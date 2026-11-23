@@ -15,6 +15,12 @@ The user programs with a **portable Arduino IDE 1.8.19**, not Arduino IDE 2, ard
 | Libraries | `portable\sketchbook\libraries` (FastLED **3.10.10**) |
 | Serial port | **COM13**: the board's CH343 USB-serial chip (VID 1A86 / PID 55D3) |
 
+**Board:** AYWHP ESP32-S3 dev board, ESP32-S3-WROOM-1-**N16R8** module (16 MB flash, 8 MB octal PSRAM), with **two USB-C ports**:
+- **COM / UART port** (CH343 chip): the one in use, shows up as COM13. Requires USB CDC On Boot = **Disabled**.
+- **USB port** (the ESP32-S3's built-in USB): shows up as a different COM port and would need USB CDC On Boot = **Enabled** for Serial output. Don't use it unless the user switches.
+
+Octal PSRAM uses GPIO 35–37: never assign those pins.
+
 The user keeps several portable IDEs, one per toolchain version. Use this folder only, and don't install or update cores or libraries without asking.
 
 ## Board settings (Tools menu)
