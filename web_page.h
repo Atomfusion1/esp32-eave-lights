@@ -67,7 +67,7 @@ details[open] summary{margin-bottom:14px}
 .stepHead{display:flex;gap:6px;color:var(--muted);font-size:11px;margin-top:8px}
 .stepHead span:first-child{flex:1}
 </style></head><body><main>
-<h1>Eave Lights</h1>
+<h1 style="display:flex;align-items:center">Eave Lights<a href="/editor" style="margin-left:auto;font-size:15px;color:var(--accent)">House view →</a></h1>
 
 <div class="card">
 <label>Control</label>

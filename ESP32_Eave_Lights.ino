@@ -9,6 +9,7 @@
 //
 // Tabs (the IDE joins them after this file, in alphabetical order):
 //   effects.ino         draws each channel's mode into frame[] each frame, layers, locate
+//   files.ino           house photos + layout.json for the House view editor (/files)
 //   led_output.ino      strand setup, power caps, showFrame()
 //   locate.ino          "Find a light": lights chosen lights only, auto-off
 //   paths.ino           Whole house path, and paths made from zones (/paths.bin)
@@ -17,6 +18,7 @@
 //   test_pattern.ino    red/green/blue/white/off test cycle
 //   web_api.ino         JSON API on port 80
 //   web_page.h          the control page (HTML/CSS/JS) — a .h on purpose, see below
+//   editor_page.h       the House view editor page (photos, light placement, live glow)
 //   wifi.ino            home Wi-Fi with hotspot fallback, mDNS name
 //   zones.ino           zones: named light ranges with their own settings, /zones.bin
 //
@@ -37,7 +39,7 @@
 #error "Missing secrets.h: copy secrets.example.h to secrets.h and fill in your Wi-Fi details"
 #endif
 
-#define FW_VERSION "0.10.0"
+#define FW_VERSION "0.11.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
@@ -199,9 +201,13 @@ uint8_t   locateCount = 0;
 ZoneRange locateRanges[MAX_ZONE_RANGES];
 uint32_t  locateStartMs = 0;
 
-// The control page (HTML/CSS/JS). Kept in a .h file, not a .ino tab, because the IDE
-// scans .ino tabs for functions and mistakes the page's JavaScript for C++.
-#include "web_page.h"
+// The web pages (HTML/CSS/JS). Kept in .h files, not .ino tabs, because the IDE
+// scans .ino tabs for functions and mistakes the pages' JavaScript for C++.
+#include "web_page.h"      // control page, "/"
+#include "editor_page.h"   // House view editor, "/editor"
+
+// The web server; used by web_api.ino and files.ino.
+WebServer server(80);
 
 // ---------- Storage ----------
 bool storageOk = false;   // true once the FAT storage area is mounted
@@ -239,6 +245,7 @@ void setup() {
   initZonePaths();
   loadState();
   startStorage();
+  startFiles();
   loadZones();
   loadZonePaths();   // after zones: paths are built from them
   loadPresets();

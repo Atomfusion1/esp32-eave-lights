@@ -32,8 +32,6 @@
 //
 // No login: anyone on the same network can use it. Fine on a home network.
 
-WebServer server(80);
-
 const char* MODE_NAMES[MODE_COUNT] = { "solid", "fade", "test", "chase", "comet" };
 
 // ---------- JSON ----------
@@ -389,6 +387,7 @@ void startWeb() {
   server.on("/api/paths", HTTP_POST, handlePaths);
   server.on("/api/presets", HTTP_GET, handleGetPresets);
   server.on("/api/presets", HTTP_POST, handlePresets);
+  addFileRoutes();   // House view editor, photos, layout (files.ino)
   server.onNotFound([]() { server.send(404, "text/plain", "Not found"); });
   server.begin();
   Serial.println("Web: server started on port 80");

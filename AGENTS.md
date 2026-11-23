@@ -81,6 +81,9 @@ ESP32_Eave_Lights/              folder name must equal the main sketch name
   web_api.ino                   JSON API: /api/state, /api/frame, /api/locate, /api/zones,
                                 /api/presets (endpoint list at the top of the file)
   web_page.h                    the control page HTML/CSS/JS (see exception below)
+  editor_page.h                 House view editor at /editor: photos, sections drawn along the
+                                eave with evenly spaced lights, Live night-glow view
+  files.ino                     photo upload, layout.json save, /files static serving
   wifi.ino                      home Wi-Fi, hotspot fallback, mDNS eavelights.local
   zones.ino                     zones (name + light ranges + settings) in /zones.bin,
                                 range text parser ("A1-12, B30-65")
@@ -95,7 +98,9 @@ How the IDE handles tabs:
 - Functions can be called from any tab, because the IDE generates prototypes automatically. A `struct` or `enum` can't be used before the tab that defines it. Keep a type inside the tab that uses it, or define it in the main `.ino` if several tabs use it.
 - Keep `setup()` and `loop()` in the main `.ino`, and have them call one function per task (`initOutputs()`, `runTestPattern()` …).
 - Name tabs in lowercase snake_case after the task.
-- **Exception: web page text goes in a `.h` file** (`web_page.h`). The IDE scans `.ino` tabs to generate prototypes and mistakes JavaScript `function name(){` lines inside a raw string for C++, which breaks the build with "'function' does not name a type".
+- The `WebServer server` object is declared in the main `.ino` because `files.ino` comes before `web_api.ino` alphabetically.
+- `/files/layout.json` is written by the editor page and only stored by the board. The firmware never parses it, so its schema (documented at the top of `editor_page.h`) can change without a firmware change.
+- **Exception: web page text goes in `.h` files** (`web_page.h`, `editor_page.h`). The IDE scans `.ino` tabs to generate prototypes and mistakes JavaScript `function name(){` lines inside a raw string for C++, which breaks the build with "'function' does not name a type".
 - Save `.ino` files as UTF-8 **without** a byte-order mark. PowerShell 5.1 `Set-Content -Encoding utf8` adds one and the compiler rejects it.
 - `.bin` storage files have a `FileHeader` with the record size. Changing `LightState`, `ZoneDef`, `PathDef`/`PathStep` or `Preset` makes old files unreadable, and zones/saved looks start empty. Warn the user before changing those structs.
 
