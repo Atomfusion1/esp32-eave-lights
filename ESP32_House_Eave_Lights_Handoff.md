@@ -109,6 +109,8 @@ void loop() {
 }
 ```
 
+**Arduino Nano reference sketch:** [Docs/Arduino_Nano_RGB_Fade_Test.ino](Docs/Arduino_Nano_RGB_Fade_Test.ino) is a known-working **Nano** sketch (D6, 5 V logic, 65 pixels, WS2811, `RBG`). It eases each color in and out with per-color caps (red 220, green 240, blue 240, white 100). It is a reference for effects and color order only; its pin 6 does not apply to the ESP32.
+
 **Caution:** The original Arduino Nano was reported to feel warm during early wiring tests. Later it operated a 65-light chase successfully. The ESP32 direct test succeeded, but permanent wiring must still use validated pinout, shared ground and proper protection.
 
 ## 3. Electrical architecture and procurement

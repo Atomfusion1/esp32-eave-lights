@@ -1,3 +1,6 @@
+// ARDUINO NANO reference sketch (not ESP32). Known working on one 65-puck strand.
+// DATA_PIN 6 = Nano D6 (5 V logic). The ESP32-S3 was tested separately on GPIO 8.
+// Per-color brightness caps used for the current measurements in the handoff doc.
 
 #include <FastLED.h>
 
