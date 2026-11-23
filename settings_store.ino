@@ -19,11 +19,14 @@ void loadState() {
   state.brightness = prefs.getUChar("bri", state.brightness);
   uint8_t m        = prefs.getUChar("mode", state.mode);
   state.mode       = (m < MODE_COUNT) ? (Mode)m : MODE_SOLID;
+  state.fadeSeconds = constrain(prefs.getUChar("fsec", state.fadeSeconds),
+                                FADE_SECONDS_MIN, FADE_SECONDS_MAX);
+  state.fadeMin    = prefs.getUChar("fmin", state.fadeMin);
   prefs.end();
 
-  Serial.printf("State loaded: %s, #%02X%02X%02X, brightness %u, mode %u\n",
+  Serial.printf("State loaded: %s, #%02X%02X%02X, brightness %u, mode %u, fade %us min %u\n",
                 state.on ? "ON" : "OFF", state.color.r, state.color.g, state.color.b,
-                state.brightness, state.mode);
+                state.brightness, state.mode, state.fadeSeconds, state.fadeMin);
 }
 
 // Call after changing `state`; the save happens a little later in handleStateSave().
@@ -42,6 +45,8 @@ void handleStateSave() {
                          ((uint32_t)state.color.g << 8) | state.color.b);
   prefs.putUChar("bri", state.brightness);
   prefs.putUChar("mode", state.mode);
+  prefs.putUChar("fsec", state.fadeSeconds);
+  prefs.putUChar("fmin", state.fadeMin);
   prefs.end();
   Serial.println("State saved");
 }

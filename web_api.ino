@@ -3,7 +3,8 @@
 //   GET  /            control page (on/off, color, brightness, mode)
 //   GET  /api/state   current state as JSON
 //   POST /api/state   change any of: on=0|1, color=RRGGBB (or #RRGGBB),
-//                     brightness=0-255, mode=solid|fade|test
+//                     brightness=0-255, mode=solid|fade|test,
+//                     fadeSeconds=2-60, fadeMin=0-255
 //                     (form-encoded body or URL query); returns the new state
 //
 // No login: anyone on the same network can use it. Fine on a home network.
@@ -13,13 +14,14 @@ WebServer server(80);
 const char* MODE_NAMES[MODE_COUNT] = { "solid", "fade", "test" };
 
 String stateJson() {
-  char buf[200];
+  char buf[256];
   snprintf(buf, sizeof(buf),
            "{\"on\":%s,\"color\":\"#%02X%02X%02X\",\"brightness\":%u,"
-           "\"mode\":\"%s\",\"version\":\"%s\"}",
+           "\"mode\":\"%s\",\"fadeSeconds\":%u,\"fadeMin\":%u,\"version\":\"%s\"}",
            state.on ? "true" : "false",
            state.color.r, state.color.g, state.color.b,
-           state.brightness, MODE_NAMES[state.mode], FW_VERSION);
+           state.brightness, MODE_NAMES[state.mode],
+           state.fadeSeconds, state.fadeMin, FW_VERSION);
   return String(buf);
 }
 
@@ -62,6 +64,15 @@ void handleSetState() {
     state.mode = (Mode)found;
     changed = true;
   }
+  if (server.hasArg("fadeSeconds")) {
+    state.fadeSeconds = (uint8_t)constrain(server.arg("fadeSeconds").toInt(),
+                                           FADE_SECONDS_MIN, FADE_SECONDS_MAX);
+    changed = true;
+  }
+  if (server.hasArg("fadeMin")) {
+    state.fadeMin = (uint8_t)constrain(server.arg("fadeMin").toInt(), 0, 255);
+    changed = true;
+  }
 
   if (changed) markStateChanged();
   server.send(200, "application/json", stateJson());
@@ -88,6 +99,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .modes button{flex:1;padding:12px;border-radius:10px;border:1px solid var(--line);background:none;color:var(--text);cursor:pointer}
 .modes button.sel{border-color:var(--accent);background:var(--accent);color:#fff}
 .status{color:var(--muted);font-size:13px;text-align:center}
+.hint{color:var(--muted);font-size:12px;margin:8px 0 0}
 </style></head><body><main>
 <h1>Eave Lights</h1>
 <div class="card"><button id="power" class="power">…</button></div>
@@ -96,6 +108,11 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 <div class="card"><label>Mode</label><div class="modes">
 <button data-mode="solid">Solid</button><button data-mode="fade">Fade</button><button data-mode="test">Test</button>
 </div></div>
+<div class="card" id="fadeCard" hidden>
+<label>Fade speed: <span id="fsecVal"></span> per breath</label><input id="fsec" type="range" min="2" max="60">
+<label style="margin-top:14px">Fade lowest level: <span id="fminVal"></span></label><input id="fmin" type="range" min="0" max="230">
+<p class="hint">Below about 20% the dim end may show steps.</p>
+</div>
 <p class="status" id="status">Connecting…</p>
 </main><script>
 const $=id=>document.getElementById(id);let st={};let timer=null;
@@ -103,6 +120,9 @@ function show(s){st=s;
  $('power').textContent=s.on?'ON':'OFF';$('power').classList.toggle('on',s.on);
  $('color').value=s.color.toLowerCase();$('bri').value=s.brightness;$('briVal').textContent=Math.round(s.brightness/2.55)+'%';
  document.querySelectorAll('.modes button').forEach(b=>b.classList.toggle('sel',b.dataset.mode===s.mode));
+ $('fadeCard').hidden=s.mode!=='fade';
+ $('fsec').value=s.fadeSeconds;$('fsecVal').textContent=s.fadeSeconds+' s';
+ $('fmin').value=s.fadeMin;$('fminVal').textContent=Math.round(s.fadeMin/2.55)+'%';
  $('status').textContent='Connected · v'+s.version;}
 async function send(p){try{const r=await fetch('/api/state',{method:'POST',body:new URLSearchParams(p)});show(await r.json());}
  catch(e){$('status').textContent='Not connected';}}
@@ -111,6 +131,8 @@ $('power').onclick=()=>send({on:st.on?0:1});
 $('color').oninput=e=>sendSoon({color:e.target.value.slice(1)});
 $('bri').oninput=e=>{$('briVal').textContent=Math.round(e.target.value/2.55)+'%';sendSoon({brightness:e.target.value});};
 document.querySelectorAll('.modes button').forEach(b=>b.onclick=()=>send({mode:b.dataset.mode}));
+$('fsec').oninput=e=>{$('fsecVal').textContent=e.target.value+' s';sendSoon({fadeSeconds:e.target.value});};
+$('fmin').oninput=e=>{$('fminVal').textContent=Math.round(e.target.value/2.55)+'%';sendSoon({fadeMin:e.target.value});};
 fetch('/api/state').then(r=>r.json()).then(show).catch(()=>$('status').textContent='Not connected');
 </script></body></html>)rawhtml";
 

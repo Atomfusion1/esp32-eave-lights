@@ -31,14 +31,14 @@
 #error "Missing secrets.h: copy secrets.example.h to secrets.h and fill in your Wi-Fi details"
 #endif
 
-#define FW_VERSION "0.2.1"
+#define FW_VERSION "0.3.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
 #define NUM_LEDS        65
 #define PIN_OUTPUT_A    8   // tested
-#define PIN_OUTPUT_B    9   // planned, not yet tested
-#define ENABLE_OUTPUT_B 0   // set to 1 once strand B is wired to GPIO 9
+#define PIN_OUTPUT_B    9   // being tested (2026-11-23)
+#define ENABLE_OUTPUT_B 1   // 1 = drive GPIO 9 too; both outputs currently show the same thing
 #define NUM_OUTPUTS     2
 
 // ---------- Power caps (from one-strand measurements at 24 V) ----------
@@ -65,10 +65,15 @@ struct LightState {
   CRGB    color;
   uint8_t brightness;   // 0-255, applied before the power caps
   Mode    mode;
+  uint8_t fadeSeconds;  // fade mode: seconds per breath (FADE_SECONDS_MIN-FADE_SECONDS_MAX)
+  uint8_t fadeMin;      // fade mode: lowest level 0-255 (64 = 25%)
 };
 
+#define FADE_SECONDS_MIN 2
+#define FADE_SECONDS_MAX 60
+
 // Defaults used on first boot (nothing saved yet).
-LightState state = { false, CRGB(255, 140, 40), 128, MODE_SOLID };
+LightState state = { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64 };
 
 void setup() {
   // Send OFF before anything else so the power-up white ends as soon as possible.
