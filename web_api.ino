@@ -28,7 +28,10 @@
 //   POST /api/paths     action=save   [id=N] name=Front sweep steps=0:0:0,2:1:3
 //                         steps = zone slot : reverse 0|1 : gap lights after (0-30), in order
 //                       action=delete id=N. Returns the state.
-//   GET  /api/presets   {"presets":[{"id","name","mode","color","bgOn","bgColor"}]}
+//   POST /api/scenes    action=save name=Xmas | action=apply id=N | action=delete id=N
+//   GET  /api/files, /fs/<path>, POST /api/restore-*   backup and restore (backup.ino)
+//   GET  /api/presets   {"presets":[{"id","name","mode","color","bgOn","bgColor"}],
+//                        "scenes":[{"id","name","on","colors"}]}
 //   POST /api/presets   action=save   name=Xmas output=<as above>   save its settings
 //                       action=apply  id=N output=<as above>         returns the state
 //                       action=delete id=N
@@ -127,6 +130,7 @@ String stateJson() {
   return json;
 }
 
+// Saved looks and scenes: {"presets":[...],"scenes":[...]}
 String presetsJson() {
   String json = "{\"presets\":[";
   bool first = true;
@@ -143,7 +147,9 @@ String presetsJson() {
     json += buf;
     first = false;
   }
-  json += "]}";
+  json += "],\"scenes\":";
+  json += scenesJson();
+  json += "}";
   return json;
 }
 
@@ -390,6 +396,25 @@ void handlePresets() {
   sendError("action must be save, apply or delete");
 }
 
+// Scenes: action=save name=Xmas | action=apply id=N | action=delete id=N.
+// save/delete return the looks+scenes list; apply returns the state.
+void handleScenes() {
+  String action = server.arg("action");
+  int id = server.arg("id").length() ? server.arg("id").toInt() : -1;
+  const char* err;
+  if (action == "save")        err = saveScene(server.arg("name"));
+  else if (action == "delete") err = deleteScene(id);
+  else if (action == "apply") {
+    err = applyScene(id);
+    if (err) return sendError(err);
+    return sendState();
+  } else {
+    err = "action must be save, apply or delete";
+  }
+  if (err) return sendError(err);
+  handleGetPresets();
+}
+
 void handleRoot() {
   server.send_P(200, "text/html", INDEX_HTML);
 }
@@ -407,6 +432,8 @@ void startWeb() {
   server.on("/api/presets", HTTP_GET, handleGetPresets);
   server.on("/api/presets", HTTP_POST, handlePresets);
   addFileRoutes();   // House view editor, photos, layout (files.ino)
+  addBackupRoutes(); // backup / restore (backup.ino)
+  server.on("/api/scenes", HTTP_POST, handleScenes);
   server.onNotFound([]() { server.send(404, "text/plain", "Not found"); });
   server.begin();
   Serial.println("Web: server started on port 80");

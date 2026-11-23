@@ -83,6 +83,8 @@ ESP32_Eave_Lights/              folder name must equal the main sketch name
   paths.ino                     Whole house path (B65→B1, A1→A65) and paths made from
                                 zones (steps: zone, reverse, gap) in /paths.bin
   presets.ino                   saved looks (name + LightState) in /presets.bin
+  scenes.ino                    scenes: snapshot of every channel's LightState, /scenes.bin
+  backup.ino                    backup (/api/files, /fs/<path>) and restore (/api/restore-*)
   settings_store.ino            strand/house settings in Preferences, delayed save;
                                 mounts FFat storage
   test_pattern.ino              red/green/blue/white/off test cycle
@@ -110,7 +112,7 @@ How the IDE handles tabs:
 - `/files/layout.json` is written by the editor page and only stored by the board. The firmware never parses it, so its schema (documented at the top of `editor_page.h`) can change without a firmware change.
 - **Exception: web page text goes in `.h` files** (`web_page.h`, `editor_page.h`). The IDE scans `.ino` tabs to generate prototypes and mistakes JavaScript `function name(){` lines inside a raw string for C++, which breaks the build with "'function' does not name a type".
 - Save `.ino` files as UTF-8 **without** a byte-order mark. PowerShell 5.1 `Set-Content -Encoding utf8` adds one and the compiler rejects it.
-- `.bin` storage files have a `FileHeader` with the record size. Changing `LightState`, `ZoneDef`, `PathDef`/`PathStep` or `Preset` makes old files unreadable, and zones/saved looks start empty. Warn the user before changing those structs.
+- `.bin` storage files have a `FileHeader` with the record size. Changing `LightState`, `ZoneDef`, `PathDef`/`PathStep`, `Preset`, `Scene`, or `MAX_ZONES`/`MAX_PATHS` (which change `Scene`'s size) makes old files unreadable, and zones/saved looks start empty. Warn the user before changing those structs, and suggest Setup → Download backup first. Better still, write a converter for the old version, as `zones.ino` does for `zones.bin` v1. While a restore runs, `savesBlocked` stops all saving so uploaded files aren't overwritten from memory.
 
 Standalone throwaway test sketches go in their own folder under `tests/<name>/<name>.ino`, so they never get compiled into the main sketch.
 

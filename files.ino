@@ -11,9 +11,8 @@
 // File names are limited to letters, digits, '-', '_' and '.', and must end in
 // .jpg, .jpeg or .png (photos) — the layout is always layout.json.
 
-const char*    FILES_DIR      = "/files";
+// FILES_DIR and FILE_MAX_BYTES are in the main tab (backup.ino uses them too).
 const char*    LAYOUT_FILE    = "/files/layout.json";
-const size_t   FILE_MAX_BYTES = 4UL * 1024 * 1024;
 const size_t   LAYOUT_MAX     = 128UL * 1024;
 
 File   uploadFile;

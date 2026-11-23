@@ -8,13 +8,15 @@
 //   PSRAM: OPI PSRAM
 //
 // Tabs (the IDE joins them after this file, in alphabetical order):
-//   effects.ino         draws each channel's mode into frame[] each frame, layers, locate
+//   backup.ino          backup (file list, raw file access) and restore of the whole setup
+//   effects.ino        draws each channel's mode into frame[] each frame, layers, locate
 //   files.ino           house photos + layout.json for the House view editor (/files)
 //   led_output.ino      strand setup, power caps, showFrame()
 //   locate.ino          "Find a light": lights chosen lights only, auto-off
 //   ota.ino             wireless firmware updates (Arduino IDE network port + web upload)
 //   paths.ino           Whole house path, and paths made from zones (/paths.bin)
 //   presets.ino         saved looks: named effect settings, stored in /presets.bin
+//   scenes.ino          scenes: whole-house snapshots of every channel, /scenes.bin
 //   settings_store.ino  strand/house settings in Preferences; mounts the FAT storage
 //   test_pattern.ino    red/green/blue/white/off test cycle
 //   web_api.ino         JSON API on port 80
@@ -48,7 +50,7 @@
 #define OTA_PASSWORD AP_PASSWORD
 #endif
 
-#define FW_VERSION "0.12.0"
+#define FW_VERSION "0.13.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
@@ -211,6 +213,26 @@ struct Preset {
 
 Preset presets[MAX_PRESETS];
 
+// ---------- Scenes ----------
+// A named snapshot of every channel's settings (strands, Whole house, all zones, all
+// zone paths, including on/off), e.g. "Xmas". Applying it restores the whole house.
+// Zones/paths themselves (their lights) are not part of a scene: all scenes share them.
+#define MAX_SCENES 16
+
+struct Scene {
+  bool       used;
+  char       name[NAME_LEN];
+  LightState states[NUM_CHANNELS];
+};
+
+Scene scenes[MAX_SCENES];
+
+// ---------- Restore ----------
+// While a backup is being restored, nothing is saved, so the files being uploaded
+// aren't overwritten from memory. Cleared by /api/restore-finish or after a timeout.
+bool     savesBlocked   = false;
+uint32_t savesBlockedMs = 0;
+
 // ---------- Find a light ----------
 // While active, only these lights are lit (first light of each range green, rest white).
 bool      locateActive = false;
@@ -228,6 +250,8 @@ WebServer server(80);
 
 // ---------- Storage ----------
 bool storageOk = false;   // true once the FAT storage area is mounted
+const char*  FILES_DIR      = "/files";            // house photos + layout.json
+const size_t FILE_MAX_BYTES = 4UL * 1024 * 1024;   // largest photo / restored file
 
 // Start of /zones.bin and /presets.bin. A file whose recordSize doesn't match the
 // current structs (firmware changed them) is ignored instead of read as garbage.
@@ -267,6 +291,7 @@ void setup() {
   loadZones();
   loadZonePaths();   // after zones: paths are built from them
   loadPresets();
+  loadScenes();
   startWifi();
   startWeb();
   startOta();

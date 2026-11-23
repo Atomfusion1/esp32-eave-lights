@@ -111,6 +111,7 @@ void markStateChanged() {
 
 void handleStateSave() {
   if (!stateDirty || millis() - stateDirtyMs < SAVE_DELAY_MS) return;
+  if (restoreBlocksSaving()) return;   // a backup is being restored; save afterwards
   stateDirty = false;
 
   prefs.begin(PREFS_NAMESPACE, false);

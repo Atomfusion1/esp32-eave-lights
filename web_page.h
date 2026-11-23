@@ -70,6 +70,14 @@ details[open] summary{margin-bottom:14px}
 <h1 style="display:flex;align-items:center">Eave Lights<a href="/editor" style="margin-left:auto;font-size:15px;color:var(--accent)">House view →</a></h1>
 
 <div class="card">
+<label>Scenes · tap to set up the whole house</label>
+<div class="chips" id="scenes"></div>
+<p class="hint" id="scenesEmpty">No scenes yet. Set up the whole house (strands, zones, paths), then save it as a scene, e.g. "Xmas".</p>
+<div class="row" style="margin-top:12px"><button class="btn" id="saveScene">Save current scene…</button></div>
+<p class="err" id="sceneErr" hidden></p>
+</div>
+
+<div class="card">
 <label>Control</label>
 <div class="seg" id="tabs"></div>
 <p class="hint" id="tabHint" hidden></p>
@@ -162,6 +170,13 @@ details[open] summary{margin-bottom:14px}
 </div>
 <p class="err" id="pathErr" hidden></p>
 </div>
+</div>
+<div class="sub">
+<h2>Backup &amp; restore</h2>
+<p class="hint" style="margin:0 0 10px">One file with everything: strand lengths, strand and Whole house settings, zones, paths, saved looks, scenes, house layout and photos. Keep it on your PC. Restoring replaces all of these on this board.</p>
+<div class="row"><button class="btn primary" id="backupBtn">Download backup</button><button class="btn" id="restoreBtn">Restore from file…</button></div>
+<input type="file" id="restoreFile" accept=".json,application/json" hidden>
+<p class="hint" id="backupStatus"></p>
 </div>
 <div class="sub">
 <h2>Firmware update</h2>
@@ -291,6 +306,60 @@ $('saveLook').onclick=async()=>{const name=prompt('Name for this look (e.g. Xmas
  if(!name)return;const j=await post('/api/presets',{action:'save',name,output:target()});
  if(j.error)showErr('lookErr',j.error);else{showErr('lookErr');showLooks(j.presets);}};
 
+// ---- Scenes ----
+let sceneList=[];
+function showScenes(list){sceneList=list||[];
+ $('scenes').innerHTML=sceneList.map(s=>'<span class="chip" data-id="'+s.id+'" title="'+s.on+' parts on">'+
+  s.colors.map(c=>'<span class="dot" style="background:'+c+'"></span>').join('')+esc(s.name)+
+  '<span class="x" data-x="'+s.id+'" title="Delete">×</span></span>').join('');
+ $('scenesEmpty').hidden=sceneList.length>0;
+ $('scenes').querySelectorAll('.chip').forEach(c=>c.onclick=async e=>{
+  const x=e.target.dataset.x;
+  if(x!==undefined){const s=sceneList.find(l=>l.id===+x);if(!confirm('Delete scene "'+s.name+'"?'))return;
+   const j=await post('/api/scenes',{action:'delete',id:x});if(j.error)showErr('sceneErr',j.error);else{showErr('sceneErr');showScenes(j.scenes);}return;}
+  const j=await post('/api/scenes',{action:'apply',id:c.dataset.id});
+  if(j.error)showErr('sceneErr',j.error);else{showErr('sceneErr');show(j);}});}
+$('saveScene').onclick=async()=>{const name=prompt('Name for this scene (e.g. Xmas, Halloween, Normal). Saves what every strand, zone and path is doing right now. Same name replaces it.');
+ if(!name)return;const j=await post('/api/scenes',{action:'save',name});
+ if(j.error)showErr('sceneErr',j.error);else{showErr('sceneErr');showScenes(j.scenes);}};
+
+// ---- Backup & restore ----
+function toB64(u8){let s='';for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000));return btoa(s);}
+function fromB64(b){const s=atob(b),u=new Uint8Array(s.length);for(let i=0;i<s.length;i++)u[i]=s.charCodeAt(i);return u;}
+// Settings of a strand / Whole house in the form /api/state accepts.
+function chanFields(o){return {on:o.on?1:0,color:o.color,brightness:o.brightness,mode:o.mode,fadeSeconds:o.fadeSeconds,fadeMin:o.fadeMin,
+ speed:o.speed,size:o.size,reverse:o.reverse?1:0,bgOn:o.bgOn?1:0,bgColor:o.bgColor};}
+$('backupBtn').onclick=async()=>{const say=t=>$('backupStatus').textContent=t;
+ try{say('Collecting files…');const s=await (await fetch('/api/state')).json();
+  const list=(await (await fetch('/api/files')).json()).files||[],files=[];
+  for(const f of list){say('Reading '+f.path+'…');const r=await fetch('/fs'+f.path,{cache:'no-store'});if(!r.ok)throw new Error('could not read '+f.path);
+   files.push({path:f.path,data:toB64(new Uint8Array(await r.arrayBuffer()))});}
+  const backup={format:'eave-lights-backup',version:1,created:new Date().toISOString(),firmware:s.version,
+   strands:s.outputs.map(o=>({id:o.id,count:o.count})),
+   channels:Object.assign({house:chanFields(s.house)},...s.outputs.map(o=>({[o.id.toLowerCase()]:chanFields(o)}))),files};
+  const blob=new Blob([JSON.stringify(backup)],{type:'application/json'}),a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);a.download='eave-lights-backup-'+new Date().toISOString().slice(0,10)+'.json';a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),5000);say('Backup downloaded ('+files.length+' files, '+Math.round(blob.size/1024)+' KB).');}
+ catch(e){say('Backup failed: '+e.message);}};
+$('restoreBtn').onclick=()=>$('restoreFile').click();
+$('restoreFile').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;const say=t=>$('backupStatus').textContent=t;
+ let b;try{b=JSON.parse(await f.text());}catch(err){say('That file is not a backup.');return;}
+ if(b.format!=='eave-lights-backup'){say('That file is not an Eave Lights backup.');return;}
+ if(!confirm('Restore the backup from '+(b.created||'?').slice(0,10)+'? This replaces zones, paths, looks, scenes, layout and photos on the board.'))return;
+ let failed='';
+ try{say('Starting restore…');let j=await post('/api/restore-begin',{});if(j.error)throw new Error(j.error);
+  for(const file of b.files||[]){say('Restoring '+file.path+'…');const fd=new FormData();fd.append('file',new Blob([fromB64(file.data)]),'data');
+   const r=await fetch('/api/restore-file?path='+encodeURIComponent(file.path),{method:'POST',body:fd});j=await r.json();
+   if(j.error)failed+=file.path+' ('+j.error+') ';}}
+ catch(err){failed+=err.message;}
+ try{say('Reloading…');await post('/api/restore-finish',{});
+  const cnt={};(b.strands||[]).forEach(s=>cnt[s.id.toLowerCase()]=s.count);
+  if(cnt.a||cnt.b)await post('/api/strands',cnt);
+  for(const [id,fields] of Object.entries(b.channels||{}))await post('/api/state',Object.assign({output:id},fields));
+  await loadLooksAndScenes();show(await (await fetch('/api/state')).json());
+  say(failed?'Restored, but these had problems: '+failed:'Restore complete.');}
+ catch(err){say('Restore failed: '+err.message+'. Reload the page and try again.');}};
+
 // ---- Strand lengths ----
 $('cntSave').onclick=async()=>{const j=await post('/api/strands',{a:$('cntA').value,b:$('cntB').value});
  if(j.error)showErr('cntErr',j.error);else{showErr('cntErr');show(j);}};
@@ -363,7 +432,8 @@ $('pathSave').onclick=async()=>{const p={action:'save',name:$('pathName').value,
 $('pathCancel').onclick=resetPathForm;
 
 fetch('/api/state').then(r=>r.json()).then(show).catch(()=>$('status').textContent='Not connected');
-fetch('/api/presets').then(r=>r.json()).then(j=>showLooks(j.presets)).catch(()=>{});
+function loadLooksAndScenes(){return fetch('/api/presets').then(r=>r.json()).then(j=>{showLooks(j.presets);showScenes(j.scenes);}).catch(()=>{});}
+loadLooksAndScenes();
 
 // ---- Live view: polls /api/frame, one request at a time, ~10 per second ----
 // LED values are linear; the screen is gamma-encoded, so dim LED values are lifted to look similar.

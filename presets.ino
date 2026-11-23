@@ -80,7 +80,7 @@ void loadPresets() {
 }
 
 void savePresetsFile() {
-  if (!storageOk) return;
+  if (!storageOk || savesBlocked) return;
   File f = FFat.open(PRESETS_FILE, "w");
   if (!f) {
     Serial.println("Saved looks: could not write file");
