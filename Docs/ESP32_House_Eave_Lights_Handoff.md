@@ -24,6 +24,19 @@ The user wants to:
 
 The system should be extensible: initially 2 physical outputs × 65 LEDs, but avoid hard-coding a two-output topology into the design.
 
+## 1a. Decisions (2026-11-23)
+
+| Topic | Decision |
+|---|---|
+| Toolchain | **Arduino IDE.** `ESP32_Eave_Lights.ino` must stay in the repo root (IDE needs folder name = sketch name). Extra code goes in `.h`/`.cpp` files beside it. |
+| Board settings | ESP32S3 Dev Module · USB CDC On Boot: Enabled · Flash Size: 16MB · PSRAM: OPI PSRAM. |
+| Output A | GPIO 8, 65 LEDs, WS2811, `RBG` (tested). |
+| Output B | GPIO 9 (planned, **untested**). Present in code, disabled by a compile flag until strand B is wired. GPIO 8/9 are the Arduino default I2C pins: any future I2C device must use other pins explicitly. |
+| Startup | Lights showing white at power-up until the ESP32 boots is **accepted**. Firmware sends OFF as the first thing in `setup()`. No 24 V power switch planned. |
+| Power limit | Per-color caps from measurements: red 220, green 240, blue 240; mixed colors limited to a channel sum of 300 (= white at 100, measured 1.1 A per strand). |
+| Data wiring | Direct 3.3 V for now. **74AHCT125 not yet purchased**; required before permanent outdoor install. |
+| Wi-Fi | Join home 2.4 GHz network; fall back to its own access point if that fails. Credentials in untracked `secrets.h`. |
+
 ## 2. Verified hardware and test results
 
 ### ESP32 board
@@ -109,7 +122,7 @@ void loop() {
 }
 ```
 
-**Arduino Nano reference sketch:** [Docs/Arduino_Nano_RGB_Fade_Test.ino](Docs/Arduino_Nano_RGB_Fade_Test.ino) is a known-working **Nano** sketch (D6, 5 V logic, 65 pixels, WS2811, `RBG`). It eases each color in and out with per-color caps (red 220, green 240, blue 240, white 100). It is a reference for effects and color order only; its pin 6 does not apply to the ESP32.
+**Arduino Nano reference sketch:** `Docs/Arduino_Nano_RGB_Fade_Test.ino` (removed from the working tree; retrieve with `git show 8189414:Docs/Arduino_Nano_RGB_Fade_Test.ino`) is a known-working **Nano** sketch (D6, 5 V logic, 65 pixels, WS2811, `RBG`). It eases each color in and out with per-color caps (red 220, green 240, blue 240, white 100). It is a reference for effects and color order only; its pin 6 does not apply to the ESP32.
 
 **Caution:** The original Arduino Nano was reported to feel warm during early wiring tests. Later it operated a 65-light chase successfully. The ESP32 direct test succeeded, but permanent wiring must still use validated pinout, shared ground and proper protection.
 
