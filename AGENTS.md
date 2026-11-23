@@ -90,7 +90,11 @@ ESP32_Eave_Lights/              folder name must equal the main sketch name
   test_pattern.ino              red/green/blue/white/off test cycle
   web_api.ino                   JSON API: /api/state, /api/frame, /api/locate, /api/zones,
                                 /api/presets (endpoint list at the top of the file)
-  web_page.h                    the control page HTML/CSS/JS (see exception below)
+  web_page.h                    the control page HTML/CSS/JS (see exception below), 4 tabs:
+                                Home (live photo/strip, scenes, what's on, All off),
+                                Lights (grouped picker, look + mode fold-outs, saved looks),
+                                House (editor in an iframe, /editor?embed=1),
+                                Setup (fold-outs: strands, find, zones, paths, backup, firmware)
   editor_page.h                 House view editor at /editor: photos, sections drawn along the
                                 eave with evenly spaced lights, Live night-glow view
   files.ino                     photo upload, layout.json save, /files static serving

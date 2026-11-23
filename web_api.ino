@@ -20,6 +20,7 @@
 //                       [outputs], per output [count low][count high], then R,G,B per
 //                       light, A's lights first.
 //   POST /api/strands   a=67 b=65   strand lengths (1-300), saved. Returns the state.
+//   POST /api/all-off   turns off every strand, Whole house, zone and path. Returns the state.
 //   POST /api/firmware  multipart .bin + password field: wireless firmware update (ota.ino)
 //   POST /api/locate    ranges=A23 | A1-12,B30-65   light only those (auto-off after 5 min)
 //                       [seconds=1-300] shorter auto-off, [white=1] all white (no green first)
@@ -307,6 +308,14 @@ void handleGetFrame() {
   server.send_P(200, "application/octet-stream", (const char*)buf, n);
 }
 
+// Turns off everything: strands, Whole house, every zone and path (and Find a light).
+void handleAllOff() {
+  stopLocate();
+  for (int ch = 0; ch < NUM_CHANNELS; ch++) states[ch].on = false;
+  markStateChanged();
+  sendState();
+}
+
 // Sets strand lengths: a=<lights on A> b=<lights on B> (1-MAX_LEDS each).
 void handleStrands() {
   int a = server.hasArg("a") ? server.arg("a").toInt() : ledCount[0];
@@ -430,6 +439,7 @@ void startWeb() {
   server.on("/api/frame", HTTP_GET, handleGetFrame);
   server.on("/api/locate", HTTP_POST, handleLocate);
   server.on("/api/strands", HTTP_POST, handleStrands);
+  server.on("/api/all-off", HTTP_POST, handleAllOff);
   server.on("/api/firmware", HTTP_POST, handleFirmwareDone, handleFirmwareData);
   server.on("/api/zones", HTTP_POST, handleZones);
   server.on("/api/paths", HTTP_POST, handlePaths);

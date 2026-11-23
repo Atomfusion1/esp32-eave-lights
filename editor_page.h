@@ -65,7 +65,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .status{color:var(--muted);font-size:13px}
 .tag{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px}
 </style></head><body><main>
-<header><h1>House view</h1><span class="status" id="status">Loading…</span><a href="/">← Controls</a></header>
+<header><h1>House view</h1><span class="status" id="status">Loading…</span><a href="/" id="backLink">← Controls</a></header>
 
 <div class="bar">
 <div class="seg" id="views"></div>
@@ -133,6 +133,13 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 </main><script>
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// Shown inside the main page's House tab (/editor?embed=1): no title/back link, and
+// tell the main page our height so its frame fits without a second scroll bar.
+const EMBED=new URLSearchParams(location.search).has('embed');
+if(EMBED){document.querySelector('header h1').style.display='none';$('backLink').style.display='none';
+ document.querySelector('main').style.padding='0';
+ const tell=()=>parent.postMessage({eaveEditorHeight:document.documentElement.scrollHeight},'*');
+ new ResizeObserver(tell).observe(document.body);window.addEventListener('load',tell);}
 let layout={schemaVersion:1,settings:{night:0.6,glow:1},views:[]};
 let st=null,frame=null,vi=0,mode='edit',selP=-1,drawing=false,drag=null,saveTimer=null;
 const img=new Image();let imgFor='';
@@ -303,7 +310,11 @@ $('glow').oninput=e=>{layout.settings.glow=+e.target.value;$('glowVal').textCont
 window.addEventListener('resize',()=>draw());
 
 // ---- Live frames ----
-async function pollFrame(){if(document.hidden){setTimeout(pollFrame,500);return;}const t0=performance.now();
+// The main page tells us when its House tab is hidden; stop polling then.
+let editorActive=true;
+window.addEventListener('message',e=>{if(e.data&&'eaveEditorActive' in e.data){editorActive=!!e.data.eaveEditorActive;
+ if(editorActive)fetch('/api/state').then(r=>r.json()).then(j=>{st=j;renderItems();renderAll();}).catch(()=>{});}});
+async function pollFrame(){if(document.hidden||!editorActive){setTimeout(pollFrame,500);return;}const t0=performance.now();
  try{const r=await fetch('/api/frame',{cache:'no-store'});frame=new Uint8Array(await r.arrayBuffer());if(!drag)draw();}catch(e){}
  setTimeout(pollFrame,Math.max(0,100-(performance.now()-t0)));}
 

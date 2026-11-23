@@ -3,8 +3,14 @@
 // This is a .h on purpose: the Arduino IDE scans .ino tabs to declare functions and
 // mistakes JavaScript "function name(){" lines for C++, breaking the build.
 //
-// Sections: what to control (strands / Both / Whole house / zones), live view, power,
-// saved looks, color, brightness, mode + mode settings, and Setup (Find a light, zones).
+// Four tabs:
+//   Home   live view (house photo or dot strip), scenes, what's on, All lights off
+//   Lights pick a strand / Whole house / path / zone (grouped drop-down), power,
+//          saved looks, color + brightness + mode, mode settings in a fold-out
+//   House  the photo editor (/editor?embed=1 in a frame)
+//   Setup  fold-out sections: strand lengths, find a light, zones, paths,
+//          backup & restore, firmware update
+// The live view card moves between Home and Lights and only polls on those tabs.
 
 #pragma once
 
@@ -16,99 +22,154 @@ const char INDEX_HTML[] PROGMEM = R"rawhtml(<!doctype html>
 :root{--bg:#f4f4f2;--card:#fff;--text:#1d1d1b;--muted:#6b6b66;--accent:#d9822b;--line:#deded9;--bad:#c0392b}
 @media (prefers-color-scheme:dark){:root{--bg:#141413;--card:#1f1f1d;--text:#ececea;--muted:#9a9a94;--accent:#e8954a;--line:#33332f;--bad:#e06656}}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 system-ui,sans-serif}
-main{max-width:460px;margin:0 auto;padding:20px 16px}
-h1{font-size:22px;margin:0 0 16px}
+button.power:disabled{opacity:.45;cursor:default}
+main{max-width:760px;margin:0 auto;padding:0 16px 24px}
+body.wide main{max-width:1240px}
+.top{position:sticky;top:0;z-index:5;background:var(--bg);padding:14px 0 10px;margin-bottom:6px;border-bottom:1px solid var(--line)}
+.titleRow{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.titleRow h1{font-size:20px;margin:0;flex:1}
+.pill{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:20px;padding:3px 10px;white-space:nowrap}
+.pill.on{color:#fff;background:var(--accent);border-color:var(--accent)}
+.tabs{display:flex;gap:6px}
+.tabs button{flex:1;padding:10px 6px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--text);cursor:pointer;font:inherit;font-size:15px;font-weight:600}
+.tabs button.sel{background:var(--accent);border-color:var(--accent);color:#fff}
+section[data-tab]{display:none}
+section[data-tab].show{display:block}
 h2{font-size:15px;margin:0 0 10px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin:14px 0}
 label{display:block;color:var(--muted);font-size:13px;margin-bottom:8px}
 button{font:inherit}
 button.power{width:100%;padding:16px;font-size:18px;font-weight:600;border-radius:12px;border:none;cursor:pointer;background:var(--line);color:var(--text)}
 button.power.on{background:var(--accent);color:#fff}
-input[type=color]{width:100%;height:56px;border:none;border-radius:10px;background:none;padding:0}
+input[type=color]{width:100%;height:48px;border:none;border-radius:10px;background:none;padding:0}
 input[type=range]{width:100%;accent-color:var(--accent)}
-input[type=text],input[type=number],input[type=password]{width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:16px}
+input[type=text],input[type=number],input[type=password],select{width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:16px}
+select.picker{font-size:17px;font-weight:600;padding:12px}
 .seg{display:flex;gap:8px;flex-wrap:wrap}
-.seg button{flex:1;padding:12px;border-radius:10px;border:1px solid var(--line);background:none;color:var(--text);cursor:pointer;font-size:15px}
+.seg button{flex:1;padding:11px;border-radius:10px;border:1px solid var(--line);background:none;color:var(--text);cursor:pointer;font-size:15px}
 .seg button.sel{border-color:var(--accent);background:var(--accent);color:#fff}
-.seg button small{display:block;font-size:11px;opacity:.8}
+.seg.small button{flex:0 0 auto;padding:5px 10px;font-size:13px;border-radius:8px}
 #modes button{flex:1 1 28%}
-#tabs button{padding:10px 6px;flex:1 1 40%}
 .btn{padding:10px 14px;border-radius:10px;border:1px solid var(--line);background:none;color:var(--text);cursor:pointer;font-size:15px}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .btn.danger{color:var(--bad)}
+.btn:disabled{opacity:.45;cursor:default}
 .row{display:flex;gap:8px;align-items:center}
 .row>*{flex:1}
 .row .btn{flex:0 0 auto}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:520px){.grid2{grid-template-columns:1fr}}
 .chips{display:flex;flex-wrap:wrap;gap:8px}
-.chip{display:inline-flex;align-items:center;gap:6px;padding:8px 10px;border-radius:20px;border:1px solid var(--line);background:none;color:var(--text);cursor:pointer;font-size:14px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:20px;border:1px solid var(--line);background:none;color:var(--text);cursor:pointer;font-size:14px}
 .chip .x{margin-left:2px;padding:0 4px;color:var(--muted);border-radius:8px}
 .chip .x:hover{color:var(--bad)}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;border:1px solid rgba(128,128,128,.5)}
+.liveHead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.liveHead label{margin:0;flex:1}
 .live{background:#0b0b0a;border-radius:10px;padding:8px 6px}
 .liveRow{display:flex;align-items:center}
 .liveRow canvas{flex:1;height:26px;min-width:0}
 .liveLabels{display:flex;justify-content:space-between;color:#8a8a84;font-size:10px;padding:2px 2px 0}
-.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;border:1px solid rgba(128,128,128,.5);vertical-align:-1px}
-.chip .dot{margin:0}
-.status{color:var(--muted);font-size:13px;text-align:center}
+.photo{background:#000;border-radius:10px;overflow:hidden}
+.photo canvas{display:block;width:100%}
+.status{color:var(--muted);font-size:13px;text-align:center;margin-top:14px}
 .hint{color:var(--muted);font-size:12px;margin:8px 0 0}
 .err{color:var(--bad);font-size:13px;margin:8px 0 0}
-details summary{cursor:pointer;font-weight:600;font-size:15px}
-details[open] summary{margin-bottom:14px}
-.zoneRow{display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--line)}
+details.fold{background:var(--card);border:1px solid var(--line);border-radius:14px;margin:14px 0}
+details.fold>summary{cursor:pointer;padding:14px 16px;font-weight:600;font-size:15px;list-style:none;display:flex;align-items:center;gap:8px}
+details.fold>summary::-webkit-details-marker{display:none}
+details.fold>summary::before{content:'▸';color:var(--muted);transition:transform .15s}
+details.fold[open]>summary::before{transform:rotate(90deg)}
+details.fold>summary small{font-weight:400;color:var(--muted);margin-left:auto;font-size:12px;text-align:right}
+details.fold>.body{padding:0 16px 16px}
+details.inner{border-top:1px solid var(--line);margin-top:14px;padding-top:10px}
+details.inner>summary{cursor:pointer;color:var(--text);font-size:14px;font-weight:600;padding:4px 0}
+.zoneRow{display:flex;align-items:center;gap:8px;padding:8px 6px;border-top:1px solid var(--line);border-radius:8px}
 .zoneRow:first-child{border-top:none}
 .zoneRow div{flex:1;min-width:0}
 .zoneRow small{display:block;color:var(--muted)}
-.zoneRow.click{cursor:pointer;border-radius:8px;padding-left:6px;padding-right:6px}
+.zoneRow.click{cursor:pointer}
 .zoneRow.click:hover{background:var(--bg)}
 .zoneRow.showing{background:var(--accent);color:#fff}
 .zoneRow.showing small{color:#fff}
 .sub{border-top:1px solid var(--line);margin-top:16px;padding-top:14px}
 .stepRow{display:flex;gap:6px;align-items:center;margin-top:6px}
-.stepRow select{flex:1;min-width:0;padding:9px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:15px}
+.stepRow select{flex:1;min-width:0;padding:9px;font-size:15px}
 .stepRow input{width:58px;flex:0 0 58px;padding:9px 6px}
 .stepRow .btn{padding:9px 10px}
 .stepHead{display:flex;gap:6px;color:var(--muted);font-size:11px;margin-top:8px}
 .stepHead span:first-child{flex:1}
+iframe.editor{width:100%;border:none;min-height:600px;display:block}
+.onList{font-size:14px;margin:0}
 </style></head><body><main>
-<h1 style="display:flex;align-items:center">Eave Lights<a href="/editor" style="margin-left:auto;font-size:15px;color:var(--accent)">House view →</a></h1>
 
+<div class="top">
+<div class="titleRow"><h1>Eave Lights</h1><span class="pill" id="onPill">…</span></div>
+<div class="tabs" id="tabs">
+<button data-t="home">Home</button><button data-t="lights">Lights</button><button data-t="house">House</button><button data-t="setup">Setup</button>
+</div>
+</div>
+
+<!-- ===== Live view (moved into Home or Lights) ===== -->
+<div class="card" id="liveCard">
+<div class="liveHead">
+<label>Live <span id="liveInfo"></span></label>
+<div class="seg small" id="photoViews"></div>
+<div class="seg small" id="liveMode"><button data-lm="photo">House</button><button data-lm="strip">Strip</button></div>
+</div>
+<div class="photo" id="photoBox"><canvas id="photoCv"></canvas></div>
+<div class="live" id="stripBox"></div>
+<p class="hint" id="liveHint"></p>
+<p class="err" id="locateBanner" hidden></p>
+</div>
+
+<!-- ===== Home ===== -->
+<section data-tab="home">
+<div id="liveSlotHome"></div>
 <div class="card">
-<label>Scenes · tap to set up the whole house</label>
+<h2>Scenes</h2>
 <div class="chips" id="scenes"></div>
-<p class="hint" id="scenesEmpty">No scenes yet. Set up the whole house (strands, zones, paths), then save it as a scene, e.g. "Xmas".</p>
+<p class="hint" id="scenesEmpty">No scenes yet. Set up the whole house in the Lights tab, then save it here as a scene, e.g. "Xmas".</p>
 <div class="row" style="margin-top:12px"><button class="btn" id="saveScene">Save current scene…</button></div>
 <p class="err" id="sceneErr" hidden></p>
 </div>
-
 <div class="card">
-<label>Control</label>
-<div class="seg" id="tabs"></div>
-<p class="hint" id="tabHint" hidden></p>
+<h2>On right now</h2>
+<p class="onList" id="onList">…</p>
+<button class="power" id="allOff" style="margin-top:12px">All lights off</button>
 </div>
+</section>
 
-<div class="card"><label>Live view <span id="liveInfo"></span></label><div class="live" id="live"></div>
-<p class="hint">What the board is sending, light by light, as seen from the street. Screen brightness is approximate.</p>
-<p class="err" id="locateBanner" hidden></p></div>
-
-<div class="card"><button id="power" class="power">…</button></div>
-
+<!-- ===== Lights ===== -->
+<section data-tab="lights">
+<div class="card">
+<label>Controlling</label>
+<select class="picker" id="picker"></select>
+<p class="hint" id="tabHint" hidden></p>
+<button id="power" class="power" style="margin-top:12px">…</button>
+</div>
+<div id="liveSlotLights"></div>
 <div class="card">
 <label>Saved looks <span id="lookTarget"></span></label>
 <div class="chips" id="looks"></div>
-<p class="hint" id="looksEmpty">No saved looks yet. Set up a look below, then save it here.</p>
+<p class="hint" id="looksEmpty">No saved looks yet. Set up a look below, then save it.</p>
 <div class="row" style="margin-top:12px"><button class="btn" id="saveLook">Save current look…</button></div>
 <p class="err" id="lookErr" hidden></p>
 </div>
-
-<div class="card"><label>Color</label><input id="color" type="color"></div>
-<div class="card"><label>Brightness <span id="briVal"></span></label><input id="bri" type="range" min="0" max="255"></div>
-<div class="card"><label>Mode</label><div class="seg" id="modes">
+<div class="card">
+<div class="grid2">
+<div><label>Color</label><input id="color" type="color"></div>
+<div><label>Brightness <span id="briVal"></span></label><input id="bri" type="range" min="0" max="255" style="margin-top:14px"></div>
+</div>
+<label style="margin-top:14px">Mode</label>
+<div class="seg" id="modes">
 <button data-mode="solid">Solid</button><button data-mode="fade">Fade</button><button data-mode="chase">Chase</button>
 <button data-mode="comet">Comet</button><button data-mode="test">Test</button>
-</div></div>
-<div class="card" id="motionCard" hidden>
-<label>Speed: <span id="spdVal"></span></label><input id="spd" type="range" min="1" max="100">
+</div>
+<details class="inner" id="motionFold" hidden><summary id="motionSum"></summary>
+<label style="margin-top:10px">Speed: <span id="spdVal"></span></label><input id="spd" type="range" min="1" max="100">
 <label style="margin-top:14px"><span id="sizeName"></span>: <span id="sizeVal"></span></label><input id="size" type="range" min="1" max="30">
 <label style="margin-top:14px">Direction</label>
 <div class="seg" id="dir"><button data-rev="0"></button><button data-rev="1"></button></div>
@@ -116,35 +177,44 @@ details[open] summary{margin-bottom:14px}
 <div class="seg" id="bg"><button data-bg="0">Off</button><button data-bg="1">On</button></div>
 <input id="bgColor" type="color" style="margin-top:10px" hidden>
 <p class="hint" id="bgHint" hidden>Uses the same brightness. Lights every light, so it adds current.</p>
-</div>
-<div class="card" id="fadeCard" hidden>
-<label>Fade speed: <span id="fsecVal"></span> per breath</label><input id="fsec" type="range" min="2" max="60">
+</details>
+<details class="inner" id="fadeFold" hidden><summary id="fadeSum"></summary>
+<label style="margin-top:10px">Fade speed: <span id="fsecVal"></span> per breath</label><input id="fsec" type="range" min="2" max="60">
 <label style="margin-top:14px">Fade lowest level: <span id="fminVal"></span></label><input id="fmin" type="range" min="0" max="230">
 <p class="hint">Below about 20% the dim end may show steps.</p>
+</details>
 </div>
+</section>
 
-<div class="card"><details id="setup"><summary>Setup: strands, find lights, zones, paths &amp; updates</summary>
-<div style="border-bottom:1px solid var(--line);padding-bottom:14px;margin-bottom:14px">
-<h2>Strand lengths</h2>
-<p class="hint" style="margin:0 0 6px">How many lights are on each strand (1–300). Zones, paths and the house view follow these numbers.</p>
+<!-- ===== House ===== -->
+<section data-tab="house">
+<p class="hint" style="margin:14px 0 8px">Add photos of the house, draw a line along the eave for each zone, and see the lights glow on the photo. Easiest on a PC.</p>
+<iframe class="editor" id="editorFrame" title="House view editor"></iframe>
+</section>
+
+<!-- ===== Setup ===== -->
+<section data-tab="setup">
+<details class="fold" data-fold="strands"><summary>Strand lengths <small id="strandSum"></small></summary><div class="body">
+<p class="hint" style="margin:0 0 8px">How many lights are on each strand (1–300). Zones, paths and the house view follow these numbers.</p>
 <div class="row" style="align-items:end">
 <div><label>Strand A (left)</label><input id="cntA" type="number" min="1" max="300"></div>
 <div><label>Strand B (right)</label><input id="cntB" type="number" min="1" max="300"></div>
 <button class="btn primary" id="cntSave">Save</button>
 </div>
 <p class="err" id="cntErr" hidden></p>
-</div>
-<h2>Find a light</h2>
+</div></details>
+
+<details class="fold" data-fold="find"><summary>Find a light</summary><div class="body">
 <p class="hint" style="margin:0 0 10px">Lights only the chosen light (green) so you can see where it is. Turns itself off after 5 minutes.</p>
 <div class="seg" id="findStrand"><button data-s="A">Strand A (left)</button><button data-s="B">Strand B (right)</button></div>
 <div class="row" style="margin-top:10px">
 <button class="btn" id="findMinus">−</button><input id="findNum" type="number" min="1" value="1"><button class="btn" id="findPlus">+</button>
 </div>
 <div class="row" style="margin-top:10px"><button class="btn primary" id="findShow">Show light</button><button class="btn" id="findStop">Stop</button></div>
+</div></details>
 
-<div class="sub">
-<h2>Zones</h2>
-<p class="hint" style="margin:0 0 10px">A zone is a name plus lights, e.g. <b>A1-12</b> or <b>A1-12, B30-65</b>. <b>A12-1</b> runs backwards. Zones that are on are drawn on top of the strands and Whole house.</p>
+<details class="fold" data-fold="zones"><summary>Zones <small id="zoneSum"></small></summary><div class="body">
+<p class="hint" style="margin:0 0 10px">A zone is a name plus lights, e.g. <b>A1-12</b> or <b>A1-12, B30-65</b>. <b>A12-1</b> runs backwards. <b>Click a zone</b> to light it white for 10 seconds. Zones that are on are drawn on top of everything else.</p>
 <div id="zoneList"></div>
 <p class="hint" id="noZones">No zones yet.</p>
 <div class="sub">
@@ -156,10 +226,9 @@ details[open] summary{margin-bottom:14px}
 </div>
 <p class="err" id="zoneErr" hidden></p>
 </div>
-</div>
+</div></details>
 
-<div class="sub">
-<h2>Paths</h2>
+<details class="fold" data-fold="paths"><summary>Paths <small id="pathSum"></small></summary><div class="body">
 <p class="hint" style="margin:0 0 10px">A path runs an effect through zones in the order you pick. ⇄ runs a zone backwards. <b>Gap</b> adds invisible lights after a zone so the effect disappears for a moment, like a jump. Leave a zone out to skip it.</p>
 <div id="pathList"></div>
 <p class="hint" id="noPaths">No paths yet.</p>
@@ -174,88 +243,124 @@ details[open] summary{margin-bottom:14px}
 </div>
 <p class="err" id="pathErr" hidden></p>
 </div>
-</div>
-<div class="sub">
-<h2>Backup &amp; restore</h2>
+</div></details>
+
+<details class="fold" data-fold="backup"><summary>Backup &amp; restore</summary><div class="body">
 <p class="hint" style="margin:0 0 10px">One file with everything: strand lengths, strand and Whole house settings, zones, paths, saved looks, scenes, house layout and photos. Keep it on your PC. Restoring replaces all of these on this board.</p>
 <div class="row"><button class="btn primary" id="backupBtn">Download backup</button><button class="btn" id="restoreBtn">Restore from file…</button></div>
 <input type="file" id="restoreFile" accept=".json,application/json" hidden>
 <p class="hint" id="backupStatus"></p>
-</div>
-<div class="sub">
-<h2>Firmware update</h2>
-<p class="hint" style="margin:0 0 10px">Running v<span id="fwVer"></span>. Easiest: in the Arduino IDE pick <b>Tools → Port → eavelights</b> (network) and Upload. Or here: in the IDE use <b>Sketch → Export compiled Binary</b>, then choose the <b>.bin</b> from the sketch folder. If an update fails, the current firmware keeps running.</p>
+</div></details>
+
+<details class="fold" data-fold="firmware"><summary>Firmware update <small id="fwSum"></small></summary><div class="body">
+<p class="hint" style="margin:0 0 10px">Running v<span id="fwVer"></span>. Easiest: in the Arduino IDE pick <b>Tools → Port → eavelights</b> (network) and Upload. Or here: in the IDE use <b>Sketch → Export compiled Binary</b>, then choose the <b>.bin</b> from the sketch folder (not the merged/bootloader ones). If an update fails, the current firmware keeps running.</p>
 <input type="file" id="fwFile" accept=".bin">
 <input type="password" id="fwPass" placeholder="Update password (OTA_PASSWORD in secrets.h)" style="margin-top:8px">
 <button class="btn primary" id="fwGo" style="margin-top:10px">Upload firmware</button>
 <p class="hint" id="fwStatus"></p>
-</div>
-<p class="err" id="storageWarn" hidden>Storage not found, so zones and saved looks are lost on restart. Use Tools → Partition Scheme → 16M Flash (3MB APP/9.9MB FATFS).</p>
-</details></div>
+</div></details>
+<p class="err" id="storageWarn" hidden>Storage not found, so zones, scenes and saved looks are lost on restart. Use Tools → Partition Scheme → 16M Flash (3MB APP/9.9MB FATFS).</p>
+</section>
 
 <p class="status" id="status">Connecting…</p>
 </main><script>
-const $=id=>document.getElementById(id);let st=null,timer=null,looks=[],editZone=-1,findStrand='A';
-// sel = what the controls change: 0/1 strand A/B, BOTH, HOUSE, ZONE+slot or PATH+slot
-const BOTH=-1,HOUSE=-2,ZONE=100,PATH=200;
-let sel=0;try{const v=localStorage.getItem('eaveSel');if(v!==null)sel=+v;}catch(e){}
-const pct=v=>Math.round(v/2.55)+'%';
+const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pct=v=>Math.round(v/2.55)+'%';
+const store={get(k,d){try{const v=localStorage.getItem(k);return v===null?d:JSON.parse(v);}catch(e){return d;}},
+ set(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}};
+function showErr(id,msg){$(id).textContent=msg||'';$(id).hidden=!msg;}
+let st=null,timer=null,looks=[],sceneList=[],layout=null,frame=null;
+
+// ================= Tabs =================
+let tab=store.get('eaveTab','home');
+const editorFrame=$('editorFrame');
+function setTab(t){tab=t;store.set('eaveTab',t);
+ document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('sel',b.dataset.t===t));
+ document.querySelectorAll('section[data-tab]').forEach(s=>s.classList.toggle('show',s.dataset.tab===t));
+ document.body.classList.toggle('wide',t==='house');
+ // the live card lives on Home and Lights only
+ if(t==='home')$('liveSlotHome').appendChild($('liveCard'));
+ if(t==='lights')$('liveSlotLights').appendChild($('liveCard'));
+ if(t==='home')loadLayout();
+ if(t==='house'&&!editorFrame.src)editorFrame.src='/editor?embed=1';
+ if(editorFrame.contentWindow)editorFrame.contentWindow.postMessage({eaveEditorActive:t==='house'},'*');
+ if(t!=='house'&&layoutDirtyFromEditor){layoutDirtyFromEditor=false;loadLayout();}
+ drawLive();}
+document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.t));
+let layoutDirtyFromEditor=false;
+window.addEventListener('message',e=>{if(e.data&&e.data.eaveEditorHeight){editorFrame.style.height=(e.data.eaveEditorHeight+20)+'px';layoutDirtyFromEditor=true;}});
+
+// Remember which Setup sections are open
+const openFolds=store.get('eaveFolds',[]);
+document.querySelectorAll('details.fold').forEach(d=>{if(openFolds.includes(d.dataset.fold))d.open=true;
+ d.addEventListener('toggle',()=>{const o=[...document.querySelectorAll('details.fold')].filter(x=>x.open).map(x=>x.dataset.fold);store.set('eaveFolds',o);});});
+
+// ================= What is being controlled =================
+// sel: 0/1 strand A/B, BOTH, HOUSE, ZONE+slot, PATH+slot
+const BOTH=-1,HOUSE=-2,ZONE=100,PATH=200;
+let sel=store.get('eaveSel',0);
 const both=()=>sel===BOTH,house=()=>sel===HOUSE,pathSel=()=>sel>=PATH,zoneSel=()=>sel>=ZONE&&sel<PATH;
 const zoneBySlot=n=>st.zones.find(z=>z.slot===n),pathBySlot=n=>st.paths.find(p=>p.slot===n);
 function cur(){return house()?st.house:pathSel()?pathBySlot(sel-PATH):zoneSel()?zoneBySlot(sel-ZONE):st.outputs[both()?0:sel];}
 function target(){return house()?'house':both()?'all':pathSel()?'p'+(sel-PATH):zoneSel()?'z'+(sel-ZONE):st.outputs[sel].id;}
 function curName(){return house()?'Whole house':both()?'Both strands':(zoneSel()||pathSel())?cur().name:'Strand '+cur().id;}
-function anyOn(){return st.outputs.some(o=>o.on);}
-function pick(i){sel=i;try{localStorage.setItem('eaveSel',i);}catch(e){}show(st);}
-function tab(i,dot,name,sub){return '<button data-i="'+i+'" class="'+(i===sel?'sel':'')+'">'+
- '<span class="dot" style="background:'+(dot||'transparent')+'"></span>'+esc(name)+'<small>'+esc(sub)+'</small></button>';}
-function showErr(id,msg){$(id).textContent=msg||'';$(id).hidden=!msg;}
+function anyStrandOn(){return st.outputs.some(o=>o.on);}
+// everything that is on, by name
+function onNames(s){const n=[];s.outputs.forEach(o=>o.on&&n.push('Strand '+o.id));if(s.house.on)n.push('Whole house');
+ s.paths.forEach(p=>p.on&&n.push(p.name));s.zones.forEach(z=>z.on&&n.push(z.name));return n;}
+
+function renderPicker(s){const onOff=o=>o.on?'  ● on':'  ○ off';
+ let h='<optgroup label="Strands">'+s.outputs.map((o,i)=>'<option value="'+i+'">Strand '+o.id+(o.id==='A'?' (left)':' (right)')+onOff(o)+'</option>').join('')+
+  '<option value="'+BOTH+'">Both strands'+(s.outputs.every(o=>o.on)?'  ● on':anyStrandOn()?'  ◐ some on':'  ○ off')+'</option></optgroup>'+
+  '<optgroup label="Whole house"><option value="'+HOUSE+'">Whole house'+onOff(s.house)+'</option></optgroup>';
+ if(s.paths.length)h+='<optgroup label="Paths">'+s.paths.map(p=>'<option value="'+(PATH+p.slot)+'">'+esc(p.name)+onOff(p)+'</option>').join('')+'</optgroup>';
+ if(s.zones.length)h+='<optgroup label="Zones">'+s.zones.map(z=>'<option value="'+(ZONE+z.slot)+'">'+esc(z.name)+onOff(z)+'</option>').join('')+'</optgroup>';
+ $('picker').innerHTML=h;$('picker').value=String(sel);}
+$('picker').onchange=e=>{sel=+e.target.value;store.set('eaveSel',sel);show(st);};
 
 function show(s){st=s;
  if((zoneSel()&&!zoneBySlot(sel-ZONE))||(pathSel()&&!pathBySlot(sel-PATH))||(sel>=0&&sel<ZONE&&sel>=s.outputs.length)||(sel<HOUSE))sel=0;
+ const names=onNames(s);
+ $('onPill').textContent=names.length?names.length+' on':'all off';$('onPill').classList.toggle('on',names.length>0);
+ $('onList').textContent=names.length?names.join(' · '):'Everything is off.';$('allOff').disabled=!names.length;
+ renderPicker(s);
  const h=s.house,zonesOn=s.zones.filter(z=>z.on),pathsOn=s.paths.filter(p=>p.on);
  const coverStrands=(h.on?['Whole house']:[]).concat(pathsOn.map(p=>p.name),zonesOn.map(z=>z.name));
- const over=h.on?' · covered':'';
- $('tabs').innerHTML=s.outputs.map((o,i)=>tab(i,o.on?o.color:'','Strand '+o.id,'GPIO '+o.gpio+' · '+(o.on?'on':'off')+over)).join('')+
-  tab(BOTH,'','Both strands',(s.outputs.every(o=>o.on)?'all on':anyOn()?'some on':'all off')+over)+
-  tab(HOUSE,h.on?h.color:'','Whole house',(h.reverse?'left → right':'right → left')+' · '+(h.on?'on':'off'))+
-  s.paths.map(p=>tab(PATH+p.slot,p.on?p.color:'',p.name,'path · '+p.length+' · '+(p.on?'on':'off'))).join('')+
-  s.zones.map(z=>tab(ZONE+z.slot,z.on?z.color:'',z.name,z.ranges+' · '+(z.on?'on':'off'))).join('');
- $('tabs').querySelectorAll('button').forEach(b=>b.onclick=()=>pick(+b.dataset.i));
- const o=cur();
+ const o=cur(),lastA='A'+s.outputs[0].count,lastB='B'+(s.outputs[1]?s.outputs[1].count:'');
  let hint='';
- const lastA='A'+s.outputs[0].count,lastB='B'+(s.outputs[1]?s.outputs[1].count:'');
  if(house())hint='One '+h.length+'-light line across the front: '+lastB+' (far right) → controller → '+lastA+' (far left). While on, it covers Strand A and B'+(zonesOn.length?'; zones that are on ('+zonesOn.map(z=>z.name).join(', ')+') are drawn on top':'')+'.';
  else if(zoneSel())hint=o.length+' lights: '+o.ranges+'. While on, drawn on top of everything else.';
  else if(pathSel())hint='Path: '+o.summary+' ('+o.length+' positions incl. gaps). Zones that are on are drawn on top of it.';
  else if(coverStrands.length)hint='Drawn on top of the strands right now: '+coverStrands.join(', ')+'.';
  else if(!both()&&!o.enabled)hint='This strand is turned off in the firmware (ENABLE_OUTPUT_B).';
  $('tabHint').textContent=hint;$('tabHint').hidden=!hint;
- const isOn=both()?anyOn():o.on;
- $('power').textContent=curName()+' '+(isOn?'ON':'OFF');
- $('power').classList.toggle('on',isOn);
+ const isOn=both()?anyStrandOn():o.on;
+ $('power').textContent=curName()+' — '+(isOn?'ON':'OFF');$('power').classList.toggle('on',isOn);
  $('lookTarget').textContent='· tap to apply to '+curName();
- const [fwd,rev]=house()?['Right → left','Left → right']
-  :zoneSel()?['As listed ('+o.ranges+')','Reversed']
-  :pathSel()?['In path order','Reversed']
-  :o.id==='A'?['Light 1 → '+o.count+' (outward, left)','Light '+o.count+' → 1 (inward)']
-  :o.id==='B'?['Light 1 → '+o.count+' (outward, right)','Light '+o.count+' → 1 (inward)']
-  :['Outward from controller','Inward to controller'];
- $('dir').children[0].textContent=fwd;$('dir').children[1].textContent=rev;
+ // look
  $('color').value=o.color.toLowerCase();$('bri').value=o.brightness;$('briVal').textContent=pct(o.brightness);
  $('modes').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',b.dataset.mode===o.mode));
- $('fadeCard').hidden=o.mode!=='fade';
- $('fsec').value=o.fadeSeconds;$('fsecVal').textContent=o.fadeSeconds+' s';
- $('fmin').value=o.fadeMin;$('fminVal').textContent=pct(o.fadeMin);
- const moving=o.mode==='chase'||o.mode==='comet';$('motionCard').hidden=!moving;
+ const moving=o.mode==='chase'||o.mode==='comet';
+ const [fwd,rev]=house()?['Right → left','Left → right']:zoneSel()?['As listed','Reversed']:pathSel()?['In path order','Reversed']
+  :o.id==='A'?['Light 1 → '+o.count+' (outward, left)','Light '+o.count+' → 1 (inward)']
+  :o.id==='B'?['Light 1 → '+o.count+' (outward, right)','Light '+o.count+' → 1 (inward)']:['Outward','Inward'];
+ $('dir').children[0].textContent=fwd;$('dir').children[1].textContent=rev;
+ $('motionFold').hidden=!moving;
+ $('motionSum').textContent=(o.mode==='comet'?'Comet':'Chase')+' settings · '+o.speed+' lights/s · '+(o.mode==='comet'?'tail ':'block ')+o.size+' · '+(o.reverse?rev:fwd).split(' (')[0]+' · background '+(o.bgOn?'on':'off');
  $('spd').value=o.speed;$('spdVal').textContent=o.speed+' lights/s';
  $('sizeName').textContent=o.mode==='comet'?'Tail length':'Lit block length';
  $('size').value=o.size;$('sizeVal').textContent=o.size+(o.size===1?' light':' lights');
  $('dir').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',(b.dataset.rev==='1')===o.reverse));
  $('bg').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',(b.dataset.bg==='1')===o.bgOn));
  $('bgColor').hidden=!o.bgOn;$('bgHint').hidden=!o.bgOn;$('bgColor').value=o.bgColor.toLowerCase();
+ $('fadeFold').hidden=o.mode!=='fade';
+ $('fadeSum').textContent='Fade settings · '+o.fadeSeconds+' s per breath · lowest '+pct(o.fadeMin);
+ $('fsec').value=o.fadeSeconds;$('fsecVal').textContent=o.fadeSeconds+' s';
+ $('fmin').value=o.fadeMin;$('fminVal').textContent=pct(o.fadeMin);
  // setup
+ $('strandSum').textContent='A '+s.outputs[0].count+(s.outputs[1]?' · B '+s.outputs[1].count:'');
+ $('zoneSum').textContent=s.zones.length+' of 12';$('pathSum').textContent=s.paths.length+' of 8';$('fwSum').textContent='v'+s.version;
  $('zoneList').innerHTML=s.zones.map(z=>'<div class="zoneRow click'+(z.slot===showingZone?' showing':'')+'" data-show="'+z.slot+'" title="Click to light this zone white for 10 seconds"><div>'+esc(z.name)+
   '<small>'+esc(z.ranges)+' · '+z.length+' lights'+(z.slot===showingZone?' · showing on the house…':'')+'</small></div>'+
   '<button class="btn" data-edit="'+z.slot+'">Edit</button><button class="btn danger" data-del="'+z.slot+'">Delete</button></div>').join('');
@@ -272,10 +377,10 @@ function show(s){st=s;
  if(document.activeElement!==$('cntA'))$('cntA').value=s.outputs[0].count;
  if(s.outputs[1]&&document.activeElement!==$('cntB'))$('cntB').value=s.outputs[1].count;
  $('fwVer').textContent=s.version;$('findNum').max=findMax();
- $('storageWarn').hidden=s.storage;
  $('findStrand').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',b.dataset.s===findStrand));
+ $('storageWarn').hidden=s.storage;
  $('locateBanner').hidden=!s.locate.active;
- $('locateBanner').textContent=s.locate.active?'Find a light is on: showing only '+s.locate.ranges+'. Press Stop in Setup to go back.':'';
+ $('locateBanner').textContent=s.locate.active?'Find a light is on: showing only '+s.locate.ranges+'. Stop it in Setup → Find a light.':'';
  $('status').textContent='Connected · v'+s.version;}
 
 async function post(url,p){const r=await fetch(url,{method:'POST',body:new URLSearchParams(p)});return r.json();}
@@ -283,8 +388,9 @@ async function send(p){if(!st)return;p.output=target();
  try{const j=await post('/api/state',p);if(j.error){$('status').textContent=j.error;}else show(j);}
  catch(e){$('status').textContent='Not connected';}}
 function sendSoon(p){clearTimeout(timer);timer=setTimeout(()=>send(p),120);}
-// Both: if any strand is on, turn all off; otherwise turn all on.
-$('power').onclick=()=>send({on:(both()?anyOn():cur().on)?0:1});
+// Both: if any strand is on, turn both off; otherwise turn both on.
+$('power').onclick=()=>send({on:(both()?anyStrandOn():cur().on)?0:1});
+$('allOff').onclick=async()=>{const j=await post('/api/all-off',{});if(!j.error)show(j);};
 $('color').oninput=e=>sendSoon({color:e.target.value.slice(1)});
 $('bri').oninput=e=>{$('briVal').textContent=pct(e.target.value);sendSoon({brightness:e.target.value});};
 $('modes').querySelectorAll('button').forEach(b=>b.onclick=()=>send({mode:b.dataset.mode}));
@@ -295,13 +401,15 @@ $('size').oninput=e=>{$('sizeVal').textContent=e.target.value+(e.target.value===
 $('dir').querySelectorAll('button').forEach(b=>b.onclick=()=>send({reverse:b.dataset.rev}));
 $('bg').querySelectorAll('button').forEach(b=>b.onclick=()=>send({bgOn:b.dataset.bg}));
 $('bgColor').oninput=e=>sendSoon({bgColor:e.target.value.slice(1)});
+// remember whether the mode fold-outs are open
+['motionFold','fadeFold'].forEach(id=>{$(id).open=store.get('eave_'+id,false);$(id).addEventListener('toggle',()=>store.set('eave_'+id,$(id).open));});
 
-// ---- Saved looks ----
-function showLooks(list){looks=list;
- $('looks').innerHTML=list.map(p=>'<span class="chip" data-id="'+p.id+'" title="'+esc(p.mode)+'">'+
+// ================= Saved looks =================
+function showLooks(list){looks=list||[];
+ $('looks').innerHTML=looks.map(p=>'<span class="chip" data-id="'+p.id+'" title="'+esc(p.mode)+'">'+
   '<span class="dot" style="background:'+p.color+'"></span>'+(p.bgOn?'<span class="dot" style="background:'+p.bgColor+'"></span>':'')+
   esc(p.name)+'<span class="x" data-x="'+p.id+'" title="Delete">×</span></span>').join('');
- $('looksEmpty').hidden=list.length>0;
+ $('looksEmpty').hidden=looks.length>0;
  $('looks').querySelectorAll('.chip').forEach(c=>c.onclick=async e=>{
   const x=e.target.dataset.x;
   if(x!==undefined){const p=looks.find(l=>l.id===+x);if(!confirm('Delete saved look "'+p.name+'"?'))return;
@@ -312,8 +420,7 @@ $('saveLook').onclick=async()=>{const name=prompt('Name for this look (e.g. Xmas
  if(!name)return;const j=await post('/api/presets',{action:'save',name,output:target()});
  if(j.error)showErr('lookErr',j.error);else{showErr('lookErr');showLooks(j.presets);}};
 
-// ---- Scenes ----
-let sceneList=[];
+// ================= Scenes =================
 function showScenes(list){sceneList=list||[];
  $('scenes').innerHTML=sceneList.map(s=>'<span class="chip" data-id="'+s.id+'" title="'+s.on+' parts on">'+
   s.colors.map(c=>'<span class="dot" style="background:'+c+'"></span>').join('')+esc(s.name)+
@@ -328,8 +435,75 @@ function showScenes(list){sceneList=list||[];
 $('saveScene').onclick=async()=>{const name=prompt('Name for this scene (e.g. Xmas, Halloween, Normal). Saves what every strand, zone and path is doing right now. Same name replaces it.');
  if(!name)return;const j=await post('/api/scenes',{action:'save',name});
  if(j.error)showErr('sceneErr',j.error);else{showErr('sceneErr');showScenes(j.scenes);}};
+function loadLooksAndScenes(){return fetch('/api/presets').then(r=>r.json()).then(j=>{showLooks(j.presets);showScenes(j.scenes);}).catch(()=>{});}
 
-// ---- Backup & restore ----
+// ================= Setup: strand lengths =================
+$('cntSave').onclick=async()=>{const j=await post('/api/strands',{a:$('cntA').value,b:$('cntB').value});
+ if(j.error)showErr('cntErr',j.error);else{showErr('cntErr');show(j);}};
+
+// ================= Setup: find a light =================
+let findStrand='A';
+function findMax(){const o=st.outputs.find(x=>x.id===findStrand);return o?o.count:1;}
+function findNum(){return Math.min(findMax(),Math.max(1,parseInt($('findNum').value)||1));}
+async function locate(ranges){const j=await post('/api/locate',ranges?{ranges}:{stop:1});if(j.error)$('status').textContent=j.error;else show(j);return j;}
+function findShow(){$('findNum').value=findNum();locate(findStrand+findNum());}
+$('findStrand').querySelectorAll('button').forEach(b=>b.onclick=()=>{findStrand=b.dataset.s;show(st);if(st.locate.active)findShow();});
+$('findMinus').onclick=()=>{$('findNum').value=Math.max(1,findNum()-1);findShow();};
+$('findPlus').onclick=()=>{$('findNum').value=Math.min(findMax(),findNum()+1);findShow();};
+$('findNum').onchange=findShow;$('findShow').onclick=findShow;$('findStop').onclick=()=>locate('');
+
+// ================= Setup: zones =================
+// Click a zone in the list: its lights go white for 10 s, then back to normal.
+const SHOW_SECONDS=10;let showingZone=-1,showTimer=null,editZone=-1;
+async function showZone(slot){clearTimeout(showTimer);
+ if(showingZone===slot){showingZone=-1;await locate('');return;}
+ const z=zoneBySlot(slot);if(!z)return;showingZone=slot;
+ const j=await post('/api/locate',{ranges:z.ranges,seconds:SHOW_SECONDS,white:1});
+ if(j.error){showingZone=-1;showErr('zoneErr',j.error);}else{showErr('zoneErr');show(j);}
+ showTimer=setTimeout(async()=>{showingZone=-1;try{show(await (await fetch('/api/state')).json());}catch(e){}},SHOW_SECONDS*1000+300);}
+function resetZoneForm(){editZone=-1;$('zoneName').value='';$('zoneRanges').value='';$('zoneFormTitle').textContent='New zone';$('zoneCancel').hidden=true;showErr('zoneErr');}
+function startEdit(slot){const z=zoneBySlot(slot);editZone=slot;$('zoneName').value=z.name;$('zoneRanges').value=z.ranges;
+ $('zoneFormTitle').textContent='Edit zone: '+z.name;$('zoneCancel').hidden=false;showErr('zoneErr');$('zoneName').focus();}
+async function delZone(slot){const z=zoneBySlot(slot);if(!confirm('Delete zone "'+z.name+'"?'))return;
+ const j=await post('/api/zones',{action:'delete',id:slot});if(j.error)showErr('zoneErr',j.error);else{if(editZone===slot)resetZoneForm();show(j);}}
+$('zoneShow').onclick=async()=>{const j=await locate($('zoneRanges').value.trim());showErr('zoneErr',j.error);};
+$('zoneSave').onclick=async()=>{const p={action:'save',name:$('zoneName').value,ranges:$('zoneRanges').value};if(editZone>=0)p.id=editZone;
+ const j=await post('/api/zones',p);if(j.error){showErr('zoneErr',j.error);return;}
+ if(j.locate.active)await locate('');resetZoneForm();show(j);};
+$('zoneCancel').onclick=resetZoneForm;
+
+// ================= Setup: paths =================
+let editPath=-1,steps=[];  // steps: {zone, reverse, gap} while building a path
+function renderSteps(){if(!st)return;
+ const zs=st.zones;$('pathNeedsZones').hidden=zs.length>0;$('stepHead').hidden=!steps.length;
+ $('pathSteps').innerHTML=steps.map((s,i)=>'<div class="stepRow"><select data-z="'+i+'">'+
+  zs.map(z=>'<option value="'+z.slot+'"'+(z.slot===s.zone?' selected':'')+'>'+esc(z.name)+' ('+esc(z.ranges)+')</option>').join('')+
+  (zs.some(z=>z.slot===s.zone)?'':'<option selected value="-1">(deleted zone)</option>')+'</select>'+
+  '<button class="btn'+(s.reverse?' primary':'')+'" data-r="'+i+'" title="Run this zone backwards">⇄</button>'+
+  '<input type="number" min="0" max="30" value="'+s.gap+'" data-g="'+i+'" title="Invisible lights after this zone">'+
+  '<button class="btn" data-u="'+i+'" title="Move up"'+(i?'':' disabled')+'>↑</button>'+
+  '<button class="btn danger" data-x="'+i+'" title="Remove">×</button></div>').join('');
+ const q=a=>$('pathSteps').querySelectorAll('['+a+']');
+ q('data-z').forEach(e=>e.onchange=()=>{steps[+e.dataset.z].zone=+e.value;});
+ q('data-r').forEach(e=>e.onclick=()=>{const s=steps[+e.dataset.r];s.reverse=!s.reverse;renderSteps();});
+ q('data-g').forEach(e=>e.onchange=()=>{steps[+e.dataset.g].gap=Math.min(30,Math.max(0,parseInt(e.value)||0));});
+ q('data-u').forEach(e=>e.onclick=()=>{const i=+e.dataset.u;[steps[i-1],steps[i]]=[steps[i],steps[i-1]];renderSteps();});
+ q('data-x').forEach(e=>e.onclick=()=>{steps.splice(+e.dataset.x,1);renderSteps();});}
+function resetPathForm(){editPath=-1;steps=[];$('pathName').value='';$('pathFormTitle').textContent='New path';$('pathCancel').hidden=true;showErr('pathErr');renderSteps();}
+function startPathEdit(slot){const p=pathBySlot(slot);editPath=slot;$('pathName').value=p.name;
+ steps=p.steps.map(s=>({zone:s.zone,reverse:s.reverse,gap:s.gap}));
+ $('pathFormTitle').textContent='Edit path: '+p.name;$('pathCancel').hidden=false;showErr('pathErr');renderSteps();$('pathName').focus();}
+async function delPath(slot){const p=pathBySlot(slot);if(!confirm('Delete path "'+p.name+'"?'))return;
+ const j=await post('/api/paths',{action:'delete',id:slot});if(j.error)showErr('pathErr',j.error);else{if(editPath===slot)resetPathForm();show(j);}}
+$('pathAdd').onclick=()=>{const zs=st.zones;if(!zs.length){showErr('pathErr','Make some zones first.');return;}
+ const used=steps.map(s=>s.zone),next=zs.find(z=>!used.includes(z.slot))||zs[0];
+ steps.push({zone:next.slot,reverse:false,gap:0});renderSteps();};
+$('pathSave').onclick=async()=>{const p={action:'save',name:$('pathName').value,steps:steps.map(s=>s.zone+':'+(s.reverse?1:0)+':'+s.gap).join(',')};
+ if(editPath>=0)p.id=editPath;const j=await post('/api/paths',p);if(j.error){showErr('pathErr',j.error);return;}
+ resetPathForm();show(j);};
+$('pathCancel').onclick=resetPathForm;
+
+// ================= Setup: backup & restore =================
 function toB64(u8){let s='';for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000));return btoa(s);}
 function fromB64(b){const s=atob(b),u=new Uint8Array(s.length);for(let i=0;i<s.length;i++)u[i]=s.charCodeAt(i);return u;}
 // Settings of a strand / Whole house in the form /api/state accepts.
@@ -362,15 +536,12 @@ $('restoreFile').onchange=async e=>{const f=e.target.files[0];e.target.value='';
   const cnt={};(b.strands||[]).forEach(s=>cnt[s.id.toLowerCase()]=s.count);
   if(cnt.a||cnt.b)await post('/api/strands',cnt);
   for(const [id,fields] of Object.entries(b.channels||{}))await post('/api/state',Object.assign({output:id},fields));
-  await loadLooksAndScenes();show(await (await fetch('/api/state')).json());
+  await loadLooksAndScenes();show(await (await fetch('/api/state')).json());layout=null;loadLayout();
+  if(editorFrame.src)editorFrame.src='/editor?embed=1';
   say(failed?'Restored, but these had problems: '+failed:'Restore complete.');}
  catch(err){say('Restore failed: '+err.message+'. Reload the page and try again.');}};
 
-// ---- Strand lengths ----
-$('cntSave').onclick=async()=>{const j=await post('/api/strands',{a:$('cntA').value,b:$('cntB').value});
- if(j.error)showErr('cntErr',j.error);else{showErr('cntErr');show(j);}};
-
-// ---- Firmware update (with progress) ----
+// ================= Setup: firmware update =================
 $('fwGo').onclick=()=>{const f=$('fwFile').files[0];if(!f){$('fwStatus').textContent='Choose the .bin file first.';return;}
  if(!confirm('Update firmware with '+f.name+'? The lights go dark and the board restarts.'))return;
  const fd=new FormData();fd.append('file',f,f.name);const x=new XMLHttpRequest();
@@ -382,103 +553,90 @@ $('fwGo').onclick=()=>{const f=$('fwFile').files[0];if(!f){$('fwStatus').textCon
  x.onerror=()=>{$('fwStatus').textContent='Upload failed (connection lost). The current firmware is still running.';};
  $('fwStatus').textContent='Uploading…';x.send(fd);};
 
-// ---- Find a light ----
-function findMax(){const o=st.outputs.find(x=>x.id===findStrand);return o?o.count:1;}
-function findNum(){return Math.min(findMax(),Math.max(1,parseInt($('findNum').value)||1));}
-// Click a zone in the list: its lights go white for 10 s, then back to normal.
-// Click the same zone again to stop early; click another to switch to it.
-const SHOW_SECONDS=10;let showingZone=-1,showTimer=null;
-async function showZone(slot){clearTimeout(showTimer);
- if(showingZone===slot){showingZone=-1;await locate('');return;}
- const z=zoneBySlot(slot);if(!z)return;showingZone=slot;
- const j=await post('/api/locate',{ranges:z.ranges,seconds:SHOW_SECONDS,white:1});
- if(j.error){showingZone=-1;showErr('zoneErr',j.error);}else{showErr('zoneErr');show(j);}
- showTimer=setTimeout(async()=>{showingZone=-1;try{show(await (await fetch('/api/state')).json());}catch(e){}},SHOW_SECONDS*1000+300);}
-async function locate(ranges){const j=await post('/api/locate',ranges?{ranges}:{stop:1});if(j.error)$('status').textContent=j.error;else show(j);return j;}
-function findShow(){$('findNum').value=findNum();locate(findStrand+findNum());}
-$('findStrand').querySelectorAll('button').forEach(b=>b.onclick=()=>{findStrand=b.dataset.s;show(st);if(st.locate.active)findShow();});
-$('findMinus').onclick=()=>{$('findNum').value=Math.max(1,findNum()-1);findShow();};
-$('findPlus').onclick=()=>{$('findNum').value=Math.min(findMax(),findNum()+1);findShow();};
-$('findNum').onchange=findShow;
-$('findShow').onclick=findShow;
-$('findStop').onclick=()=>locate('');
-
-// ---- Zones ----
-function resetZoneForm(){editZone=-1;$('zoneName').value='';$('zoneRanges').value='';$('zoneFormTitle').textContent='New zone';$('zoneCancel').hidden=true;showErr('zoneErr');}
-function startEdit(slot){const z=zoneBySlot(slot);editZone=slot;$('zoneName').value=z.name;$('zoneRanges').value=z.ranges;
- $('zoneFormTitle').textContent='Edit zone: '+z.name;$('zoneCancel').hidden=false;showErr('zoneErr');$('zoneName').focus();}
-async function delZone(slot){const z=zoneBySlot(slot);if(!confirm('Delete zone "'+z.name+'"?'))return;
- const j=await post('/api/zones',{action:'delete',id:slot});if(j.error)showErr('zoneErr',j.error);else{if(editZone===slot)resetZoneForm();show(j);}}
-$('zoneShow').onclick=async()=>{const j=await locate($('zoneRanges').value.trim());showErr('zoneErr',j.error);};
-$('zoneSave').onclick=async()=>{const p={action:'save',name:$('zoneName').value,ranges:$('zoneRanges').value};if(editZone>=0)p.id=editZone;
- const j=await post('/api/zones',p);if(j.error){showErr('zoneErr',j.error);return;}
- if(j.locate.active)await locate('');resetZoneForm();show(j);};
-$('zoneCancel').onclick=resetZoneForm;
-
-// ---- Paths ----
-let editPath=-1,steps=[];  // steps: {zone, reverse, gap} while building a path
-function renderSteps(){if(!st)return;
- const zs=st.zones;$('pathNeedsZones').hidden=zs.length>0;$('stepHead').hidden=!steps.length;
- $('pathSteps').innerHTML=steps.map((s,i)=>'<div class="stepRow"><select data-z="'+i+'">'+
-  zs.map(z=>'<option value="'+z.slot+'"'+(z.slot===s.zone?' selected':'')+'>'+esc(z.name)+' ('+esc(z.ranges)+')</option>').join('')+
-  (zs.some(z=>z.slot===s.zone)?'':'<option selected value="-1">(deleted zone)</option>')+'</select>'+
-  '<button class="btn'+(s.reverse?' primary':'')+'" data-r="'+i+'" title="Run this zone backwards">⇄</button>'+
-  '<input type="number" min="0" max="30" value="'+s.gap+'" data-g="'+i+'" title="Invisible lights after this zone">'+
-  '<button class="btn" data-u="'+i+'" title="Move up"'+(i?'':' disabled')+'>↑</button>'+
-  '<button class="btn danger" data-x="'+i+'" title="Remove">×</button></div>').join('');
- const q=a=>$('pathSteps').querySelectorAll('['+a+']');
- q('data-z').forEach(e=>e.onchange=()=>{steps[+e.dataset.z].zone=+e.value;});
- q('data-r').forEach(e=>e.onclick=()=>{const s=steps[+e.dataset.r];s.reverse=!s.reverse;renderSteps();});
- q('data-g').forEach(e=>e.onchange=()=>{steps[+e.dataset.g].gap=Math.min(30,Math.max(0,parseInt(e.value)||0));});
- q('data-u').forEach(e=>e.onclick=()=>{const i=+e.dataset.u;[steps[i-1],steps[i]]=[steps[i],steps[i-1]];renderSteps();});
- q('data-x').forEach(e=>e.onclick=()=>{steps.splice(+e.dataset.x,1);renderSteps();});}
-function resetPathForm(){editPath=-1;steps=[];$('pathName').value='';$('pathFormTitle').textContent='New path';$('pathCancel').hidden=true;showErr('pathErr');renderSteps();}
-function startPathEdit(slot){const p=pathBySlot(slot);editPath=slot;$('pathName').value=p.name;
- steps=p.steps.map(s=>({zone:s.zone,reverse:s.reverse,gap:s.gap}));
- $('pathFormTitle').textContent='Edit path: '+p.name;$('pathCancel').hidden=false;showErr('pathErr');renderSteps();$('pathName').focus();}
-async function delPath(slot){const p=pathBySlot(slot);if(!confirm('Delete path "'+p.name+'"?'))return;
- const j=await post('/api/paths',{action:'delete',id:slot});if(j.error)showErr('pathErr',j.error);else{if(editPath===slot)resetPathForm();show(j);}}
-$('pathAdd').onclick=()=>{const zs=st.zones;if(!zs.length){showErr('pathErr','Make some zones first.');return;}
- const used=steps.map(s=>s.zone),next=zs.find(z=>!used.includes(z.slot))||zs[0];
- steps.push({zone:next.slot,reverse:false,gap:0});renderSteps();};
-$('pathSave').onclick=async()=>{const p={action:'save',name:$('pathName').value,steps:steps.map(s=>s.zone+':'+(s.reverse?1:0)+':'+s.gap).join(',')};
- if(editPath>=0)p.id=editPath;const j=await post('/api/paths',p);if(j.error){showErr('pathErr',j.error);return;}
- resetPathForm();show(j);};
-$('pathCancel').onclick=resetPathForm;
-
-fetch('/api/state').then(r=>r.json()).then(show).catch(()=>$('status').textContent='Not connected');
-function loadLooksAndScenes(){return fetch('/api/presets').then(r=>r.json()).then(j=>{showLooks(j.presets);showScenes(j.scenes);}).catch(()=>{});}
-loadLooksAndScenes();
-
-// ---- Live view: polls /api/frame, one request at a time, ~10 per second ----
-// LED values are linear; the screen is gamma-encoded, so dim LED values are lifted to look similar.
+// ================= Live view =================
+// Frame from /api/frame: [outputs], per output [count lo][count hi], then RGB per light, A first.
+// LED values are linear; the screen is gamma-encoded, so dim values are lifted to look similar.
 const GAM=new Uint8Array(256).map((_,v)=>Math.round(255*Math.pow(v/255,1/2.2)));
-let cv=null,frames=0,fpsT=performance.now();
-// Drawn as seen from the street: strand A runs left from the controller (last A light far
-// left), strand B runs right (last B light far right), light 1 of each next to the controller.
-// Frame: [outputs], per output [count lo][count hi], then RGB per light, A's lights first.
-const GAP=3;  // empty slots for the controller mark
-let liveLabelKey='';
-function drawFrame(b){const outs=b[0],cnt=[],start=[];let off=1+outs*2;
- for(let o=0;o<outs;o++){cnt.push(b[1+o*2]|(b[2+o*2]<<8));start.push(off);off+=cnt[o]*3;}
- const cA=cnt[0],cB=outs>1?cnt[1]:0,key=cA+'/'+cB;
- if(!cv||liveLabelKey!==key){liveLabelKey=key;$('live').innerHTML='<div class="liveRow"><canvas></canvas></div>'+
+function frameInfo(b){const outs=b[0],cnt=[],start=[];let off=1+outs*2;
+ for(let o=0;o<outs;o++){cnt.push(b[1+o*2]|(b[2+o*2]<<8));start.push(off);off+=cnt[o]*3;}return {outs,cnt,start};}
+function lightRGB(fi,o,i){if(o>=fi.outs||i>=fi.cnt[o])return null;const k=fi.start[o]+i*3,r=frame[k],g=frame[k+1],b=frame[k+2];
+ return (r|g|b)?[GAM[r],GAM[g],GAM[b]]:null;}
+let liveMode=store.get('eaveLiveMode','photo'),photoView=store.get('eavePhotoView',0),frames=0,fpsT=performance.now();
+$('liveMode').querySelectorAll('button').forEach(b=>b.onclick=()=>{liveMode=b.dataset.lm;store.set('eaveLiveMode',liveMode);drawLive();});
+
+// --- strip: as seen from the street, A runs left from the controller, B right ---
+const GAP=3;let stripCv=null,stripKey='';
+function drawStrip(fi){const cA=fi.cnt[0],cB=fi.outs>1?fi.cnt[1]:0,key=cA+'/'+cB;
+ if(!stripCv||stripKey!==key){stripKey=key;$('stripBox').innerHTML='<div class="liveRow"><canvas></canvas></div>'+
   '<div class="liveLabels"><span>A'+cA+' · left</span><span>controller</span><span>right · B'+cB+'</span></div>';
-  cv=$('live').querySelector('canvas');}
- const dpr=window.devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;
- if(cv.width!==Math.round(w*dpr)){cv.width=Math.round(w*dpr);cv.height=Math.round(h*dpr);}
- const g=cv.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,w,h);
- const slots=cA+GAP+cB,step=w/slots,r=Math.max(1,Math.min(step*0.4,6));
+  stripCv=$('stripBox').querySelector('canvas');}
+ const dpr=window.devicePixelRatio||1,w=stripCv.clientWidth,h=stripCv.clientHeight;if(!w)return;
+ if(stripCv.width!==Math.round(w*dpr)){stripCv.width=Math.round(w*dpr);stripCv.height=Math.round(h*dpr);}
+ const g=stripCv.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,w,h);
+ const step=w/(cA+GAP+cB),r=Math.max(1,Math.min(step*0.4,6));
  g.shadowBlur=0;g.fillStyle='#55554f';g.fillRect(step*(cA+GAP/2)-1,h*0.2,2,h*0.6);
- for(let o=0;o<Math.min(outs,2);o++)for(let i=0;i<cnt[o];i++){const k=start[o]+i*3,R=b[k],G=b[k+1],B=b[k+2];
-  const lit=R|G|B;g.fillStyle=lit?'rgb('+GAM[R]+','+GAM[G]+','+GAM[B]+')':'#2a2a27';
-  g.shadowBlur=lit?r*3:0;g.shadowColor=g.fillStyle;
-  const slot=o===0?cA-1-i:cA+GAP+i;
-  g.beginPath();g.arc(step*(slot+0.5),h/2,r,0,Math.PI*2);g.fill();}}
-async function pollFrame(){if(document.hidden){setTimeout(pollFrame,500);return;}
+ for(let o=0;o<Math.min(fi.outs,2);o++)for(let i=0;i<fi.cnt[o];i++){const c=lightRGB(fi,o,i);
+  g.fillStyle=c?'rgb('+c.join(',')+')':'#2a2a27';g.shadowBlur=c?r*3:0;g.shadowColor=g.fillStyle;
+  const slot=o===0?cA-1-i:cA+GAP+i;g.beginPath();g.arc(step*(slot+0.5),h/2,r,0,Math.PI*2);g.fill();}}
+
+// --- house photo: same placement maths as the House editor ---
+const imgs={};
+function loadLayout(){fetch('/files/layout.json',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(j=>{layout=j&&j.views?j:null;renderPhotoViews();drawLive();}).catch(()=>{layout=null;renderPhotoViews();drawLive();});}
+function renderPhotoViews(){const vs=layout?layout.views:[];if(photoView>=vs.length)photoView=0;
+ $('photoViews').innerHTML=vs.length>1?vs.map((v,i)=>'<button data-v="'+i+'" class="'+(i===photoView?'sel':'')+'">'+esc(v.name)+'</button>').join(''):'';
+ $('photoViews').querySelectorAll('button').forEach(b=>b.onclick=()=>{photoView=+b.dataset.v;store.set('eavePhotoView',photoView);renderPhotoViews();drawLive();});}
+function parseRanges(t){const out=[];
+ for(const part of String(t).split(',')){const m=part.trim().match(/^([AB])(\d+)(?:\s*-\s*[AB]?(\d+))?$/i);if(!m)continue;
+  const o=m[1].toUpperCase()==='A'?0:1,a=+m[2]-1,b=(m[3]?+m[3]:+m[2])-1,s=a<=b?1:-1;
+  for(let i=a;;i+=s){out.push([o,i]);if(i===b)break;}}
+ return out;}
+function itemLights(id){if(!st)return [];
+ if(id[0]==='z'){const z=zoneBySlot(+id.slice(1));return z?parseRanges(z.ranges):[];}
+ const o=st.outputs.find(x=>x.id===id);return o?parseRanges(o.id+'1-'+o.count):[];}
+function positions(v,pts,n){const W=v.width,H=v.height;if(!pts.length||!n)return [];
+ if(pts.length===1||n===1)return Array(n).fill(0).map(()=>({x:pts[0][0],y:pts[0][1]}));
+ const seg=[];let total=0;
+ for(let i=1;i<pts.length;i++){const d=Math.hypot((pts[i][0]-pts[i-1][0])*W,(pts[i][1]-pts[i-1][1])*H);seg.push(d);total+=d;}
+ const out=[];
+ for(let k=0;k<n;k++){let t=total*k/(n-1),i=0;while(i<seg.length-1&&t>seg[i]){t-=seg[i];i++;}
+  const f=seg[i]?Math.min(1,t/seg[i]):0,a=pts[i],b=pts[i+1];out.push({x:a[0]+(b[0]-a[0])*f,y:a[1]+(b[1]-a[1])*f});}
+ return out;}
+const photoCv=$('photoCv'),pctx=photoCv.getContext('2d');
+function drawPhoto(fi){const v=layout.views[photoView];let im=imgs[v.image];
+ if(!im){im=imgs[v.image]=new Image();im.onload=()=>drawLive();im.src=v.image;}
+ if(!im.complete||!im.naturalWidth)return;
+ const w=$('photoBox').clientWidth,h=Math.round(w*v.height/v.width),dpr=window.devicePixelRatio||1;if(!w)return;
+ if(photoCv.width!==Math.round(w*dpr)||photoCv.height!==Math.round(h*dpr)){photoCv.width=Math.round(w*dpr);photoCv.height=Math.round(h*dpr);photoCv.style.height=h+'px';}
+ pctx.setTransform(dpr,0,0,dpr,0,0);pctx.globalCompositeOperation='source-over';pctx.drawImage(im,0,0,w,h);
+ const set=Object.assign({night:0.6,glow:1},layout.settings||{});
+ if(set.night>0){pctx.fillStyle='rgba(0,0,0,'+set.night+')';pctx.fillRect(0,0,w,h);}
+ const R=w*0.012*set.glow;pctx.globalCompositeOperation='lighter';
+ (v.placements||[]).forEach(p=>{const all=itemLights(p.item),ls=all.slice(Math.max(0,p.from-1),Math.min(all.length,p.to)),pos=positions(v,p.points||[],ls.length);
+  pos.forEach((q,i)=>{const c=lightRGB(fi,ls[i][0],ls[i][1]);if(!c)return;const x=q.x*w,y=q.y*h,rgb=c.join(',');
+   let g=pctx.createRadialGradient(x,y,0,x,y,R*4);g.addColorStop(0,'rgba('+rgb+',0.22)');g.addColorStop(1,'rgba('+rgb+',0)');
+   pctx.fillStyle=g;pctx.beginPath();pctx.arc(x,y,R*4,0,7);pctx.fill();
+   g=pctx.createRadialGradient(x,y,0,x,y,R);g.addColorStop(0,'rgba('+rgb+',0.95)');g.addColorStop(0.35,'rgba('+rgb+',0.45)');g.addColorStop(1,'rgba('+rgb+',0)');
+   pctx.fillStyle=g;pctx.beginPath();pctx.arc(x,y,R,0,7);pctx.fill();
+   pctx.fillStyle='rgba('+c.map(z=>Math.round(z+(255-z)*0.6)).join(',')+',0.9)';pctx.beginPath();pctx.arc(x,y,Math.max(1.2,R*0.16),0,7);pctx.fill();});});
+ pctx.globalCompositeOperation='source-over';}
+
+function drawLive(){const hasPhoto=!!(layout&&layout.views&&layout.views.length),usePhoto=liveMode==='photo'&&hasPhoto;
+ $('liveMode').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',b.dataset.lm===(usePhoto?'photo':'strip')));
+ $('photoBox').hidden=!usePhoto;$('stripBox').hidden=usePhoto;$('photoViews').hidden=!usePhoto;
+ $('liveHint').textContent=liveMode==='photo'&&!hasPhoto?'No house photos yet: add them in the House tab. Showing the strip for now.':
+  usePhoto?'':'As seen from the street. Screen brightness is approximate.';
+ if(!frame)return;const fi=frameInfo(frame);
+ if(usePhoto)drawPhoto(fi);else drawStrip(fi);}
+window.addEventListener('resize',()=>drawLive());
+
+async function pollFrame(){if(document.hidden||(tab!=='home'&&tab!=='lights')){setTimeout(pollFrame,500);return;}
  const t0=performance.now();
- try{const r=await fetch('/api/frame',{cache:'no-store'});drawFrame(new Uint8Array(await r.arrayBuffer()));frames++;}catch(e){}
+ try{const r=await fetch('/api/frame',{cache:'no-store'});frame=new Uint8Array(await r.arrayBuffer());frames++;drawLive();}catch(e){}
  const now=performance.now();if(now-fpsT>=2000){$('liveInfo').textContent='· '+(frames*1000/(now-fpsT)).toFixed(1)+' updates/s';frames=0;fpsT=now;}
  setTimeout(pollFrame,Math.max(0,100-(now-t0)));}
-pollFrame();
+
+// ================= Start =================
+fetch('/api/state').then(r=>r.json()).then(s=>{show(s);setTab(['home','lights','house','setup'].includes(tab)?tab:'home');})
+ .catch(()=>{$('status').textContent='Not connected';setTab('home');});
+loadLooksAndScenes();loadLayout();pollFrame();
 </script></body></html>)rawhtml";
