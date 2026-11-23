@@ -6,12 +6,13 @@ struct TestStep {
   const char* name;
 };
 
+// Explicit full values: FastLED's CRGB::Green is the web color (0,128,0), half brightness.
 const TestStep TEST_STEPS[] = {
-  {CRGB::Red,   "RED"},
-  {CRGB::Green, "GREEN"},
-  {CRGB::Blue,  "BLUE"},
-  {CRGB::White, "WHITE"},
-  {CRGB::Black, "OFF"},
+  {CRGB(255,   0,   0), "RED"},
+  {CRGB(  0, 255,   0), "GREEN"},
+  {CRGB(  0,   0, 255), "BLUE"},
+  {CRGB(255, 255, 255), "WHITE"},
+  {CRGB(  0,   0,   0), "OFF"},
 };
 const int NUM_TEST_STEPS = sizeof(TEST_STEPS) / sizeof(TEST_STEPS[0]);
 const uint32_t STEP_MS = 2000;

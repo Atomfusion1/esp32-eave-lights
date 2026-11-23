@@ -53,6 +53,8 @@ $ino  = "C:\Users\Admin\Desktop\ESP32_Eave_Lights\ESP32_Eave_Lights.ino"
 
 - Passing `--board` on the command line does not change the IDE's saved settings.
 - A warning about an invalid `MT6701` library is expected and harmless.
+- **Boot loop with `partition 3 invalid … exceeds flash chip`:** the IDE built with Flash Size 4MB. Set Tools → Flash Size → 16MB and upload again. To check what an IDE build actually used, look at `fqbn` in `%TEMP%\arduino_build_*\build.options.json`. (Verified 2026-11-23: the chip reads 16 MB flash and 8 MB embedded PSRAM with `esptool flash-id`.)
+- Use explicit `CRGB(r,g,b)` values for test colors. FastLED's `CRGB::Green` is (0,128,0).
 - After compiling, report the "Sketch uses … / Global variables use …" lines.
 - Only upload when the user asks: the board drives the house lights.
 

@@ -17,7 +17,7 @@
 
 #include <FastLED.h>
 
-#define FW_VERSION "0.1.1"
+#define FW_VERSION "0.1.2"
 
 // ---------- Outputs ----------
 #define NUM_LEDS        65
@@ -27,10 +27,10 @@
 #define NUM_OUTPUTS     2
 
 // ---------- Power caps (from one-strand measurements at 24 V) ----------
-#define CAP_RED         220
+#define CAP_RED         240
 #define CAP_GREEN       240
 #define CAP_BLUE        240
-#define CAP_CHANNEL_SUM 300  // white at 100+100+100 measured ~1.1 A per strand
+#define CAP_CHANNEL_SUM 400  // white ~133 each. Not yet measured (white 100 each = ~1.1 A per strand)
 
 // What effects draw into (full range, uncapped).
 CRGB frame[NUM_OUTPUTS][NUM_LEDS];
