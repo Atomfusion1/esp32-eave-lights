@@ -59,6 +59,10 @@ details[open] summary{margin-bottom:14px}
 .zoneRow:first-child{border-top:none}
 .zoneRow div{flex:1;min-width:0}
 .zoneRow small{display:block;color:var(--muted)}
+.zoneRow.click{cursor:pointer;border-radius:8px;padding-left:6px;padding-right:6px}
+.zoneRow.click:hover{background:var(--bg)}
+.zoneRow.showing{background:var(--accent);color:#fff}
+.zoneRow.showing small{color:#fff}
 .sub{border-top:1px solid var(--line);margin-top:16px;padding-top:14px}
 .stepRow{display:flex;gap:6px;align-items:center;margin-top:6px}
 .stepRow select{flex:1;min-width:0;padding:9px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:15px}
@@ -252,11 +256,13 @@ function show(s){st=s;
  $('bg').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',(b.dataset.bg==='1')===o.bgOn));
  $('bgColor').hidden=!o.bgOn;$('bgHint').hidden=!o.bgOn;$('bgColor').value=o.bgColor.toLowerCase();
  // setup
- $('zoneList').innerHTML=s.zones.map(z=>'<div class="zoneRow"><div>'+esc(z.name)+'<small>'+esc(z.ranges)+' · '+z.length+' lights</small></div>'+
+ $('zoneList').innerHTML=s.zones.map(z=>'<div class="zoneRow click'+(z.slot===showingZone?' showing':'')+'" data-show="'+z.slot+'" title="Click to light this zone white for 10 seconds"><div>'+esc(z.name)+
+  '<small>'+esc(z.ranges)+' · '+z.length+' lights'+(z.slot===showingZone?' · showing on the house…':'')+'</small></div>'+
   '<button class="btn" data-edit="'+z.slot+'">Edit</button><button class="btn danger" data-del="'+z.slot+'">Delete</button></div>').join('');
  $('noZones').hidden=s.zones.length>0;
- $('zoneList').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>startEdit(+b.dataset.edit));
- $('zoneList').querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>delZone(+b.dataset.del));
+ $('zoneList').querySelectorAll('[data-edit]').forEach(b=>b.onclick=e=>{e.stopPropagation();startEdit(+b.dataset.edit);});
+ $('zoneList').querySelectorAll('[data-del]').forEach(b=>b.onclick=e=>{e.stopPropagation();delZone(+b.dataset.del);});
+ $('zoneList').querySelectorAll('[data-show]').forEach(r=>r.onclick=()=>showZone(+r.dataset.show));
  $('pathList').innerHTML=s.paths.map(p=>'<div class="zoneRow"><div>'+esc(p.name)+'<small>'+esc(p.summary)+' · '+p.length+' positions</small></div>'+
   '<button class="btn" data-pedit="'+p.slot+'">Edit</button><button class="btn danger" data-pdel="'+p.slot+'">Delete</button></div>').join('');
  $('noPaths').hidden=s.paths.length>0;
@@ -379,6 +385,15 @@ $('fwGo').onclick=()=>{const f=$('fwFile').files[0];if(!f){$('fwStatus').textCon
 // ---- Find a light ----
 function findMax(){const o=st.outputs.find(x=>x.id===findStrand);return o?o.count:1;}
 function findNum(){return Math.min(findMax(),Math.max(1,parseInt($('findNum').value)||1));}
+// Click a zone in the list: its lights go white for 10 s, then back to normal.
+// Click the same zone again to stop early; click another to switch to it.
+const SHOW_SECONDS=10;let showingZone=-1,showTimer=null;
+async function showZone(slot){clearTimeout(showTimer);
+ if(showingZone===slot){showingZone=-1;await locate('');return;}
+ const z=zoneBySlot(slot);if(!z)return;showingZone=slot;
+ const j=await post('/api/locate',{ranges:z.ranges,seconds:SHOW_SECONDS,white:1});
+ if(j.error){showingZone=-1;showErr('zoneErr',j.error);}else{showErr('zoneErr');show(j);}
+ showTimer=setTimeout(async()=>{showingZone=-1;try{show(await (await fetch('/api/state')).json());}catch(e){}},SHOW_SECONDS*1000+300);}
 async function locate(ranges){const j=await post('/api/locate',ranges?{ranges}:{stop:1});if(j.error)$('status').textContent=j.error;else show(j);return j;}
 function findShow(){$('findNum').value=findNum();locate(findStrand+findNum());}
 $('findStrand').querySelectorAll('button').forEach(b=>b.onclick=()=>{findStrand=b.dataset.s;show(st);if(st.locate.active)findShow();});

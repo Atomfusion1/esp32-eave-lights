@@ -22,6 +22,7 @@
 //   POST /api/strands   a=67 b=65   strand lengths (1-300), saved. Returns the state.
 //   POST /api/firmware  multipart .bin + password field: wireless firmware update (ota.ino)
 //   POST /api/locate    ranges=A23 | A1-12,B30-65   light only those (auto-off after 5 min)
+//                       [seconds=1-300] shorter auto-off, [white=1] all white (no green first)
 //                       stop=1                      back to normal. Returns the state.
 //   POST /api/zones     action=save   [id=N] name=Porch ranges=A1-12   (no id = new zone)
 //                       action=delete id=N. Returns the state.
@@ -325,7 +326,10 @@ void handleLocate() {
   uint8_t count;
   const char* err = parseRanges(server.arg("ranges"), ranges, count);
   if (err) return sendError(err);
-  startLocate(ranges, count);
+  // seconds=1-300: how long to show (default 5 minutes); white=1: every light white
+  uint32_t timeoutMs = LOCATE_TIMEOUT_MS;
+  if (server.hasArg("seconds")) timeoutMs = (uint32_t)constrain(server.arg("seconds").toInt(), 1, 300) * 1000;
+  startLocate(ranges, count, timeoutMs, argIsTrue("white"));
   sendState();
 }
 
