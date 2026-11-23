@@ -11,7 +11,7 @@
 //   effects.ino         draws each channel's mode into frame[] each frame, layers, locate
 //   led_output.ino      strand setup, power caps, showFrame()
 //   locate.ino          "Find a light": lights chosen lights only, auto-off
-//   paths.ino           builds the Whole house path (B65 -> B1, A1 -> A65)
+//   paths.ino           Whole house path, and paths made from zones (/paths.bin)
 //   presets.ino         saved looks: named effect settings, stored in /presets.bin
 //   settings_store.ino  strand/house settings in Preferences; mounts the FAT storage
 //   test_pattern.ino    red/green/blue/white/off test cycle
@@ -37,7 +37,7 @@
 #error "Missing secrets.h: copy secrets.example.h to secrets.h and fill in your Wi-Fi details"
 #endif
 
-#define FW_VERSION "0.9.0"
+#define FW_VERSION "0.10.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
@@ -129,13 +129,43 @@ ZoneDef   zones[MAX_ZONES];
 PathPoint zonePoints[MAX_ZONES][HOUSE_PATH_LEN];  // each zone's lights in line order
 uint16_t  zoneLen[MAX_ZONES];                     // lights in each zone (0 if unused)
 
+// ---------- Paths made from zones ----------
+// A zone path is a name plus an ordered list of zones; each step can run its zone
+// reversed and add a gap of invisible lights after it (the effect "jumps").
+// Leaving a zone out of the path skips it.
+#define MAX_PATHS        8
+#define MAX_PATH_STEPS   12
+#define MAX_PATH_GAP     30
+#define MAX_PATH_LEN     (HOUSE_PATH_LEN + MAX_PATH_STEPS * MAX_PATH_GAP)
+#define VIRTUAL_OUTPUT   0xFF   // PathPoint.output for a gap position (no real light)
+
+struct PathStep {
+  uint8_t zone;       // zone slot
+  uint8_t reverse;    // 1 = run this zone's lights backwards
+  uint8_t gapAfter;   // invisible lights after this zone (0-MAX_PATH_GAP)
+};
+
+struct PathDef {
+  bool     used;
+  char     name[NAME_LEN];
+  uint8_t  stepCount;
+  PathStep steps[MAX_PATH_STEPS];
+};
+
+PathDef   pathDefs[MAX_PATHS];
+PathPoint pathPoints[MAX_PATHS][MAX_PATH_LEN];   // each path's positions in order
+uint16_t  pathLen[MAX_PATHS];                    // positions in each path, gaps included
+
 // ---------- Channels ----------
 // A channel is anything with its own LightState that draws effects:
-//   0 = strand A, 1 = strand B, CH_HOUSE = Whole house path, CH_ZONE0 + z = zone z.
-// Drawing order (later covers earlier): strands, Whole house (if on), zones (if on).
+//   0 = strand A, 1 = strand B, CH_HOUSE = Whole house path, CH_ZONE0 + z = zone z,
+//   CH_PATH0 + p = zone path p.
+// Drawing order (later covers earlier): strands, Whole house, zone paths, zones
+// (each only while on).
 #define CH_HOUSE     NUM_OUTPUTS
 #define CH_ZONE0     (NUM_OUTPUTS + 1)
-#define NUM_CHANNELS (CH_ZONE0 + MAX_ZONES)
+#define CH_PATH0     (CH_ZONE0 + MAX_ZONES)
+#define NUM_CHANNELS (CH_PATH0 + MAX_PATHS)
 
 // Defaults used on first boot (nothing saved yet). Zone states are set in initZones().
 LightState states[NUM_CHANNELS] = {
@@ -146,6 +176,9 @@ LightState states[NUM_CHANNELS] = {
 // A new zone starts as steady warm white, off.
 const LightState ZONE_DEFAULT_STATE =
   { false, CRGB(255, 160, 60), 160, MODE_SOLID, 5, 64, 10, 5, false, false, CRGB(16, 32, 64) };
+// A new zone path starts as an orange comet, off.
+const LightState PATH_DEFAULT_STATE =
+  { false, CRGB(255, 140, 40), 128, MODE_COMET, 5, 64, 20, 8, false, false, CRGB(16, 32, 64) };
 
 // ---------- Saved looks (presets) ----------
 // A named copy of a channel's settings (everything except on/off), e.g. "Xmas chase".
@@ -203,9 +236,11 @@ void setup() {
 
   initPaths();
   initZones();
+  initZonePaths();
   loadState();
   startStorage();
   loadZones();
+  loadZonePaths();   // after zones: paths are built from them
   loadPresets();
   startWifi();
   startWeb();

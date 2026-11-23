@@ -135,6 +135,7 @@ const char* saveZone(int id, const String& name, const String& rangesStr, int& n
   zd.rangeCount = count;
   for (int r = 0; r < count; r++) zd.ranges[r] = ranges[r];
   rebuildZone(id);
+  rebuildAllZonePaths();   // paths follow the zone's new lights
   resetPhase(CH_ZONE0 + id);
 
   markStateChanged();
@@ -149,6 +150,7 @@ const char* deleteZone(int id) {
   zones[id].rangeCount = 0;
   states[CH_ZONE0 + id] = ZONE_DEFAULT_STATE;
   rebuildZone(id);
+  rebuildAllZonePaths();   // paths that used this zone skip it now
   markStateChanged();
   return nullptr;
 }

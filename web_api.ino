@@ -2,11 +2,14 @@
 //
 //   GET  /              control page
 //   GET  /api/state     {"version", "storage", "outputs":[A,B], "house":{...},
-//                        "zones":[{"id":"z0","name","ranges","length",...}], "locate":{...}}
+//                        "zones":[{"id":"z0","name","ranges","length",...}],
+//                        "paths":[{"id":"p0","name","summary","steps":[...],"length",...}],
+//                        "locate":{...}}
 //   POST /api/state     form-encoded body or URL query, any of:
-//                         output=all|a|b|house|z<N>  what to change (default all = both
-//                                strands; "all" also lines up their fades/movement).
-//                                house = Whole house path, z<N> = zone slot N.
+//                         output=all|a|b|house|z<N>|p<N>  what to change (default all =
+//                                both strands; "all" also lines up their fades/movement).
+//                                house = Whole house path, z<N> = zone slot N,
+//                                p<N> = zone path slot N.
 //                         on=0|1  color=RRGGBB  brightness=0-255
 //                         mode=solid|fade|test|chase|comet
 //                         fadeSeconds=2-60  fadeMin=0-255
@@ -18,6 +21,9 @@
 //   POST /api/locate    ranges=A23 | A1-12,B30-65   light only those (auto-off after 5 min)
 //                       stop=1                      back to normal. Returns the state.
 //   POST /api/zones     action=save   [id=N] name=Porch ranges=A1-12   (no id = new zone)
+//                       action=delete id=N. Returns the state.
+//   POST /api/paths     action=save   [id=N] name=Front sweep steps=0:0:0,2:1:3
+//                         steps = zone slot : reverse 0|1 : gap lights after (0-30), in order
 //                       action=delete id=N. Returns the state.
 //   GET  /api/presets   {"presets":[{"id","name","mode","color","bgOn","bgColor"}]}
 //   POST /api/presets   action=save   name=Xmas output=<as above>   save its settings
@@ -82,6 +88,34 @@ String stateJson() {
     json += zoneLen[z];
     json += ",";
     json += channelFieldsJson(CH_ZONE0 + z);
+    json += "}";
+  }
+  json += "],\"paths\":[";
+  first = true;
+  for (int p = 0; p < MAX_PATHS; p++) {
+    if (!pathDefs[p].used) continue;
+    if (!first) json += ",";
+    first = false;
+    json += "{\"id\":\"p";
+    json += p;
+    json += "\",\"slot\":";
+    json += p;
+    json += ",\"name\":\"";
+    json += pathDefs[p].name;
+    json += "\",\"summary\":\"";
+    json += pathStepsText(p);
+    json += "\",\"steps\":[";
+    for (int s = 0; s < pathDefs[p].stepCount; s++) {
+      const PathStep& st = pathDefs[p].steps[s];
+      char buf[48];
+      snprintf(buf, sizeof(buf), "%s{\"zone\":%u,\"reverse\":%s,\"gap\":%u}",
+               s ? "," : "", st.zone, st.reverse ? "true" : "false", st.gapAfter);
+      json += buf;
+    }
+    json += "],\"length\":";
+    json += pathLen[p];
+    json += ",";
+    json += channelFieldsJson(CH_PATH0 + p);
     json += "}";
   }
   json += "],\"locate\":{\"active\":";
@@ -151,6 +185,10 @@ bool parseTarget(int& target) {
   if (v.length() >= 2 && v[0] == 'z') {
     int z = v.substring(1).toInt();
     if (z >= 0 && z < MAX_ZONES && zones[z].used) { target = CH_ZONE0 + z; return true; }
+  }
+  if (v.length() >= 2 && v[0] == 'p') {
+    int p = v.substring(1).toInt();
+    if (p >= 0 && p < MAX_PATHS && pathDefs[p].used) { target = CH_PATH0 + p; return true; }
   }
   return false;
 }
@@ -286,6 +324,22 @@ void handleZones() {
   sendState();
 }
 
+void handlePaths() {
+  String action = server.arg("action");
+  int id = server.hasArg("id") && server.arg("id").length() ? server.arg("id").toInt() : -1;
+  const char* err = nullptr;
+  if (action == "save") {
+    int newId;
+    err = saveZonePath(id, server.arg("name"), server.arg("steps"), newId);
+  } else if (action == "delete") {
+    err = deleteZonePath(id);
+  } else {
+    err = "action must be save or delete";
+  }
+  if (err) return sendError(err);
+  sendState();
+}
+
 void handleGetPresets() {
   server.send(200, "application/json", presetsJson());
 }
@@ -332,6 +386,7 @@ void startWeb() {
   server.on("/api/frame", HTTP_GET, handleGetFrame);
   server.on("/api/locate", HTTP_POST, handleLocate);
   server.on("/api/zones", HTTP_POST, handleZones);
+  server.on("/api/paths", HTTP_POST, handlePaths);
   server.on("/api/presets", HTTP_GET, handleGetPresets);
   server.on("/api/presets", HTTP_POST, handlePresets);
   server.onNotFound([]() { server.send(404, "text/plain", "Not found"); });

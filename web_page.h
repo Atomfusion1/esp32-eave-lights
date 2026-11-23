@@ -60,6 +60,12 @@ details[open] summary{margin-bottom:14px}
 .zoneRow div{flex:1;min-width:0}
 .zoneRow small{display:block;color:var(--muted)}
 .sub{border-top:1px solid var(--line);margin-top:16px;padding-top:14px}
+.stepRow{display:flex;gap:6px;align-items:center;margin-top:6px}
+.stepRow select{flex:1;min-width:0;padding:9px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:15px}
+.stepRow input{width:58px;flex:0 0 58px;padding:9px 6px}
+.stepRow .btn{padding:9px 10px}
+.stepHead{display:flex;gap:6px;color:var(--muted);font-size:11px;margin-top:8px}
+.stepHead span:first-child{flex:1}
 </style></head><body><main>
 <h1>Eave Lights</h1>
 
@@ -105,7 +111,7 @@ details[open] summary{margin-bottom:14px}
 <p class="hint">Below about 20% the dim end may show steps.</p>
 </div>
 
-<div class="card"><details id="setup"><summary>Setup: find lights &amp; zones</summary>
+<div class="card"><details id="setup"><summary>Setup: find lights, zones &amp; paths</summary>
 <h2>Find a light</h2>
 <p class="hint" style="margin:0 0 10px">Lights only the chosen light (green) so you can see where it is. Turns itself off after 5 minutes.</p>
 <div class="seg" id="findStrand"><button data-s="A">Strand A (left)</button><button data-s="B">Strand B (right)</button></div>
@@ -129,22 +135,40 @@ details[open] summary{margin-bottom:14px}
 <p class="err" id="zoneErr" hidden></p>
 </div>
 </div>
+
+<div class="sub">
+<h2>Paths</h2>
+<p class="hint" style="margin:0 0 10px">A path runs an effect through zones in the order you pick. ⇄ runs a zone backwards. <b>Gap</b> adds invisible lights after a zone so the effect disappears for a moment, like a jump. Leave a zone out to skip it.</p>
+<div id="pathList"></div>
+<p class="hint" id="noPaths">No paths yet.</p>
+<div class="sub">
+<label id="pathFormTitle">New path</label>
+<input id="pathName" type="text" placeholder="Name, e.g. Front sweep" maxlength="23">
+<div class="stepHead" id="stepHead" hidden><span>Zone (in order)</span><span style="width:40px">Rev</span><span style="width:58px">Gap after</span><span style="width:90px"></span></div>
+<div id="pathSteps"></div>
+<p class="hint" id="pathNeedsZones" hidden>Make some zones first.</p>
+<div class="row" style="margin-top:10px">
+<button class="btn" id="pathAdd">+ Add zone</button><button class="btn primary" id="pathSave">Save path</button><button class="btn" id="pathCancel" hidden>Cancel</button>
+</div>
+<p class="err" id="pathErr" hidden></p>
+</div>
+</div>
 <p class="err" id="storageWarn" hidden>Storage not found, so zones and saved looks are lost on restart. Use Tools → Partition Scheme → 16M Flash (3MB APP/9.9MB FATFS).</p>
 </details></div>
 
 <p class="status" id="status">Connecting…</p>
 </main><script>
 const $=id=>document.getElementById(id);let st=null,timer=null,looks=[],editZone=-1,findStrand='A';
-// sel = what the controls change: 0/1 strand A/B, BOTH, HOUSE, or ZONE+slot
-const BOTH=-1,HOUSE=-2,ZONE=100;
+// sel = what the controls change: 0/1 strand A/B, BOTH, HOUSE, ZONE+slot or PATH+slot
+const BOTH=-1,HOUSE=-2,ZONE=100,PATH=200;
 let sel=0;try{const v=localStorage.getItem('eaveSel');if(v!==null)sel=+v;}catch(e){}
 const pct=v=>Math.round(v/2.55)+'%';
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const both=()=>sel===BOTH,house=()=>sel===HOUSE,zoneSel=()=>sel>=ZONE;
-const zoneBySlot=n=>st.zones.find(z=>z.slot===n);
-function cur(){return house()?st.house:zoneSel()?zoneBySlot(sel-ZONE):st.outputs[both()?0:sel];}
-function target(){return house()?'house':both()?'all':zoneSel()?'z'+(sel-ZONE):st.outputs[sel].id;}
-function curName(){return house()?'Whole house':both()?'Both strands':zoneSel()?cur().name:'Strand '+cur().id;}
+const both=()=>sel===BOTH,house=()=>sel===HOUSE,pathSel=()=>sel>=PATH,zoneSel=()=>sel>=ZONE&&sel<PATH;
+const zoneBySlot=n=>st.zones.find(z=>z.slot===n),pathBySlot=n=>st.paths.find(p=>p.slot===n);
+function cur(){return house()?st.house:pathSel()?pathBySlot(sel-PATH):zoneSel()?zoneBySlot(sel-ZONE):st.outputs[both()?0:sel];}
+function target(){return house()?'house':both()?'all':pathSel()?'p'+(sel-PATH):zoneSel()?'z'+(sel-ZONE):st.outputs[sel].id;}
+function curName(){return house()?'Whole house':both()?'Both strands':(zoneSel()||pathSel())?cur().name:'Strand '+cur().id;}
 function anyOn(){return st.outputs.some(o=>o.on);}
 function pick(i){sel=i;try{localStorage.setItem('eaveSel',i);}catch(e){}show(st);}
 function tab(i,dot,name,sub){return '<button data-i="'+i+'" class="'+(i===sel?'sel':'')+'">'+
@@ -152,19 +176,21 @@ function tab(i,dot,name,sub){return '<button data-i="'+i+'" class="'+(i===sel?'s
 function showErr(id,msg){$(id).textContent=msg||'';$(id).hidden=!msg;}
 
 function show(s){st=s;
- if((zoneSel()&&!zoneBySlot(sel-ZONE))||(sel>=0&&sel<ZONE&&sel>=s.outputs.length)||(sel<HOUSE))sel=0;
- const h=s.house,zonesOn=s.zones.filter(z=>z.on);
- const coverStrands=(h.on?['Whole house']:[]).concat(zonesOn.map(z=>z.name));
+ if((zoneSel()&&!zoneBySlot(sel-ZONE))||(pathSel()&&!pathBySlot(sel-PATH))||(sel>=0&&sel<ZONE&&sel>=s.outputs.length)||(sel<HOUSE))sel=0;
+ const h=s.house,zonesOn=s.zones.filter(z=>z.on),pathsOn=s.paths.filter(p=>p.on);
+ const coverStrands=(h.on?['Whole house']:[]).concat(pathsOn.map(p=>p.name),zonesOn.map(z=>z.name));
  const over=h.on?' · covered':'';
  $('tabs').innerHTML=s.outputs.map((o,i)=>tab(i,o.on?o.color:'','Strand '+o.id,'GPIO '+o.gpio+' · '+(o.on?'on':'off')+over)).join('')+
   tab(BOTH,'','Both strands',(s.outputs.every(o=>o.on)?'all on':anyOn()?'some on':'all off')+over)+
   tab(HOUSE,h.on?h.color:'','Whole house',(h.reverse?'left → right':'right → left')+' · '+(h.on?'on':'off'))+
+  s.paths.map(p=>tab(PATH+p.slot,p.on?p.color:'',p.name,'path · '+p.length+' · '+(p.on?'on':'off'))).join('')+
   s.zones.map(z=>tab(ZONE+z.slot,z.on?z.color:'',z.name,z.ranges+' · '+(z.on?'on':'off'))).join('');
  $('tabs').querySelectorAll('button').forEach(b=>b.onclick=()=>pick(+b.dataset.i));
  const o=cur();
  let hint='';
  if(house())hint='One '+h.length+'-light line across the front: B65 (far right) → controller → A65 (far left). While on, it covers Strand A and B'+(zonesOn.length?'; zones that are on ('+zonesOn.map(z=>z.name).join(', ')+') are drawn on top':'')+'.';
  else if(zoneSel())hint=o.length+' lights: '+o.ranges+'. While on, drawn on top of everything else.';
+ else if(pathSel())hint='Path: '+o.summary+' ('+o.length+' positions incl. gaps). Zones that are on are drawn on top of it.';
  else if(coverStrands.length)hint='Drawn on top of the strands right now: '+coverStrands.join(', ')+'.';
  else if(!both()&&!o.enabled)hint='This strand is turned off in the firmware (ENABLE_OUTPUT_B).';
  $('tabHint').textContent=hint;$('tabHint').hidden=!hint;
@@ -174,6 +200,7 @@ function show(s){st=s;
  $('lookTarget').textContent='· tap to apply to '+curName();
  const [fwd,rev]=house()?['Right → left','Left → right']
   :zoneSel()?['As listed ('+o.ranges+')','Reversed']
+  :pathSel()?['In path order','Reversed']
   :o.id==='A'?['Light 1 → 65 (outward, left)','Light 65 → 1 (inward)']
   :o.id==='B'?['Light 1 → 65 (outward, right)','Light 65 → 1 (inward)']
   :['Outward from controller','Inward to controller'];
@@ -196,6 +223,12 @@ function show(s){st=s;
  $('noZones').hidden=s.zones.length>0;
  $('zoneList').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>startEdit(+b.dataset.edit));
  $('zoneList').querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>delZone(+b.dataset.del));
+ $('pathList').innerHTML=s.paths.map(p=>'<div class="zoneRow"><div>'+esc(p.name)+'<small>'+esc(p.summary)+' · '+p.length+' positions</small></div>'+
+  '<button class="btn" data-pedit="'+p.slot+'">Edit</button><button class="btn danger" data-pdel="'+p.slot+'">Delete</button></div>').join('');
+ $('noPaths').hidden=s.paths.length>0;
+ $('pathList').querySelectorAll('[data-pedit]').forEach(b=>b.onclick=()=>startPathEdit(+b.dataset.pedit));
+ $('pathList').querySelectorAll('[data-pdel]').forEach(b=>b.onclick=()=>delPath(+b.dataset.pdel));
+ renderSteps();
  $('storageWarn').hidden=s.storage;
  $('findStrand').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',b.dataset.s===findStrand));
  $('locateBanner').hidden=!s.locate.active;
@@ -258,6 +291,37 @@ $('zoneSave').onclick=async()=>{const p={action:'save',name:$('zoneName').value,
  const j=await post('/api/zones',p);if(j.error){showErr('zoneErr',j.error);return;}
  if(j.locate.active)await locate('');resetZoneForm();show(j);};
 $('zoneCancel').onclick=resetZoneForm;
+
+// ---- Paths ----
+let editPath=-1,steps=[];  // steps: {zone, reverse, gap} while building a path
+function renderSteps(){if(!st)return;
+ const zs=st.zones;$('pathNeedsZones').hidden=zs.length>0;$('stepHead').hidden=!steps.length;
+ $('pathSteps').innerHTML=steps.map((s,i)=>'<div class="stepRow"><select data-z="'+i+'">'+
+  zs.map(z=>'<option value="'+z.slot+'"'+(z.slot===s.zone?' selected':'')+'>'+esc(z.name)+' ('+esc(z.ranges)+')</option>').join('')+
+  (zs.some(z=>z.slot===s.zone)?'':'<option selected value="-1">(deleted zone)</option>')+'</select>'+
+  '<button class="btn'+(s.reverse?' primary':'')+'" data-r="'+i+'" title="Run this zone backwards">⇄</button>'+
+  '<input type="number" min="0" max="30" value="'+s.gap+'" data-g="'+i+'" title="Invisible lights after this zone">'+
+  '<button class="btn" data-u="'+i+'" title="Move up"'+(i?'':' disabled')+'>↑</button>'+
+  '<button class="btn danger" data-x="'+i+'" title="Remove">×</button></div>').join('');
+ const q=a=>$('pathSteps').querySelectorAll('['+a+']');
+ q('data-z').forEach(e=>e.onchange=()=>{steps[+e.dataset.z].zone=+e.value;});
+ q('data-r').forEach(e=>e.onclick=()=>{const s=steps[+e.dataset.r];s.reverse=!s.reverse;renderSteps();});
+ q('data-g').forEach(e=>e.onchange=()=>{steps[+e.dataset.g].gap=Math.min(30,Math.max(0,parseInt(e.value)||0));});
+ q('data-u').forEach(e=>e.onclick=()=>{const i=+e.dataset.u;[steps[i-1],steps[i]]=[steps[i],steps[i-1]];renderSteps();});
+ q('data-x').forEach(e=>e.onclick=()=>{steps.splice(+e.dataset.x,1);renderSteps();});}
+function resetPathForm(){editPath=-1;steps=[];$('pathName').value='';$('pathFormTitle').textContent='New path';$('pathCancel').hidden=true;showErr('pathErr');renderSteps();}
+function startPathEdit(slot){const p=pathBySlot(slot);editPath=slot;$('pathName').value=p.name;
+ steps=p.steps.map(s=>({zone:s.zone,reverse:s.reverse,gap:s.gap}));
+ $('pathFormTitle').textContent='Edit path: '+p.name;$('pathCancel').hidden=false;showErr('pathErr');renderSteps();$('pathName').focus();}
+async function delPath(slot){const p=pathBySlot(slot);if(!confirm('Delete path "'+p.name+'"?'))return;
+ const j=await post('/api/paths',{action:'delete',id:slot});if(j.error)showErr('pathErr',j.error);else{if(editPath===slot)resetPathForm();show(j);}}
+$('pathAdd').onclick=()=>{const zs=st.zones;if(!zs.length){showErr('pathErr','Make some zones first.');return;}
+ const used=steps.map(s=>s.zone),next=zs.find(z=>!used.includes(z.slot))||zs[0];
+ steps.push({zone:next.slot,reverse:false,gap:0});renderSteps();};
+$('pathSave').onclick=async()=>{const p={action:'save',name:$('pathName').value,steps:steps.map(s=>s.zone+':'+(s.reverse?1:0)+':'+s.gap).join(',')};
+ if(editPath>=0)p.id=editPath;const j=await post('/api/paths',p);if(j.error){showErr('pathErr',j.error);return;}
+ resetPathForm();show(j);};
+$('pathCancel').onclick=resetPathForm;
 
 fetch('/api/state').then(r=>r.json()).then(show).catch(()=>$('status').textContent='Not connected');
 fetch('/api/presets').then(r=>r.json()).then(j=>showLooks(j.presets)).catch(()=>{});

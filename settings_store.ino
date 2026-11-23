@@ -26,11 +26,12 @@ uint32_t colorToRgb(CRGB c) {
   return ((uint32_t)c.r << 16) | ((uint32_t)c.g << 8) | c.b;
 }
 
-// "A", "B", "House" or the zone's name — for Serial messages.
+// "A", "B", "House", or the zone's / path's name — for Serial messages.
 const char* channelName(int ch) {
   static const char* names[CH_ZONE0] = { "A", "B", "House" };
   if (ch < CH_ZONE0) return names[ch];
-  return zones[ch - CH_ZONE0].name;
+  if (ch < CH_PATH0) return zones[ch - CH_ZONE0].name;
+  return pathDefs[ch - CH_PATH0].name;
 }
 
 // Builds "a_on" etc. for channel o ('a' = strand A, 'b' = strand B, 'c' = Whole house).
@@ -124,7 +125,8 @@ void handleStateSave() {
   }
   prefs.end();
 
-  // Zone settings (on/off, color, ...) live in the zones file, so write it too.
+  // Zone and path settings (on/off, color, ...) live in their files, so write them too.
   saveZonesFile();
+  saveZonePathsFile();
   Serial.println("State saved");
 }

@@ -72,7 +72,8 @@ ESP32_Eave_Lights/              folder name must equal the main sketch name
                                 layers strands → Whole house → zones, then Find-a-light overlay
   led_output.ino                strand setup, power caps, showFrame()
   locate.ino                    Find a light: show only chosen ranges, 5-min auto-off
-  paths.ino                     builds path light orders (Whole house: B65→B1, A1→A65)
+  paths.ino                     Whole house path (B65→B1, A1→A65) and paths made from
+                                zones (steps: zone, reverse, gap) in /paths.bin
   presets.ino                   saved looks (name + LightState) in /presets.bin
   settings_store.ino            strand/house settings in Preferences, delayed save;
                                 mounts FFat storage
@@ -96,14 +97,14 @@ How the IDE handles tabs:
 - Name tabs in lowercase snake_case after the task.
 - **Exception: web page text goes in a `.h` file** (`web_page.h`). The IDE scans `.ino` tabs to generate prototypes and mistakes JavaScript `function name(){` lines inside a raw string for C++, which breaks the build with "'function' does not name a type".
 - Save `.ino` files as UTF-8 **without** a byte-order mark. PowerShell 5.1 `Set-Content -Encoding utf8` adds one and the compiler rejects it.
-- `.bin` storage files have a `FileHeader` with the record size. Changing `LightState`, `ZoneDef` or `Preset` makes old files unreadable, and zones/saved looks start empty. Warn the user before changing those structs.
+- `.bin` storage files have a `FileHeader` with the record size. Changing `LightState`, `ZoneDef`, `PathDef`/`PathStep` or `Preset` makes old files unreadable, and zones/saved looks start empty. Warn the user before changing those structs.
 
 Standalone throwaway test sketches go in their own folder under `tests/<name>/<name>.ino`, so they never get compiled into the main sketch.
 
 ## Firmware rules (from the handoff)
 
 - LED color order is **`RBG`**, chipset `WS2811`. Never change it to `GRB`.
-- Output A = GPIO 8 (tested). Output B = GPIO 9 (`ENABLE_OUTPUT_B 1`; pin verified with strand A in v0.3.0, the installed strand B not yet connected). Each **channel** has its own `LightState` in `states[]`: 0 = strand A, 1 = strand B, `CH_HOUSE` = Whole house path (v0.7+). Effects draw on a channel's "line" through `lineLength()`/`lineLight()`, so they work the same on strands and paths. The house path is drawn after the strands and covers them while on; zones (`CH_ZONE0 + slot`, up to 12) are drawn after that. Zones and saved looks are stored on the FFat partition, so the **16M Flash (3MB APP/9.9MB FATFS)** partition scheme is required. The API's `output=all` changes both strands (not paths) and lines up their phases.
+- Output A = GPIO 8 (tested). Output B = GPIO 9 (`ENABLE_OUTPUT_B 1`; pin verified with strand A in v0.3.0, the installed strand B not yet connected). Each **channel** has its own `LightState` in `states[]`: 0 = strand A, 1 = strand B, `CH_HOUSE` = Whole house path (v0.7+). Effects draw on a channel's "line" through `lineLength()`/`lineLight()`, so they work the same on strands and paths. Drawing order while on: strands → Whole house → zone paths (`CH_PATH0 + slot`, up to 8) → zones (`CH_ZONE0 + slot`, up to 12). Zone-path gap positions use `VIRTUAL_OUTPUT` and draw to a hidden `gapSink`. Paths are rebuilt whenever a zone changes. Zones and saved looks are stored on the FFat partition, so the **16M Flash (3MB APP/9.9MB FATFS)** partition scheme is required. The API's `output=all` changes both strands (not paths) and lines up their phases.
 - Every frame goes through `showFrame()` so the power caps are always applied. Never call `FastLED.show()` on raw colors.
 - `initOutputs()` stays the first line of `setup()` (sends OFF).
 - No blocking `delay()` in `loop()`. Use `millis()` timing.

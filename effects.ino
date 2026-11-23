@@ -34,13 +34,20 @@ void resetPhase(int ch) {
 int lineLength(int ch) {
   if (ch < NUM_OUTPUTS) return NUM_LEDS;
   if (ch == CH_HOUSE)   return HOUSE_PATH_LEN;
-  return zoneLen[ch - CH_ZONE0];
+  if (ch < CH_PATH0)    return zoneLen[ch - CH_ZONE0];
+  return pathLen[ch - CH_PATH0];
 }
+
+// Where gap positions of a path draw to: a light that is never shown.
+CRGB gapSink;
 
 // The physical light at position i of channel ch's line.
 CRGB& lineLight(int ch, int i) {
   if (ch < NUM_OUTPUTS) return frame[ch][i];
-  const PathPoint& p = (ch == CH_HOUSE) ? housePath[i] : zonePoints[ch - CH_ZONE0][i];
+  const PathPoint& p = (ch == CH_HOUSE) ? housePath[i]
+                     : (ch < CH_PATH0)  ? zonePoints[ch - CH_ZONE0][i]
+                                        : pathPoints[ch - CH_PATH0][i];
+  if (p.output == VIRTUAL_OUTPUT) return gapSink;
   return frame[p.output][p.index];
 }
 
@@ -167,13 +174,16 @@ void renderFrame() {
   lastFrameMs = now;
 
   // Layers, later ones cover earlier ones:
-  // strands, then Whole house while on, then each zone that is on (e.g. a steady porch
-  // stays steady while a Whole house comet passes behind it).
+  // strands, then Whole house while on, then zone paths that are on, then zones that
+  // are on (e.g. a steady porch stays steady while a comet passes behind it).
   for (int o = 0; o < NUM_OUTPUTS; o++) {
     drawChannel(o, dtMs);
   }
   if (states[CH_HOUSE].on) {
     drawChannel(CH_HOUSE, dtMs);
+  }
+  for (int p = 0; p < MAX_PATHS; p++) {
+    if (pathDefs[p].used && states[CH_PATH0 + p].on) drawChannel(CH_PATH0 + p, dtMs);
   }
   for (int z = 0; z < MAX_ZONES; z++) {
     if (zones[z].used && states[CH_ZONE0 + z].on) drawChannel(CH_ZONE0 + z, dtMs);
