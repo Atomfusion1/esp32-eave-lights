@@ -1,0 +1,29 @@
+# PlatformIO / build output
+.pio/
+build/
+*.bin
+*.elf
+*.map
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+
+# Secrets — never commit Wi-Fi credentials
+secrets.h
+**/secrets.h
+*.env
+.env*
+
+# Full-size house photos stay out of git
+photos/
+*.jpg
+*.jpeg
+*.png
+*.heic
+
+# Web tooling
+node_modules/
+dist/
