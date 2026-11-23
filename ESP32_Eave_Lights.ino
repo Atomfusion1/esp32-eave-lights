@@ -37,7 +37,7 @@
 // ---------- Outputs ----------
 #define NUM_LEDS        65
 #define PIN_OUTPUT_A    8   // tested
-#define PIN_OUTPUT_B    9   // being tested (2026-11-23)
+#define PIN_OUTPUT_B    9   // pin tested 2026-11-23 with strand A moved over; strand B itself untested
 #define ENABLE_OUTPUT_B 1   // 1 = drive GPIO 9 too; both outputs currently show the same thing
 #define NUM_OUTPUTS     2
 

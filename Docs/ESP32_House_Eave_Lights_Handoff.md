@@ -31,7 +31,7 @@ The system should be extensible: initially 2 physical outputs × 65 LEDs, but av
 | Toolchain | **Portable Arduino IDE 1.8.19** at `D:\00 Programming\01 Arduino\arduino-1.8.19 ESP 3.0` (ESP32 core 3.3.12, FastLED 3.10.10). `ESP32_Eave_Lights.ino` must stay in the repo root. Code is split into one `.ino` tab per task. See [AGENTS.md](../AGENTS.md). |
 | Board settings | ESP32S3 Dev Module · USB CDC On Boot: **Disabled** (COM13 is the board's CH343 USB-serial chip) · Flash Size: 16MB · Partition: 16M Flash (3MB APP/9.9MB FATFS) · PSRAM: OPI PSRAM. |
 | Output A | GPIO 8, 65 LEDs, WS2811, `RBG` (tested). |
-| Output B | GPIO 9 (planned, **untested**). Present in code, disabled by a compile flag until strand B is wired. GPIO 8/9 are the Arduino default I2C pins: any future I2C device must use other pins explicitly. |
+| Output B | GPIO 9. **Pin verified 2026-11-23** (v0.3.0) by moving strand A's data from GPIO 8 to 9: test cycle, fade and web control all correct. The installed strand B itself is still untested. Enabled in code; currently mirrors output A. GPIO 8/9 are the Arduino default I2C pins: any future I2C device must use other pins explicitly. |
 | Startup | Lights showing white at power-up until the ESP32 boots is **accepted**. Firmware sends OFF as the first thing in `setup()`. No 24 V power switch planned. |
 | Power limit | Per-color caps: red 240, green 240, blue 240; mixed colors limited to a channel sum of 400 (white ≈ 133 each). White at 100 each measured 1.1 A per strand; white at 133 each (v0.1.2 test pattern) measured **1.26 A** per strand (2026-11-23, one strand). |
 | Data wiring | Direct 3.3 V for now. **74AHCT125 not yet purchased**; required before permanent outdoor install. |
@@ -142,7 +142,7 @@ void loop() {
                         |
           +-------------+-------------+
           |                           |
-     GPIO 8 (tested)          second GPIO (TBD)
+     GPIO 8 (tested)          GPIO 9 (pin tested)
           |                           |
       74AHCT125 buffer channels, 5 V powered (preferred for permanent use)
           |                           |
@@ -315,7 +315,7 @@ This is a proposed structure only. Keep implementation incremental; do not build
 2. **Final wire topology:** House photo and exact wire directions/LED locations not yet supplied; don't invent zone addresses or route geometry.
 3. **Power:** Confirm whether original 24 V/2 A was per strand; measure current for both branches at full intended RGB/white brightness, and size PSU/wires/fuses based on real ratings.
 4. **Startup white:** Need a designed way to prevent unintended white during power application or controller boot (early OFF data and possibly switched 24 V load power). Avoid shorting signal lines to ground as a control method.
-5. **GPIO:** Only GPIO 8 has been directly tested on ESP32-S3; second output pin is TBD.
+5. **GPIO:** ~~Second output pin TBD.~~ Resolved: GPIO 8 and GPIO 9 both tested with strand A (2026-11-23). Remaining: connect the installed strand B to GPIO 9 and test it.
 6. **Signal integrity:** Direct 3.3 V succeeded on short bench wiring; prefer 74AHCT125 5 V buffer for long installed wires and test with oscilloscope.
 7. **Weatherproofing:** Physical connectors/enclosure and waterproof routing are pending; damaged Y-splitter must not be reused until fixed.
 8. **Remote:** Original IR carrier frequency/protocol not yet decoded. WLED is an alternative firmware if preferred, but a highly custom house-layout designer may warrant custom firmware/software.

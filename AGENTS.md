@@ -89,7 +89,7 @@ Standalone throwaway test sketches go in their own folder under `tests/<name>/<n
 ## Firmware rules (from the handoff)
 
 - LED color order is **`RBG`**, chipset `WS2811`. Never change it to `GRB`.
-- Output A = GPIO 8 (tested). Output B = GPIO 9 (`ENABLE_OUTPUT_B 1` since v0.3.0, under test). Both outputs currently mirror each other.
+- Output A = GPIO 8 (tested). Output B = GPIO 9 (`ENABLE_OUTPUT_B 1`; pin verified with strand A in v0.3.0, the installed strand B not yet connected). Both outputs currently mirror each other.
 - Every frame goes through `showFrame()` so the power caps are always applied. Never call `FastLED.show()` on raw colors.
 - `initOutputs()` stays the first line of `setup()` (sends OFF).
 - No blocking `delay()` in `loop()`. Use `millis()` timing.
