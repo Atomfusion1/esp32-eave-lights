@@ -1,15 +1,23 @@
-// settings_store — keeps each channel's light state (strands A, B and Whole house) in flash
-// (ESP32 Preferences / NVS), so the lights come back the way they were after a
-// power cut or reboot. Saves are delayed SAVE_DELAY_MS after the last change, so
-// dragging a slider doesn't write flash dozens of times.
+// settings_store — keeps the strand A, B and Whole house settings in flash (ESP32
+// Preferences / NVS), so the lights come back the way they were after a power cut or
+// reboot. Zone settings are saved with the zones in /zones.bin (zones.ino).
+// Saves are delayed SAVE_DELAY_MS after the last change, so dragging a slider doesn't
+// write flash dozens of times.
 //
-// Keys per output: "<a|b>_on", "_col", "_bri", "_mode", "_fsec", "_fmin", "_spd", "_size", "_rev", "_bgon", "_bgc".
+// Also mounts the FAT storage area (the 9.9 MB "ffat" partition) used for zones and
+// saved looks.
+//
+// Keys per channel: "<a|b|c>_on", "_col", "_bri", "_mode", "_fsec", "_fmin", "_spd",
+// "_size", "_rev", "_bgon", "_bgc" (a = strand A, b = strand B, c = Whole house).
 // Versions before 0.4.0 used one set of keys without a prefix ("on", "color", ...);
 // those are used as the defaults, so both strands start from the old saved state.
 
 Preferences prefs;
 const char*    PREFS_NAMESPACE = "eave";
 const uint32_t SAVE_DELAY_MS   = 2000;
+
+// Channels kept in Preferences: strands and Whole house (zones live in /zones.bin).
+#define PREFS_CHANNELS CH_ZONE0
 
 bool     stateDirty   = false;
 uint32_t stateDirtyMs = 0;
@@ -18,10 +26,11 @@ uint32_t colorToRgb(CRGB c) {
   return ((uint32_t)c.r << 16) | ((uint32_t)c.g << 8) | c.b;
 }
 
-// "A", "B", "House" — for Serial messages.
+// "A", "B", "House" or the zone's name — for Serial messages.
 const char* channelName(int ch) {
-  static const char* names[NUM_CHANNELS] = { "A", "B", "House" };
-  return names[ch];
+  static const char* names[CH_ZONE0] = { "A", "B", "House" };
+  if (ch < CH_ZONE0) return names[ch];
+  return zones[ch - CH_ZONE0].name;
 }
 
 // Builds "a_on" etc. for channel o ('a' = strand A, 'b' = strand B, 'c' = Whole house).
@@ -29,6 +38,18 @@ const char* outputKey(int o, const char* name) {
   static char key[16];
   snprintf(key, sizeof(key), "%c_%s", 'a' + o, name);
   return key;
+}
+
+// Mounts the FAT storage area. Formats it the first time (takes a few seconds once).
+void startStorage() {
+  storageOk = FFat.begin(true);
+  if (storageOk) {
+    Serial.printf("Storage: %u KB free of %u KB\n",
+                  (unsigned)(FFat.freeBytes() / 1024), (unsigned)(FFat.totalBytes() / 1024));
+  } else {
+    Serial.println("Storage: FAT partition not found. Zones and saved looks won't be kept.");
+    Serial.println("         Tools > Partition Scheme > 16M Flash (3MB APP/9.9MB FATFS)");
+  }
 }
 
 void loadState() {
@@ -44,7 +65,7 @@ void loadState() {
   old.fadeSeconds = prefs.getUChar("fsec", old.fadeSeconds);
   old.fadeMin     = prefs.getUChar("fmin", old.fadeMin);
 
-  for (int o = 0; o < NUM_CHANNELS; o++) {
+  for (int o = 0; o < PREFS_CHANNELS; o++) {
     LightState& s = states[o];
     // The house path is newer than the single-state keys: use its own defaults.
     if (o >= NUM_OUTPUTS) old = s;
@@ -65,7 +86,7 @@ void loadState() {
   prefs.end();
 
   Serial.println("State loaded:");
-  for (int o = 0; o < NUM_CHANNELS; o++) {
+  for (int o = 0; o < PREFS_CHANNELS; o++) {
     const LightState& s = states[o];
     Serial.printf("  %s: %s, #%02X%02X%02X, brightness %u, mode %u, fade %us min %u, "
                   "speed %u size %u %s, background %s #%02X%02X%02X\n",
@@ -76,7 +97,7 @@ void loadState() {
   }
 }
 
-// Call after changing `states`; the save happens a little later in handleStateSave().
+// Call after changing `states` or zones; the save happens a little later in handleStateSave().
 void markStateChanged() {
   stateDirty = true;
   stateDirtyMs = millis();
@@ -87,7 +108,7 @@ void handleStateSave() {
   stateDirty = false;
 
   prefs.begin(PREFS_NAMESPACE, false);
-  for (int o = 0; o < NUM_CHANNELS; o++) {
+  for (int o = 0; o < PREFS_CHANNELS; o++) {
     const LightState& s = states[o];
     prefs.putBool(outputKey(o, "on"), s.on);
     prefs.putUInt(outputKey(o, "col"), colorToRgb(s.color));
@@ -102,5 +123,8 @@ void handleStateSave() {
     prefs.putUInt(outputKey(o, "bgc"), colorToRgb(s.bgColor));
   }
   prefs.end();
+
+  // Zone settings (on/off, color, ...) live in the zones file, so write it too.
+  saveZonesFile();
   Serial.println("State saved");
 }

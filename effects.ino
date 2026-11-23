@@ -32,13 +32,15 @@ void resetPhase(int ch) {
 }
 
 int lineLength(int ch) {
-  return ch < NUM_OUTPUTS ? NUM_LEDS : HOUSE_PATH_LEN;
+  if (ch < NUM_OUTPUTS) return NUM_LEDS;
+  if (ch == CH_HOUSE)   return HOUSE_PATH_LEN;
+  return zoneLen[ch - CH_ZONE0];
 }
 
 // The physical light at position i of channel ch's line.
 CRGB& lineLight(int ch, int i) {
   if (ch < NUM_OUTPUTS) return frame[ch][i];
-  const PathPoint& p = housePath[i];
+  const PathPoint& p = (ch == CH_HOUSE) ? housePath[i] : zonePoints[ch - CH_ZONE0][i];
   return frame[p.output][p.index];
 }
 
@@ -52,7 +54,7 @@ void fillLine(int ch, CRGB c) {
 // 8-bit step is a big jump down there.
 uint8_t fadeLevel(int ch, uint32_t dtMs) {
   const LightState& s = states[ch];
-  uint32_t periodMs = (uint32_t)s.fadeSeconds * 1000;
+  uint32_t periodMs = (uint32_t)max((int)s.fadeSeconds, FADE_SECONDS_MIN) * 1000;
   fadePhase[ch] += (uint16_t)((dtMs * 65536UL) / periodMs);
   // sin8 gives 0-255; start each breath at the bottom (phase offset of 3/4 turn)
   uint8_t wave = sin8((uint8_t)((fadePhase[ch] >> 8) + 192));
@@ -164,12 +166,21 @@ void renderFrame() {
   uint32_t dtMs = now - lastFrameMs;
   lastFrameMs = now;
 
-  // Strands first, then the house path on top while it is on.
+  // Layers, later ones cover earlier ones:
+  // strands, then Whole house while on, then each zone that is on (e.g. a steady porch
+  // stays steady while a Whole house comet passes behind it).
   for (int o = 0; o < NUM_OUTPUTS; o++) {
     drawChannel(o, dtMs);
   }
   if (states[CH_HOUSE].on) {
     drawChannel(CH_HOUSE, dtMs);
   }
+  for (int z = 0; z < MAX_ZONES; z++) {
+    if (zones[z].used && states[CH_ZONE0 + z].on) drawChannel(CH_ZONE0 + z, dtMs);
+  }
+
+  // Find a light: replaces everything with just the chosen lights.
+  if (locateActive) drawLocate();
+
   showFrame();
 }

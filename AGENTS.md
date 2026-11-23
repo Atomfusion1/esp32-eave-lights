@@ -65,16 +65,24 @@ The user prefers **separate `.ino` files (IDE tabs) for different tasks** instea
 ```text
 ESP32_Eave_Lights/              folder name must equal the main sketch name
   ESP32_Eave_Lights.ino         MAIN: must stay in the repo root, never move or rename.
-                                defines, includes, LightState/Mode types, states[] per output,
-                                globals, setup(), loop()
-  effects.ino                   draws the current mode (solid/fade/test) into frame[] at 50 fps
+                                defines, includes, all shared types (LightState, PathPoint,
+                                ZoneDef, Preset, FileHeader), states[] per channel, globals,
+                                setup(), loop()
+  effects.ino                   draws each channel (solid/fade/test/chase/comet) at 50 fps,
+                                layers strands → Whole house → zones, then Find-a-light overlay
   led_output.ino                strand setup, power caps, showFrame()
+  locate.ino                    Find a light: show only chosen ranges, 5-min auto-off
   paths.ino                     builds path light orders (Whole house: B65→B1, A1→A65)
-  settings_store.ino            saves/loads LightState in flash (Preferences), delayed save
+  presets.ino                   saved looks (name + LightState) in /presets.bin
+  settings_store.ino            strand/house settings in Preferences, delayed save;
+                                mounts FFat storage
   test_pattern.ino              red/green/blue/white/off test cycle
-  web_api.ino                   control page + JSON API (GET/POST /api/state),
-                                live view via GET /api/frame (binary copy of out[])
+  web_api.ino                   JSON API: /api/state, /api/frame, /api/locate, /api/zones,
+                                /api/presets (endpoint list at the top of the file)
+  web_page.h                    the control page HTML/CSS/JS (see exception below)
   wifi.ino                      home Wi-Fi, hotspot fallback, mDNS eavelights.local
+  zones.ino                     zones (name + light ranges + settings) in /zones.bin,
+                                range text parser ("A1-12, B30-65")
   secrets.h                     Wi-Fi passwords, gitignored (copy from secrets.example.h)
   <task>.ino                    add new tasks the same way
   Docs/                         handoff and notes (ignored by the compiler)
@@ -86,13 +94,16 @@ How the IDE handles tabs:
 - Functions can be called from any tab, because the IDE generates prototypes automatically. A `struct` or `enum` can't be used before the tab that defines it. Keep a type inside the tab that uses it, or define it in the main `.ino` if several tabs use it.
 - Keep `setup()` and `loop()` in the main `.ino`, and have them call one function per task (`initOutputs()`, `runTestPattern()` …).
 - Name tabs in lowercase snake_case after the task.
+- **Exception: web page text goes in a `.h` file** (`web_page.h`). The IDE scans `.ino` tabs to generate prototypes and mistakes JavaScript `function name(){` lines inside a raw string for C++, which breaks the build with "'function' does not name a type".
+- Save `.ino` files as UTF-8 **without** a byte-order mark. PowerShell 5.1 `Set-Content -Encoding utf8` adds one and the compiler rejects it.
+- `.bin` storage files have a `FileHeader` with the record size. Changing `LightState`, `ZoneDef` or `Preset` makes old files unreadable, and zones/saved looks start empty. Warn the user before changing those structs.
 
 Standalone throwaway test sketches go in their own folder under `tests/<name>/<name>.ino`, so they never get compiled into the main sketch.
 
 ## Firmware rules (from the handoff)
 
 - LED color order is **`RBG`**, chipset `WS2811`. Never change it to `GRB`.
-- Output A = GPIO 8 (tested). Output B = GPIO 9 (`ENABLE_OUTPUT_B 1`; pin verified with strand A in v0.3.0, the installed strand B not yet connected). Each **channel** has its own `LightState` in `states[]`: 0 = strand A, 1 = strand B, `CH_HOUSE` = Whole house path (v0.7+). Effects draw on a channel's "line" through `lineLength()`/`lineLight()`, so they work the same on strands and paths. The house path is drawn after the strands and covers them while on. The API's `output=all` changes both strands (not paths) and lines up their phases.
+- Output A = GPIO 8 (tested). Output B = GPIO 9 (`ENABLE_OUTPUT_B 1`; pin verified with strand A in v0.3.0, the installed strand B not yet connected). Each **channel** has its own `LightState` in `states[]`: 0 = strand A, 1 = strand B, `CH_HOUSE` = Whole house path (v0.7+). Effects draw on a channel's "line" through `lineLength()`/`lineLight()`, so they work the same on strands and paths. The house path is drawn after the strands and covers them while on; zones (`CH_ZONE0 + slot`, up to 12) are drawn after that. Zones and saved looks are stored on the FFat partition, so the **16M Flash (3MB APP/9.9MB FATFS)** partition scheme is required. The API's `output=all` changes both strands (not paths) and lines up their phases.
 - Every frame goes through `showFrame()` so the power caps are always applied. Never call `FastLED.show()` on raw colors.
 - `initOutputs()` stays the first line of `setup()` (sends OFF).
 - No blocking `delay()` in `loop()`. Use `millis()` timing.

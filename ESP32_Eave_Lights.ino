@@ -4,17 +4,21 @@
 //   Board: ESP32S3 Dev Module
 //   USB CDC On Boot: Disabled    (COM13 is the CH343 USB-serial chip, Serial = UART0)
 //   Flash Size: 16MB
-//   Partition Scheme: 16M Flash (3MB APP/9.9MB FATFS)
+//   Partition Scheme: 16M Flash (3MB APP/9.9MB FATFS)   <- zones/looks are stored there
 //   PSRAM: OPI PSRAM
 //
 // Tabs (the IDE joins them after this file, in alphabetical order):
-//   effects.ino         draws each channel's mode into frame[] each frame
+//   effects.ino         draws each channel's mode into frame[] each frame, layers, locate
 //   led_output.ino      strand setup, power caps, showFrame()
+//   locate.ino          "Find a light": lights chosen lights only, auto-off
 //   paths.ino           builds the Whole house path (B65 -> B1, A1 -> A65)
-//   settings_store.ino  saves/loads the light state in flash (survives power cuts)
+//   presets.ino         saved looks: named effect settings, stored in /presets.bin
+//   settings_store.ino  strand/house settings in Preferences; mounts the FAT storage
 //   test_pattern.ino    red/green/blue/white/off test cycle
-//   web_api.ino         web page + JSON API on port 80
+//   web_api.ino         JSON API on port 80
+//   web_page.h          the control page (HTML/CSS/JS) — a .h on purpose, see below
 //   wifi.ino            home Wi-Fi with hotspot fallback, mDNS name
+//   zones.ino           zones: named light ranges with their own settings, /zones.bin
 //
 // All #defines, #includes, shared types and globals live in this file so every tab can use them.
 //
@@ -25,6 +29,7 @@
 #include <ESPmDNS.h>
 #include <WebServer.h>
 #include <Preferences.h>
+#include <FFat.h>
 
 #if __has_include("secrets.h")
 #include "secrets.h"
@@ -32,7 +37,7 @@
 #error "Missing secrets.h: copy secrets.example.h to secrets.h and fill in your Wi-Fi details"
 #endif
 
-#define FW_VERSION "0.8.1"
+#define FW_VERSION "0.9.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
@@ -90,8 +95,7 @@ const bool  OUTPUT_ENABLED[NUM_OUTPUTS] = { true, ENABLE_OUTPUT_B };
 
 // ---------- Paths ----------
 // A path is an ordered list of physical lights. An effect on a path draws along it as
-// one line, crossing strands wherever the path does. Later, zones and editor-made paths
-// will be built the same way.
+// one line, crossing strands wherever the path does.
 struct PathPoint {
   uint8_t  output;   // 0 = A, 1 = B
   uint16_t index;    // 0-based light on that strand (light 1 = index 0)
@@ -101,18 +105,81 @@ struct PathPoint {
 #define HOUSE_PATH_LEN (NUM_OUTPUTS * NUM_LEDS)
 PathPoint housePath[HOUSE_PATH_LEN];
 
+// ---------- Zones ----------
+// A zone is a name plus up to MAX_ZONE_RANGES light ranges, e.g. "Porch" = A1-12.
+// Its lights form one line in range order; a range with first > last runs backwards.
+#define MAX_ZONES        12
+#define MAX_ZONE_RANGES  6
+#define NAME_LEN         24   // zone and saved-look names, including the ending 0
+
+struct ZoneRange {
+  uint8_t output;   // 0 = A, 1 = B
+  uint8_t first;    // 0-based, inclusive
+  uint8_t last;     // 0-based, inclusive; first > last = runs backwards
+};
+
+struct ZoneDef {
+  bool      used;
+  char      name[NAME_LEN];
+  uint8_t   rangeCount;
+  ZoneRange ranges[MAX_ZONE_RANGES];
+};
+
+ZoneDef   zones[MAX_ZONES];
+PathPoint zonePoints[MAX_ZONES][HOUSE_PATH_LEN];  // each zone's lights in line order
+uint16_t  zoneLen[MAX_ZONES];                     // lights in each zone (0 if unused)
+
 // ---------- Channels ----------
 // A channel is anything with its own LightState that draws effects:
-//   0 = strand A, 1 = strand B, CH_HOUSE = Whole house path.
-// While the house path is on, it is drawn after the strands and covers them.
+//   0 = strand A, 1 = strand B, CH_HOUSE = Whole house path, CH_ZONE0 + z = zone z.
+// Drawing order (later covers earlier): strands, Whole house (if on), zones (if on).
 #define CH_HOUSE     NUM_OUTPUTS
-#define NUM_CHANNELS (NUM_OUTPUTS + 1)
+#define CH_ZONE0     (NUM_OUTPUTS + 1)
+#define NUM_CHANNELS (CH_ZONE0 + MAX_ZONES)
 
-// Defaults used on first boot (nothing saved yet).
+// Defaults used on first boot (nothing saved yet). Zone states are set in initZones().
 LightState states[NUM_CHANNELS] = {
   { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64, 10, 5, false, false, CRGB(16, 32, 64) },  // strand A
   { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64, 10, 5, false, false, CRGB(16, 32, 64) },  // strand B
   { false, CRGB(255, 140, 40), 128, MODE_COMET, 5, 64, 20, 8, false, false, CRGB(16, 32, 64) },  // Whole house
+};
+// A new zone starts as steady warm white, off.
+const LightState ZONE_DEFAULT_STATE =
+  { false, CRGB(255, 160, 60), 160, MODE_SOLID, 5, 64, 10, 5, false, false, CRGB(16, 32, 64) };
+
+// ---------- Saved looks (presets) ----------
+// A named copy of a channel's settings (everything except on/off), e.g. "Xmas chase".
+#define MAX_PRESETS 32
+
+struct Preset {
+  bool       used;
+  char       name[NAME_LEN];
+  LightState look;
+};
+
+Preset presets[MAX_PRESETS];
+
+// ---------- Find a light ----------
+// While active, only these lights are lit (first light of each range green, rest white).
+bool      locateActive = false;
+uint8_t   locateCount = 0;
+ZoneRange locateRanges[MAX_ZONE_RANGES];
+uint32_t  locateStartMs = 0;
+
+// The control page (HTML/CSS/JS). Kept in a .h file, not a .ino tab, because the IDE
+// scans .ino tabs for functions and mistakes the page's JavaScript for C++.
+#include "web_page.h"
+
+// ---------- Storage ----------
+bool storageOk = false;   // true once the FAT storage area is mounted
+
+// Start of /zones.bin and /presets.bin. A file whose recordSize doesn't match the
+// current structs (firmware changed them) is ignored instead of read as garbage.
+struct FileHeader {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t recordSize;
+  uint16_t count;
 };
 
 void setup() {
@@ -135,7 +202,11 @@ void setup() {
                 ESP.getPsramSize() / (1024 * 1024));
 
   initPaths();
+  initZones();
   loadState();
+  startStorage();
+  loadZones();
+  loadPresets();
   startWifi();
   startWeb();
 }
@@ -143,6 +214,7 @@ void setup() {
 void loop() {
   handleWifi();
   handleWeb();
+  handleLocateTimeout();
   renderFrame();
   handleStateSave();
 }
