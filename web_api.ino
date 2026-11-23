@@ -12,6 +12,7 @@
 //                       mode=solid|fade|test|chase|comet
 //                       fadeSeconds=2-60  fadeMin=0-255
 //                       speed=1-100 (lights/s)  size=1-30  reverse=0|1
+//                       bgOn=0|1  bgColor=RRGGBB   (chase/comet background)
 //                     Invalid values change nothing and return 400. Returns the new state.
 //   GET  /api/frame   the exact colors being sent to the LEDs right now (after power caps),
 //                     binary: [outputs][leds low byte][leds high byte] then R,G,B per LED,
@@ -26,13 +27,15 @@ const char* MODE_NAMES[MODE_COUNT] = { "solid", "fade", "test", "chase", "comet"
 // The settings fields shared by strands and paths, without braces.
 String channelFieldsJson(int ch) {
   const LightState& s = states[ch];
-  char buf[220];
+  char buf[300];
   snprintf(buf, sizeof(buf),
            "\"on\":%s,\"color\":\"#%02X%02X%02X\",\"brightness\":%u,\"mode\":\"%s\","
-           "\"fadeSeconds\":%u,\"fadeMin\":%u,\"speed\":%u,\"size\":%u,\"reverse\":%s",
+           "\"fadeSeconds\":%u,\"fadeMin\":%u,\"speed\":%u,\"size\":%u,\"reverse\":%s,"
+           "\"bgOn\":%s,\"bgColor\":\"#%02X%02X%02X\"",
            s.on ? "true" : "false", s.color.r, s.color.g, s.color.b, s.brightness,
            MODE_NAMES[s.mode], s.fadeSeconds, s.fadeMin, s.speed, s.size,
-           s.reverse ? "true" : "false");
+           s.reverse ? "true" : "false",
+           s.bgOn ? "true" : "false", s.bgColor.r, s.bgColor.g, s.bgColor.b);
   return String(buf);
 }
 
@@ -66,6 +69,18 @@ void handleGetState() {
   server.send(200, "application/json", stateJson());
 }
 
+// Reads an "RRGGBB" or "#RRGGBB" argument. Returns false if it isn't 6 hex digits.
+bool parseColorArg(const char* name, CRGB& result) {
+  String v = server.arg(name);
+  if (v.startsWith("#")) v = v.substring(1);
+  if (v.length() != 6) return false;
+  for (unsigned int i = 0; i < 6; i++) {
+    if (!isxdigit((unsigned char)v[i])) return false;
+  }
+  result = CRGB((uint32_t)strtoul(v.c_str(), nullptr, 16));
+  return true;
+}
+
 void handleSetState() {
   // ---- 1. Parse and validate everything first, so a bad value changes nothing ----
   int target = -1;  // -1 = both strands, else a channel number
@@ -81,12 +96,11 @@ void handleSetState() {
 
   bool hasColor = server.hasArg("color");
   CRGB newColor;
-  if (hasColor) {
-    String v = server.arg("color");
-    if (v.startsWith("#")) v = v.substring(1);
-    if (v.length() != 6) return sendError("color must be RRGGBB");
-    newColor = CRGB((uint32_t)strtoul(v.c_str(), nullptr, 16));
-  }
+  if (hasColor && !parseColorArg("color", newColor)) return sendError("color must be RRGGBB");
+
+  bool hasBgColor = server.hasArg("bgColor");
+  CRGB newBgColor;
+  if (hasBgColor && !parseColorArg("bgColor", newBgColor)) return sendError("bgColor must be RRGGBB");
 
   bool hasMode = server.hasArg("mode");
   Mode newMode = MODE_SOLID;
@@ -142,6 +156,12 @@ void handleSetState() {
       s.reverse = (v == "1" || v == "true");
       changed = true;
     }
+    if (server.hasArg("bgOn")) {
+      String v = server.arg("bgOn");
+      s.bgOn = (v == "1" || v == "true" || v == "on");
+      changed = true;
+    }
+    if (hasBgColor) { s.bgColor = newBgColor; changed = true; }
   }
 
   // Changing both strands together: keep their fades and movement in step.
@@ -224,6 +244,10 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 <label style="margin-top:14px"><span id="sizeName"></span>: <span id="sizeVal"></span></label><input id="size" type="range" min="1" max="30">
 <label style="margin-top:14px">Direction</label>
 <div class="seg" id="dir"><button data-rev="0">Light 1 → 65</button><button data-rev="1">Light 65 → 1</button></div>
+<label style="margin-top:14px">Background (lights between / behind the effect)</label>
+<div class="seg" id="bg"><button data-bg="0">Off</button><button data-bg="1">On</button></div>
+<input id="bgColor" type="color" style="margin-top:10px" hidden>
+<p class="hint" id="bgHint" hidden>Uses the same brightness. Lights every light, so it adds current.</p>
 </div>
 <div class="card" id="fadeCard" hidden>
 <label>Fade speed: <span id="fsecVal"></span> per breath</label><input id="fsec" type="range" min="2" max="60">
@@ -274,6 +298,8 @@ function show(s){st=s;if(sel>=s.outputs.length||sel<HOUSE)sel=0;
  $('sizeName').textContent=o.mode==='comet'?'Tail length':'Lit block length';
  $('size').value=o.size;$('sizeVal').textContent=o.size+(o.size===1?' light':' lights');
  $('dir').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',(b.dataset.rev==='1')===o.reverse));
+ $('bg').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',(b.dataset.bg==='1')===o.bgOn));
+ $('bgColor').hidden=!o.bgOn;$('bgHint').hidden=!o.bgOn;$('bgColor').value=o.bgColor.toLowerCase();
  $('status').textContent='Connected · v'+s.version;}
 async function send(p){if(!st)return;p.output=house()?'house':both()?'all':st.outputs[sel].id;
  try{const r=await fetch('/api/state',{method:'POST',body:new URLSearchParams(p)});const j=await r.json();
@@ -290,6 +316,8 @@ $('fmin').oninput=e=>{$('fminVal').textContent=pct(e.target.value);sendSoon({fad
 $('spd').oninput=e=>{$('spdVal').textContent=e.target.value+' lights/s';sendSoon({speed:e.target.value});};
 $('size').oninput=e=>{$('sizeVal').textContent=e.target.value+(e.target.value==='1'?' light':' lights');sendSoon({size:e.target.value});};
 $('dir').querySelectorAll('button').forEach(b=>b.onclick=()=>send({reverse:b.dataset.rev}));
+$('bg').querySelectorAll('button').forEach(b=>b.onclick=()=>send({bgOn:b.dataset.bg}));
+$('bgColor').oninput=e=>sendSoon({bgColor:e.target.value.slice(1)});
 fetch('/api/state').then(r=>r.json()).then(show).catch(()=>$('status').textContent='Not connected');
 
 // ---- Live view: polls /api/frame, one request at a time, ~10 per second ----

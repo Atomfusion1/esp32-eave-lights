@@ -67,19 +67,31 @@ uint32_t advanceMotion(int ch, uint32_t dtMs, uint32_t period) {
   return motionPos[ch];
 }
 
-// Sets line position i of channel ch to its color at `level` (0-255) times its brightness.
+// Sets line position i of channel ch for a moving effect. level 0-255 is how much of
+// the effect color shows: 255 = full color, 0 = background (or off if background is off).
+// In between, the color blends into the background (comet tail).
 void setLight(int ch, int i, uint8_t level) {
   const LightState& s = states[ch];
   int len = lineLength(ch);
   // reverse: position 0 of the effect is the last light on the line
   CRGB& light = lineLight(ch, s.reverse ? (len - 1 - i) : i);
-  if (level == 0) {
-    light = CRGB(0, 0, 0);
+
+  if (!s.bgOn) {
+    if (level == 0) {
+      light = CRGB(0, 0, 0);
+      return;
+    }
+    CRGB c = s.color;
+    c.nscale8_video(scale8(s.brightness, level));
+    light = c;
     return;
   }
-  CRGB c = s.color;
-  c.nscale8_video(scale8(s.brightness, level));
-  light = c;
+
+  CRGB fg = s.color;
+  fg.nscale8_video(s.brightness);
+  CRGB bg = s.bgColor;
+  bg.nscale8_video(s.brightness);
+  light = blend(bg, fg, level);
 }
 
 // Chase: blocks of `size` lit lights, then `size` dark, repeating and moving.

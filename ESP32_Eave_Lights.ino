@@ -32,7 +32,7 @@
 #error "Missing secrets.h: copy secrets.example.h to secrets.h and fill in your Wi-Fi details"
 #endif
 
-#define FW_VERSION "0.7.1"
+#define FW_VERSION "0.8.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
@@ -73,6 +73,8 @@ struct LightState {
   uint8_t speed;        // chase/comet: lights per second (SPEED_MIN-SPEED_MAX)
   uint8_t size;         // chase: lit block length; comet: tail length (SIZE_MIN-SIZE_MAX)
   bool    reverse;      // chase/comet: false = moves from light 1 toward light 65
+  bool    bgOn;         // chase/comet: true = unlit lights show bgColor instead of off
+  CRGB    bgColor;      // chase/comet background, also scaled by brightness
 };
 
 #define FADE_SECONDS_MIN 2
@@ -108,9 +110,9 @@ PathPoint housePath[HOUSE_PATH_LEN];
 
 // Defaults used on first boot (nothing saved yet).
 LightState states[NUM_CHANNELS] = {
-  { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64, 10, 5, false },   // strand A
-  { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64, 10, 5, false },   // strand B
-  { false, CRGB(255, 140, 40), 128, MODE_COMET, 5, 64, 20, 8, false },   // Whole house
+  { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64, 10, 5, false, false, CRGB(16, 32, 64) },  // strand A
+  { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64, 10, 5, false, false, CRGB(16, 32, 64) },  // strand B
+  { false, CRGB(255, 140, 40), 128, MODE_COMET, 5, 64, 20, 8, false, false, CRGB(16, 32, 64) },  // Whole house
 };
 
 void setup() {

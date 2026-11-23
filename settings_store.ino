@@ -3,7 +3,7 @@
 // power cut or reboot. Saves are delayed SAVE_DELAY_MS after the last change, so
 // dragging a slider doesn't write flash dozens of times.
 //
-// Keys per output: "<a|b>_on", "_col", "_bri", "_mode", "_fsec", "_fmin", "_spd", "_size", "_rev".
+// Keys per output: "<a|b>_on", "_col", "_bri", "_mode", "_fsec", "_fmin", "_spd", "_size", "_rev", "_bgon", "_bgc".
 // Versions before 0.4.0 used one set of keys without a prefix ("on", "color", ...);
 // those are used as the defaults, so both strands start from the old saved state.
 
@@ -59,6 +59,8 @@ void loadState() {
     s.speed       = constrain(prefs.getUChar(outputKey(o, "spd"), s.speed), SPEED_MIN, SPEED_MAX);
     s.size        = constrain(prefs.getUChar(outputKey(o, "size"), s.size), SIZE_MIN, SIZE_MAX);
     s.reverse     = prefs.getBool(outputKey(o, "rev"), s.reverse);
+    s.bgOn        = prefs.getBool(outputKey(o, "bgon"), s.bgOn);
+    s.bgColor     = CRGB(prefs.getUInt(outputKey(o, "bgc"), colorToRgb(s.bgColor)));
   }
   prefs.end();
 
@@ -66,10 +68,11 @@ void loadState() {
   for (int o = 0; o < NUM_CHANNELS; o++) {
     const LightState& s = states[o];
     Serial.printf("  %s: %s, #%02X%02X%02X, brightness %u, mode %u, fade %us min %u, "
-                  "speed %u size %u %s\n",
+                  "speed %u size %u %s, background %s #%02X%02X%02X\n",
                   channelName(o), s.on ? "ON" : "OFF", s.color.r, s.color.g, s.color.b,
                   s.brightness, s.mode, s.fadeSeconds, s.fadeMin,
-                  s.speed, s.size, s.reverse ? "reverse" : "forward");
+                  s.speed, s.size, s.reverse ? "reverse" : "forward",
+                  s.bgOn ? "on" : "off", s.bgColor.r, s.bgColor.g, s.bgColor.b);
   }
 }
 
@@ -95,6 +98,8 @@ void handleStateSave() {
     prefs.putUChar(outputKey(o, "spd"), s.speed);
     prefs.putUChar(outputKey(o, "size"), s.size);
     prefs.putBool(outputKey(o, "rev"), s.reverse);
+    prefs.putBool(outputKey(o, "bgon"), s.bgOn);
+    prefs.putUInt(outputKey(o, "bgc"), colorToRgb(s.bgColor));
   }
   prefs.end();
   Serial.println("State saved");
