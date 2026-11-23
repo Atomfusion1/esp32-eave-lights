@@ -31,7 +31,7 @@
 #error "Missing secrets.h: copy secrets.example.h to secrets.h and fill in your Wi-Fi details"
 #endif
 
-#define FW_VERSION "0.4.1"
+#define FW_VERSION "0.5.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------

@@ -71,7 +71,8 @@ ESP32_Eave_Lights/              folder name must equal the main sketch name
   led_output.ino                strand setup, power caps, showFrame()
   settings_store.ino            saves/loads LightState in flash (Preferences), delayed save
   test_pattern.ino              red/green/blue/white/off test cycle
-  web_api.ino                   control page + JSON API (GET/POST /api/state)
+  web_api.ino                   control page + JSON API (GET/POST /api/state),
+                                live view via GET /api/frame (binary copy of out[])
   wifi.ino                      home Wi-Fi, hotspot fallback, mDNS eavelights.local
   secrets.h                     Wi-Fi passwords, gitignored (copy from secrets.example.h)
   <task>.ino                    add new tasks the same way

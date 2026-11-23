@@ -8,6 +8,9 @@
 //                       on=0|1  color=RRGGBB  brightness=0-255  mode=solid|fade|test
 //                       fadeSeconds=2-60  fadeMin=0-255
 //                     Invalid values change nothing and return 400. Returns the new state.
+//   GET  /api/frame   the exact colors being sent to the LEDs right now (after power caps),
+//                     binary: [outputs][leds low byte][leds high byte] then R,G,B per LED,
+//                     output A's LEDs first. The page polls this for the live view.
 //
 // No login: anyone on the same network can use it. Fine on a home network.
 
@@ -115,6 +118,25 @@ void handleSetState() {
   server.send(200, "application/json", stateJson());
 }
 
+// Live view: copies out[] (what FastLED is sending, after caps) into one binary reply.
+// out[] holds plain RGB; the RBG reorder for the strand happens later inside FastLED.
+void handleGetFrame() {
+  static uint8_t buf[3 + NUM_OUTPUTS * NUM_LEDS * 3];
+  size_t n = 0;
+  buf[n++] = NUM_OUTPUTS;
+  buf[n++] = NUM_LEDS & 0xFF;
+  buf[n++] = NUM_LEDS >> 8;
+  for (int o = 0; o < NUM_OUTPUTS; o++) {
+    for (int i = 0; i < NUM_LEDS; i++) {
+      buf[n++] = out[o][i].r;
+      buf[n++] = out[o][i].g;
+      buf[n++] = out[o][i].b;
+    }
+  }
+  server.sendHeader("Cache-Control", "no-store");
+  server.send_P(200, "application/octet-stream", (const char*)buf, n);
+}
+
 const char INDEX_HTML[] PROGMEM = R"rawhtml(<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -137,6 +159,10 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .seg button.sel{border-color:var(--accent);background:var(--accent);color:#fff}
 .seg button small{display:block;font-size:11px;opacity:.8}
 #tabs button{padding:10px 6px}
+.live{background:#0b0b0a;border-radius:10px;padding:8px 6px}
+.liveRow{display:flex;align-items:center;gap:6px}
+.liveRow span{color:#8a8a84;font-size:11px;width:10px}
+.liveRow canvas{flex:1;height:22px;min-width:0}
 .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;border:1px solid rgba(128,128,128,.5);vertical-align:-1px}
 .status{color:var(--muted);font-size:13px;text-align:center}
 .hint{color:var(--muted);font-size:12px;margin:8px 0 0}
@@ -147,6 +173,8 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 <div class="seg" id="tabs"></div>
 <p class="hint" id="disabledHint" hidden>This strand is turned off in the firmware (ENABLE_OUTPUT_B).</p>
 </div>
+<div class="card"><label>Live view <span id="liveInfo"></span></label><div class="live" id="live"></div>
+<p class="hint">What the board is sending, light by light. Screen brightness is approximate.</p></div>
 <div class="card"><button id="power" class="power">…</button></div>
 <div class="card"><label>Color</label><input id="color" type="color"></div>
 <div class="card"><label>Brightness <span id="briVal"></span></label><input id="bri" type="range" min="0" max="255"></div>
@@ -198,6 +226,30 @@ $('modes').querySelectorAll('button').forEach(b=>b.onclick=()=>send({mode:b.data
 $('fsec').oninput=e=>{$('fsecVal').textContent=e.target.value+' s';sendSoon({fadeSeconds:e.target.value});};
 $('fmin').oninput=e=>{$('fminVal').textContent=pct(e.target.value);sendSoon({fadeMin:e.target.value});};
 fetch('/api/state').then(r=>r.json()).then(show).catch(()=>$('status').textContent='Not connected');
+
+// ---- Live view: polls /api/frame, one request at a time, ~10 per second ----
+// LED values are linear; the screen is gamma-encoded, so dim LED values are lifted to look similar.
+const GAM=new Uint8Array(256).map((_,v)=>Math.round(255*Math.pow(v/255,1/2.2)));
+let rows=[],frames=0,fpsT=performance.now();
+function buildRows(n){$('live').innerHTML='';rows=[];
+ for(let o=0;o<n;o++){const d=document.createElement('div');d.className='liveRow';
+  d.innerHTML='<span>'+String.fromCharCode(65+o)+'</span><canvas></canvas>';$('live').appendChild(d);rows.push(d.querySelector('canvas'));}}
+function drawFrame(b){const outs=b[0],leds=b[1]|(b[2]<<8);if(rows.length!==outs)buildRows(outs);
+ const dpr=window.devicePixelRatio||1;
+ for(let o=0;o<outs;o++){const cv=rows[o],w=cv.clientWidth,h=cv.clientHeight;
+  if(cv.width!==Math.round(w*dpr)){cv.width=Math.round(w*dpr);cv.height=Math.round(h*dpr);}
+  const g=cv.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,w,h);
+  const step=w/leds,r=Math.max(1.5,Math.min(step*0.38,7));
+  for(let i=0;i<leds;i++){const k=3+(o*leds+i)*3,R=b[k],G=b[k+1],B=b[k+2];
+   const lit=R|G|B;g.fillStyle=lit?'rgb('+GAM[R]+','+GAM[G]+','+GAM[B]+')':'#2a2a27';
+   g.shadowBlur=lit?r*2:0;g.shadowColor=g.fillStyle;
+   g.beginPath();g.arc(step*(i+0.5),h/2,r,0,Math.PI*2);g.fill();}}}
+async function pollFrame(){if(document.hidden){setTimeout(pollFrame,500);return;}
+ const t0=performance.now();
+ try{const r=await fetch('/api/frame',{cache:'no-store'});drawFrame(new Uint8Array(await r.arrayBuffer()));frames++;}catch(e){}
+ const now=performance.now();if(now-fpsT>=2000){$('liveInfo').textContent='· '+(frames*1000/(now-fpsT)).toFixed(1)+' updates/s';frames=0;fpsT=now;}
+ setTimeout(pollFrame,Math.max(0,100-(now-t0)));}
+pollFrame();
 </script></body></html>)rawhtml";
 
 void handleRoot() {
@@ -208,6 +260,7 @@ void startWeb() {
   server.on("/", HTTP_GET, handleRoot);
   server.on("/api/state", HTTP_GET, handleGetState);
   server.on("/api/state", HTTP_POST, handleSetState);
+  server.on("/api/frame", HTTP_GET, handleGetFrame);
   server.onNotFound([]() { server.send(404, "text/plain", "Not found"); });
   server.begin();
   Serial.println("Web: server started on port 80");
