@@ -28,8 +28,8 @@ The system should be extensible: initially 2 physical outputs × 65 LEDs, but av
 
 | Topic | Decision |
 |---|---|
-| Toolchain | **Arduino IDE.** `ESP32_Eave_Lights.ino` must stay in the repo root (IDE needs folder name = sketch name). Extra code goes in `.h`/`.cpp` files beside it. |
-| Board settings | ESP32S3 Dev Module · USB CDC On Boot: Enabled · Flash Size: 16MB · PSRAM: OPI PSRAM. |
+| Toolchain | **Portable Arduino IDE 1.8.19** at `D:\00 Programming\01 Arduino\arduino-1.8.19 ESP 3.0` (ESP32 core 3.3.12, FastLED 3.10.10). `ESP32_Eave_Lights.ino` must stay in the repo root. Code is split into one `.ino` tab per task. See [AGENTS.md](../AGENTS.md). |
+| Board settings | ESP32S3 Dev Module · USB CDC On Boot: **Disabled** (COM13 is the board's CH343 USB-serial chip) · Flash Size: 16MB · Partition: 16M Flash (3MB APP/9.9MB FATFS) · PSRAM: OPI PSRAM. |
 | Output A | GPIO 8, 65 LEDs, WS2811, `RBG` (tested). |
 | Output B | GPIO 9 (planned, **untested**). Present in code, disabled by a compile flag until strand B is wired. GPIO 8/9 are the Arduino default I2C pins: any future I2C device must use other pins explicitly. |
 | Startup | Lights showing white at power-up until the ESP32 boots is **accepted**. Firmware sends OFF as the first thing in `setup()`. No 24 V power switch planned. |
