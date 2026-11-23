@@ -1,8 +1,10 @@
 // paths — builds the light order for each path.
 //
-// Whole house: the strands leave the controller in a Y, so starting at the far end
-// of B and running back to the controller, then out along A, sweeps one end of the
-// house to the other:
+// Physical layout (facing the house): controller in the middle, strand A runs LEFT,
+// strand B runs RIGHT, light 1 of each next to the controller.
+//
+// Whole house: starting at the far right end of B, back to the controller, then out
+// along A to the far left end — one sweep across the front, right to left:
 //   path position 0..64   -> B65 .. B1  (B index 64 .. 0)
 //   path position 65..129 -> A1  .. A65 (A index 0 .. 64)
 
