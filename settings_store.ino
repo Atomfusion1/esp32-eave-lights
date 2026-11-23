@@ -1,4 +1,4 @@
-// settings_store — keeps each output's light state in flash
+// settings_store — keeps each channel's light state (strands A, B and Whole house) in flash
 // (ESP32 Preferences / NVS), so the lights come back the way they were after a
 // power cut or reboot. Saves are delayed SAVE_DELAY_MS after the last change, so
 // dragging a slider doesn't write flash dozens of times.
@@ -18,7 +18,13 @@ uint32_t colorToRgb(CRGB c) {
   return ((uint32_t)c.r << 16) | ((uint32_t)c.g << 8) | c.b;
 }
 
-// Builds "a_on" etc. for output o.
+// "A", "B", "House" — for Serial messages.
+const char* channelName(int ch) {
+  static const char* names[NUM_CHANNELS] = { "A", "B", "House" };
+  return names[ch];
+}
+
+// Builds "a_on" etc. for channel o ('a' = strand A, 'b' = strand B, 'c' = Whole house).
 const char* outputKey(int o, const char* name) {
   static char key[16];
   snprintf(key, sizeof(key), "%c_%s", 'a' + o, name);
@@ -38,8 +44,10 @@ void loadState() {
   old.fadeSeconds = prefs.getUChar("fsec", old.fadeSeconds);
   old.fadeMin     = prefs.getUChar("fmin", old.fadeMin);
 
-  for (int o = 0; o < NUM_OUTPUTS; o++) {
+  for (int o = 0; o < NUM_CHANNELS; o++) {
     LightState& s = states[o];
+    // The house path is newer than the single-state keys: use its own defaults.
+    if (o >= NUM_OUTPUTS) old = s;
     s.on          = prefs.getBool(outputKey(o, "on"), old.on);
     s.color       = CRGB(prefs.getUInt(outputKey(o, "col"), colorToRgb(old.color)));
     s.brightness  = prefs.getUChar(outputKey(o, "bri"), old.brightness);
@@ -55,11 +63,11 @@ void loadState() {
   prefs.end();
 
   Serial.println("State loaded:");
-  for (int o = 0; o < NUM_OUTPUTS; o++) {
+  for (int o = 0; o < NUM_CHANNELS; o++) {
     const LightState& s = states[o];
-    Serial.printf("  %c: %s, #%02X%02X%02X, brightness %u, mode %u, fade %us min %u, "
+    Serial.printf("  %s: %s, #%02X%02X%02X, brightness %u, mode %u, fade %us min %u, "
                   "speed %u size %u %s\n",
-                  OUTPUT_LETTERS[o], s.on ? "ON" : "OFF", s.color.r, s.color.g, s.color.b,
+                  channelName(o), s.on ? "ON" : "OFF", s.color.r, s.color.g, s.color.b,
                   s.brightness, s.mode, s.fadeSeconds, s.fadeMin,
                   s.speed, s.size, s.reverse ? "reverse" : "forward");
   }
@@ -76,7 +84,7 @@ void handleStateSave() {
   stateDirty = false;
 
   prefs.begin(PREFS_NAMESPACE, false);
-  for (int o = 0; o < NUM_OUTPUTS; o++) {
+  for (int o = 0; o < NUM_CHANNELS; o++) {
     const LightState& s = states[o];
     prefs.putBool(outputKey(o, "on"), s.on);
     prefs.putUInt(outputKey(o, "col"), colorToRgb(s.color));

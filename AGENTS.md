@@ -69,6 +69,7 @@ ESP32_Eave_Lights/              folder name must equal the main sketch name
                                 globals, setup(), loop()
   effects.ino                   draws the current mode (solid/fade/test) into frame[] at 50 fps
   led_output.ino                strand setup, power caps, showFrame()
+  paths.ino                     builds path light orders (Whole house: B65→B1, A1→A65)
   settings_store.ino            saves/loads LightState in flash (Preferences), delayed save
   test_pattern.ino              red/green/blue/white/off test cycle
   web_api.ino                   control page + JSON API (GET/POST /api/state),
@@ -91,7 +92,7 @@ Standalone throwaway test sketches go in their own folder under `tests/<name>/<n
 ## Firmware rules (from the handoff)
 
 - LED color order is **`RBG`**, chipset `WS2811`. Never change it to `GRB`.
-- Output A = GPIO 8 (tested). Output B = GPIO 9 (`ENABLE_OUTPUT_B 1`; pin verified with strand A in v0.3.0, the installed strand B not yet connected). Each output has its own `LightState` in `states[]` (v0.4+). The API's `output=all` changes every strand and lines up their fades.
+- Output A = GPIO 8 (tested). Output B = GPIO 9 (`ENABLE_OUTPUT_B 1`; pin verified with strand A in v0.3.0, the installed strand B not yet connected). Each **channel** has its own `LightState` in `states[]`: 0 = strand A, 1 = strand B, `CH_HOUSE` = Whole house path (v0.7+). Effects draw on a channel's "line" through `lineLength()`/`lineLight()`, so they work the same on strands and paths. The house path is drawn after the strands and covers them while on. The API's `output=all` changes both strands (not paths) and lines up their phases.
 - Every frame goes through `showFrame()` so the power caps are always applied. Never call `FastLED.show()` on raw colors.
 - `initOutputs()` stays the first line of `setup()` (sends OFF).
 - No blocking `delay()` in `loop()`. Use `millis()` timing.

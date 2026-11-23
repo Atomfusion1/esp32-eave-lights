@@ -1,10 +1,13 @@
 // web_api — control page and JSON API on port 80.
 //
 //   GET  /            control page
-//   GET  /api/state   {"version":..., "outputs":[{...}, {...}]}
+//   GET  /api/state   {"version":..., "outputs":[{A}, {B}], "house":{...}}
 //   POST /api/state   form-encoded body or URL query, any of:
-//                       output=all|a|b|0|1   which strand to change (default all).
-//                                            "all" also lines up the fades.
+//                       output=all|a|b|house  what to change (default all = both strands;
+//                                             "all" also lines up their fades/movement).
+//                                             house = Whole house path; while it is on it
+//                                             covers both strands. Turning it on restarts
+//                                             its effect from the first light (B65).
 //                       on=0|1  color=RRGGBB  brightness=0-255
 //                       mode=solid|fade|test|chase|comet
 //                       fadeSeconds=2-60  fadeMin=0-255
@@ -20,22 +23,35 @@ WebServer server(80);
 
 const char* MODE_NAMES[MODE_COUNT] = { "solid", "fade", "test", "chase", "comet" };
 
+// The settings fields shared by strands and paths, without braces.
+String channelFieldsJson(int ch) {
+  const LightState& s = states[ch];
+  char buf[220];
+  snprintf(buf, sizeof(buf),
+           "\"on\":%s,\"color\":\"#%02X%02X%02X\",\"brightness\":%u,\"mode\":\"%s\","
+           "\"fadeSeconds\":%u,\"fadeMin\":%u,\"speed\":%u,\"size\":%u,\"reverse\":%s",
+           s.on ? "true" : "false", s.color.r, s.color.g, s.color.b, s.brightness,
+           MODE_NAMES[s.mode], s.fadeSeconds, s.fadeMin, s.speed, s.size,
+           s.reverse ? "true" : "false");
+  return String(buf);
+}
+
 String stateJson() {
   String json = "{\"version\":\"" FW_VERSION "\",\"outputs\":[";
   for (int o = 0; o < NUM_OUTPUTS; o++) {
-    const LightState& s = states[o];
-    char buf[256];
-    snprintf(buf, sizeof(buf),
-             "%s{\"id\":\"%c\",\"gpio\":%d,\"enabled\":%s,\"on\":%s,"
-             "\"color\":\"#%02X%02X%02X\",\"brightness\":%u,\"mode\":\"%s\","
-             "\"fadeSeconds\":%u,\"fadeMin\":%u,\"speed\":%u,\"size\":%u,\"reverse\":%s}",
+    char buf[80];
+    snprintf(buf, sizeof(buf), "%s{\"id\":\"%c\",\"gpio\":%d,\"enabled\":%s,",
              o ? "," : "", OUTPUT_LETTERS[o], OUTPUT_PINS[o],
-             OUTPUT_ENABLED[o] ? "true" : "false", s.on ? "true" : "false",
-             s.color.r, s.color.g, s.color.b, s.brightness, MODE_NAMES[s.mode],
-             s.fadeSeconds, s.fadeMin, s.speed, s.size, s.reverse ? "true" : "false");
+             OUTPUT_ENABLED[o] ? "true" : "false");
     json += buf;
+    json += channelFieldsJson(o);
+    json += "}";
   }
-  json += "]}";
+  json += "],\"house\":{\"id\":\"house\",\"name\":\"Whole house\",\"length\":";
+  json += HOUSE_PATH_LEN;
+  json += ",";
+  json += channelFieldsJson(CH_HOUSE);
+  json += "}}";
   return json;
 }
 
@@ -52,14 +68,15 @@ void handleGetState() {
 
 void handleSetState() {
   // ---- 1. Parse and validate everything first, so a bad value changes nothing ----
-  int target = -1;  // -1 = all outputs
+  int target = -1;  // -1 = both strands, else a channel number
   if (server.hasArg("output")) {
     String v = server.arg("output");
     v.toLowerCase();
-    if (v == "all")                 target = -1;
-    else if (v == "a" || v == "0")  target = 0;
-    else if (v == "b" || v == "1")  target = 1;
-    else return sendError("output must be all, a or b");
+    if (v == "all")                        target = -1;
+    else if (v == "a" || v == "0")         target = 0;
+    else if (v == "b" || v == "1")         target = 1;
+    else if (v == "house" || v == "path")  target = CH_HOUSE;
+    else return sendError("output must be all, a, b or house");
   }
 
   bool hasColor = server.hasArg("color");
@@ -83,15 +100,18 @@ void handleSetState() {
     newMode = (Mode)found;
   }
 
-  // ---- 2. Apply to the target output(s) ----
+  // ---- 2. Apply to the target channel(s) ----
   bool changed = false;
-  for (int o = 0; o < NUM_OUTPUTS; o++) {
+  for (int o = 0; o < NUM_CHANNELS; o++) {
+    if (target < 0 && o >= NUM_OUTPUTS) continue;   // "all" = the strands only
     if (target >= 0 && o != target) continue;
     LightState& s = states[o];
 
     if (server.hasArg("on")) {
       String v = server.arg("on");
+      bool wasOn = s.on;
       s.on = (v == "1" || v == "true" || v == "on");
+      if (o == CH_HOUSE && s.on && !wasOn) resetPhase(o);  // start again from B65
       changed = true;
     }
     if (hasColor) { s.color = newColor; changed = true; }
@@ -175,7 +195,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .seg button{flex:1;padding:12px;border-radius:10px;border:1px solid var(--line);background:none;color:var(--text);cursor:pointer;font-size:15px}
 .seg button.sel{border-color:var(--accent);background:var(--accent);color:#fff}
 .seg button small{display:block;font-size:11px;opacity:.8}
-#tabs button{padding:10px 6px}
+#tabs button{padding:10px 6px;flex:1 1 40%}
 .live{background:#0b0b0a;border-radius:10px;padding:8px 6px}
 .liveRow{display:flex;align-items:center;gap:6px}
 .liveRow span{color:#8a8a84;font-size:11px;width:10px}
@@ -186,9 +206,9 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 </style></head><body><main>
 <h1>Eave Lights</h1>
 <div class="card">
-<label>Strand</label>
+<label>Control</label>
 <div class="seg" id="tabs"></div>
-<p class="hint" id="disabledHint" hidden>This strand is turned off in the firmware (ENABLE_OUTPUT_B).</p>
+<p class="hint" id="tabHint" hidden></p>
 </div>
 <div class="card"><label>Live view <span id="liveInfo"></span></label><div class="live" id="live"></div>
 <p class="hint">What the board is sending, light by light. Screen brightness is approximate.</p></div>
@@ -213,24 +233,33 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 <p class="status" id="status">Connecting…</p>
 </main><script>
 const $=id=>document.getElementById(id);let st=null,timer=null;
-// sel = index of the strand being edited, or -1 for both
+// sel = what is being edited: 0/1 = strand A/B, BOTH = both strands, HOUSE = Whole house path
+const BOTH=-1,HOUSE=-2;
 let sel=0;try{const v=localStorage.getItem('eaveSel');if(v!==null)sel=+v;}catch(e){}
 const pct=v=>Math.round(v/2.55)+'%';
-const both=()=>sel<0;
-function cur(){return st.outputs[both()?0:sel];}
+const both=()=>sel===BOTH,house=()=>sel===HOUSE;
+function cur(){return house()?st.house:st.outputs[both()?0:sel];}
 function anyOn(){return st.outputs.some(o=>o.on);}
 function pick(i){sel=i;try{localStorage.setItem('eaveSel',i);}catch(e){}show(st);}
-function show(s){st=s;if(sel>=s.outputs.length)sel=0;
- $('tabs').innerHTML=s.outputs.map((o,i)=>'<button data-i="'+i+'" class="'+(i===sel?'sel':'')+'">'+
-  '<span class="dot" style="background:'+(o.on?o.color:'transparent')+'"></span>Strand '+o.id+
-  '<small>GPIO '+o.gpio+' · '+(o.on?'on':'off')+'</small></button>').join('')+
-  '<button data-i="-1" class="'+(both()?'sel':'')+'">Both<small>'+(s.outputs.every(o=>o.on)?'all on':anyOn()?'some on':'all off')+'</small></button>';
+function tab(i,dot,name,sub){return '<button data-i="'+i+'" class="'+(i===sel?'sel':'')+'">'+
+ '<span class="dot" style="background:'+(dot||'transparent')+'"></span>'+name+'<small>'+sub+'</small></button>';}
+function show(s){st=s;if(sel>=s.outputs.length||sel<HOUSE)sel=0;
+ const h=s.house,hOn=h.on,over=hOn?' · covered':'';
+ $('tabs').innerHTML=s.outputs.map((o,i)=>tab(i,o.on?o.color:'','Strand '+o.id,'GPIO '+o.gpio+' · '+(o.on?'on':'off')+over)).join('')+
+  tab(BOTH,'','Both strands',(s.outputs.every(o=>o.on)?'all on':anyOn()?'some on':'all off')+over)+
+  tab(HOUSE,hOn?h.color:'','Whole house','B65→1, A1→65 · '+(hOn?'on':'off'));
  $('tabs').querySelectorAll('button').forEach(b=>b.onclick=()=>pick(+b.dataset.i));
  const o=cur();
- $('disabledHint').hidden=both()||o.enabled;
+ let hint='';
+ if(house())hint='One '+h.length+'-light line across both strands. While it is on it covers Strand A and B; turn it off to go back to them.';
+ else if(hOn)hint='Whole house is on and covering the strands. These settings show again when it is turned off.';
+ else if(!both()&&!o.enabled)hint='This strand is turned off in the firmware (ENABLE_OUTPUT_B).';
+ $('tabHint').textContent=hint;$('tabHint').hidden=!hint;
  const isOn=both()?anyOn():o.on;
- $('power').textContent=(both()?'Both strands ':'Strand '+o.id+' ')+(isOn?'ON':'OFF');
+ $('power').textContent=(house()?'Whole house ':both()?'Both strands ':'Strand '+o.id+' ')+(isOn?'ON':'OFF');
  $('power').classList.toggle('on',isOn);
+ const [fwd,rev]=house()?['B65 → A65','A65 → B65']:['Light 1 → 65','Light 65 → 1'];
+ $('dir').children[0].textContent=fwd;$('dir').children[1].textContent=rev;
  $('color').value=o.color.toLowerCase();$('bri').value=o.brightness;$('briVal').textContent=pct(o.brightness);
  $('modes').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',b.dataset.mode===o.mode));
  $('fadeCard').hidden=o.mode!=='fade';
@@ -242,7 +271,7 @@ function show(s){st=s;if(sel>=s.outputs.length)sel=0;
  $('size').value=o.size;$('sizeVal').textContent=o.size+(o.size===1?' light':' lights');
  $('dir').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',(b.dataset.rev==='1')===o.reverse));
  $('status').textContent='Connected · v'+s.version;}
-async function send(p){if(!st)return;p.output=both()?'all':st.outputs[sel].id;
+async function send(p){if(!st)return;p.output=house()?'house':both()?'all':st.outputs[sel].id;
  try{const r=await fetch('/api/state',{method:'POST',body:new URLSearchParams(p)});const j=await r.json();
   if(j.error){$('status').textContent=j.error;}else show(j);}
  catch(e){$('status').textContent='Not connected';}}

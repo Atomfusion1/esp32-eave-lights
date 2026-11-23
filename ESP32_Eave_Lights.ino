@@ -8,8 +8,9 @@
 //   PSRAM: OPI PSRAM
 //
 // Tabs (the IDE joins them after this file, in alphabetical order):
-//   effects.ino         draws the current mode into frame[] each frame
+//   effects.ino         draws each channel's mode into frame[] each frame
 //   led_output.ino      strand setup, power caps, showFrame()
+//   paths.ino           builds the Whole house path (B65 -> B1, A1 -> A65)
 //   settings_store.ino  saves/loads the light state in flash (survives power cuts)
 //   test_pattern.ino    red/green/blue/white/off test cycle
 //   web_api.ino         web page + JSON API on port 80
@@ -17,7 +18,7 @@
 //
 // All #defines, #includes, shared types and globals live in this file so every tab can use them.
 //
-// Stage 2: Wi-Fi control. Copy secrets.example.h to secrets.h and fill in your Wi-Fi.
+// Wi-Fi: copy secrets.example.h to secrets.h and fill in your Wi-Fi.
 
 #include <FastLED.h>
 #include <WiFi.h>
@@ -31,7 +32,7 @@
 #error "Missing secrets.h: copy secrets.example.h to secrets.h and fill in your Wi-Fi details"
 #endif
 
-#define FW_VERSION "0.6.0"
+#define FW_VERSION "0.7.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
@@ -81,15 +82,36 @@ struct LightState {
 #define SIZE_MIN  1
 #define SIZE_MAX  30
 
-// One state per output (strand). Defaults used on first boot (nothing saved yet).
-LightState states[NUM_OUTPUTS] = {
-  { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64, 10, 5, false },
-  { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64, 10, 5, false },
-};
-
 const char  OUTPUT_LETTERS[NUM_OUTPUTS] = { 'A', 'B' };
 const int   OUTPUT_PINS[NUM_OUTPUTS]    = { PIN_OUTPUT_A, PIN_OUTPUT_B };
 const bool  OUTPUT_ENABLED[NUM_OUTPUTS] = { true, ENABLE_OUTPUT_B };
+
+// ---------- Paths ----------
+// A path is an ordered list of physical lights. An effect on a path draws along it as
+// one line, crossing strands wherever the path does. Later, zones and editor-made paths
+// will be built the same way.
+struct PathPoint {
+  uint8_t  output;   // 0 = A, 1 = B
+  uint16_t index;    // 0-based light on that strand (light 1 = index 0)
+};
+
+// "Whole house": B65 -> B1, then A1 -> A65 (built in paths.ino).
+#define HOUSE_PATH_LEN (NUM_OUTPUTS * NUM_LEDS)
+PathPoint housePath[HOUSE_PATH_LEN];
+
+// ---------- Channels ----------
+// A channel is anything with its own LightState that draws effects:
+//   0 = strand A, 1 = strand B, CH_HOUSE = Whole house path.
+// While the house path is on, it is drawn after the strands and covers them.
+#define CH_HOUSE     NUM_OUTPUTS
+#define NUM_CHANNELS (NUM_OUTPUTS + 1)
+
+// Defaults used on first boot (nothing saved yet).
+LightState states[NUM_CHANNELS] = {
+  { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64, 10, 5, false },   // strand A
+  { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64, 10, 5, false },   // strand B
+  { false, CRGB(255, 140, 40), 128, MODE_COMET, 5, 64, 20, 8, false },   // Whole house
+};
 
 void setup() {
   // Send OFF before anything else so the power-up white ends as soon as possible.
@@ -110,6 +132,7 @@ void setup() {
                 ESP.getFlashChipSize() / (1024 * 1024),
                 ESP.getPsramSize() / (1024 * 1024));
 
+  initPaths();
   loadState();
   startWifi();
   startWeb();
