@@ -2,7 +2,9 @@
 
 const uint32_t FRAME_MS = 20;      // 50 frames per second
 const uint8_t  FADE_BPM = 12;      // fade mode: one breath every 5 seconds
-const uint8_t  FADE_MIN = 10;      // fade mode: lowest level (0-255), so it never goes fully dark
+// Fade mode: lowest level (0-255). Kept at ~25%: below that each 8-bit step is a visible
+// jump and channels flick between 0 and 1, which looks like on/off flicker.
+const uint8_t  FADE_MIN = 64;
 
 void renderFrame() {
   static uint32_t lastFrameMs = 0;
@@ -14,12 +16,13 @@ void renderFrame() {
   if (state.on) {
     switch (state.mode) {
       case MODE_SOLID:
+        // nscale8_video: a channel that is on never rounds down to 0 (no color shift when dim)
         c = state.color;
-        c.nscale8(state.brightness);
+        c.nscale8_video(state.brightness);
         break;
       case MODE_FADE:
         c = state.color;
-        c.nscale8(scale8(state.brightness, beatsin8(FADE_BPM, FADE_MIN, 255)));
+        c.nscale8_video(scale8(state.brightness, beatsin8(FADE_BPM, FADE_MIN, 255)));
         break;
       case MODE_TEST:
         c = testPatternColor();
