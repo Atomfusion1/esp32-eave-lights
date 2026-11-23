@@ -27,7 +27,7 @@ button.power{width:100%;padding:16px;font-size:18px;font-weight:600;border-radiu
 button.power.on{background:var(--accent);color:#fff}
 input[type=color]{width:100%;height:56px;border:none;border-radius:10px;background:none;padding:0}
 input[type=range]{width:100%;accent-color:var(--accent)}
-input[type=text],input[type=number]{width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:16px}
+input[type=text],input[type=number],input[type=password]{width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:16px}
 .seg{display:flex;gap:8px;flex-wrap:wrap}
 .seg button{flex:1;padding:12px;border-radius:10px;border:1px solid var(--line);background:none;color:var(--text);cursor:pointer;font-size:15px}
 .seg button.sel{border-color:var(--accent);background:var(--accent);color:#fff}
@@ -111,12 +111,22 @@ details[open] summary{margin-bottom:14px}
 <p class="hint">Below about 20% the dim end may show steps.</p>
 </div>
 
-<div class="card"><details id="setup"><summary>Setup: find lights, zones &amp; paths</summary>
+<div class="card"><details id="setup"><summary>Setup: strands, find lights, zones, paths &amp; updates</summary>
+<div style="border-bottom:1px solid var(--line);padding-bottom:14px;margin-bottom:14px">
+<h2>Strand lengths</h2>
+<p class="hint" style="margin:0 0 6px">How many lights are on each strand (1–300). Zones, paths and the house view follow these numbers.</p>
+<div class="row" style="align-items:end">
+<div><label>Strand A (left)</label><input id="cntA" type="number" min="1" max="300"></div>
+<div><label>Strand B (right)</label><input id="cntB" type="number" min="1" max="300"></div>
+<button class="btn primary" id="cntSave">Save</button>
+</div>
+<p class="err" id="cntErr" hidden></p>
+</div>
 <h2>Find a light</h2>
 <p class="hint" style="margin:0 0 10px">Lights only the chosen light (green) so you can see where it is. Turns itself off after 5 minutes.</p>
 <div class="seg" id="findStrand"><button data-s="A">Strand A (left)</button><button data-s="B">Strand B (right)</button></div>
 <div class="row" style="margin-top:10px">
-<button class="btn" id="findMinus">−</button><input id="findNum" type="number" min="1" max="65" value="1"><button class="btn" id="findPlus">+</button>
+<button class="btn" id="findMinus">−</button><input id="findNum" type="number" min="1" value="1"><button class="btn" id="findPlus">+</button>
 </div>
 <div class="row" style="margin-top:10px"><button class="btn primary" id="findShow">Show light</button><button class="btn" id="findStop">Stop</button></div>
 
@@ -153,6 +163,14 @@ details[open] summary{margin-bottom:14px}
 <p class="err" id="pathErr" hidden></p>
 </div>
 </div>
+<div class="sub">
+<h2>Firmware update</h2>
+<p class="hint" style="margin:0 0 10px">Running v<span id="fwVer"></span>. Easiest: in the Arduino IDE pick <b>Tools → Port → eavelights</b> (network) and Upload. Or here: in the IDE use <b>Sketch → Export compiled Binary</b>, then choose the <b>.bin</b> from the sketch folder. If an update fails, the current firmware keeps running.</p>
+<input type="file" id="fwFile" accept=".bin">
+<input type="password" id="fwPass" placeholder="Update password (OTA_PASSWORD in secrets.h)" style="margin-top:8px">
+<button class="btn primary" id="fwGo" style="margin-top:10px">Upload firmware</button>
+<p class="hint" id="fwStatus"></p>
+</div>
 <p class="err" id="storageWarn" hidden>Storage not found, so zones and saved looks are lost on restart. Use Tools → Partition Scheme → 16M Flash (3MB APP/9.9MB FATFS).</p>
 </details></div>
 
@@ -188,7 +206,8 @@ function show(s){st=s;
  $('tabs').querySelectorAll('button').forEach(b=>b.onclick=()=>pick(+b.dataset.i));
  const o=cur();
  let hint='';
- if(house())hint='One '+h.length+'-light line across the front: B65 (far right) → controller → A65 (far left). While on, it covers Strand A and B'+(zonesOn.length?'; zones that are on ('+zonesOn.map(z=>z.name).join(', ')+') are drawn on top':'')+'.';
+ const lastA='A'+s.outputs[0].count,lastB='B'+(s.outputs[1]?s.outputs[1].count:'');
+ if(house())hint='One '+h.length+'-light line across the front: '+lastB+' (far right) → controller → '+lastA+' (far left). While on, it covers Strand A and B'+(zonesOn.length?'; zones that are on ('+zonesOn.map(z=>z.name).join(', ')+') are drawn on top':'')+'.';
  else if(zoneSel())hint=o.length+' lights: '+o.ranges+'. While on, drawn on top of everything else.';
  else if(pathSel())hint='Path: '+o.summary+' ('+o.length+' positions incl. gaps). Zones that are on are drawn on top of it.';
  else if(coverStrands.length)hint='Drawn on top of the strands right now: '+coverStrands.join(', ')+'.';
@@ -201,8 +220,8 @@ function show(s){st=s;
  const [fwd,rev]=house()?['Right → left','Left → right']
   :zoneSel()?['As listed ('+o.ranges+')','Reversed']
   :pathSel()?['In path order','Reversed']
-  :o.id==='A'?['Light 1 → 65 (outward, left)','Light 65 → 1 (inward)']
-  :o.id==='B'?['Light 1 → 65 (outward, right)','Light 65 → 1 (inward)']
+  :o.id==='A'?['Light 1 → '+o.count+' (outward, left)','Light '+o.count+' → 1 (inward)']
+  :o.id==='B'?['Light 1 → '+o.count+' (outward, right)','Light '+o.count+' → 1 (inward)']
   :['Outward from controller','Inward to controller'];
  $('dir').children[0].textContent=fwd;$('dir').children[1].textContent=rev;
  $('color').value=o.color.toLowerCase();$('bri').value=o.brightness;$('briVal').textContent=pct(o.brightness);
@@ -229,6 +248,9 @@ function show(s){st=s;
  $('pathList').querySelectorAll('[data-pedit]').forEach(b=>b.onclick=()=>startPathEdit(+b.dataset.pedit));
  $('pathList').querySelectorAll('[data-pdel]').forEach(b=>b.onclick=()=>delPath(+b.dataset.pdel));
  renderSteps();
+ if(document.activeElement!==$('cntA'))$('cntA').value=s.outputs[0].count;
+ if(s.outputs[1]&&document.activeElement!==$('cntB'))$('cntB').value=s.outputs[1].count;
+ $('fwVer').textContent=s.version;$('findNum').max=findMax();
  $('storageWarn').hidden=s.storage;
  $('findStrand').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',b.dataset.s===findStrand));
  $('locateBanner').hidden=!s.locate.active;
@@ -269,13 +291,30 @@ $('saveLook').onclick=async()=>{const name=prompt('Name for this look (e.g. Xmas
  if(!name)return;const j=await post('/api/presets',{action:'save',name,output:target()});
  if(j.error)showErr('lookErr',j.error);else{showErr('lookErr');showLooks(j.presets);}};
 
+// ---- Strand lengths ----
+$('cntSave').onclick=async()=>{const j=await post('/api/strands',{a:$('cntA').value,b:$('cntB').value});
+ if(j.error)showErr('cntErr',j.error);else{showErr('cntErr');show(j);}};
+
+// ---- Firmware update (with progress) ----
+$('fwGo').onclick=()=>{const f=$('fwFile').files[0];if(!f){$('fwStatus').textContent='Choose the .bin file first.';return;}
+ if(!confirm('Update firmware with '+f.name+'? The lights go dark and the board restarts.'))return;
+ const fd=new FormData();fd.append('file',f,f.name);const x=new XMLHttpRequest();
+ x.open('POST','/api/firmware?password='+encodeURIComponent($('fwPass').value));
+ x.upload.onprogress=e=>{if(e.lengthComputable)$('fwStatus').textContent='Uploading '+Math.round(e.loaded*100/e.total)+'%…';};
+ x.onload=()=>{let j={};try{j=JSON.parse(x.responseText);}catch(e){}
+  if(j.ok){$('fwStatus').textContent='Done. The board is restarting; this page reloads in 15 seconds.';setTimeout(()=>location.reload(),15000);}
+  else $('fwStatus').textContent='Failed: '+(j.error||('HTTP '+x.status))+'. The current firmware is still running.';};
+ x.onerror=()=>{$('fwStatus').textContent='Upload failed (connection lost). The current firmware is still running.';};
+ $('fwStatus').textContent='Uploading…';x.send(fd);};
+
 // ---- Find a light ----
-function findNum(){return Math.min(65,Math.max(1,parseInt($('findNum').value)||1));}
+function findMax(){const o=st.outputs.find(x=>x.id===findStrand);return o?o.count:1;}
+function findNum(){return Math.min(findMax(),Math.max(1,parseInt($('findNum').value)||1));}
 async function locate(ranges){const j=await post('/api/locate',ranges?{ranges}:{stop:1});if(j.error)$('status').textContent=j.error;else show(j);return j;}
 function findShow(){$('findNum').value=findNum();locate(findStrand+findNum());}
 $('findStrand').querySelectorAll('button').forEach(b=>b.onclick=()=>{findStrand=b.dataset.s;show(st);if(st.locate.active)findShow();});
 $('findMinus').onclick=()=>{$('findNum').value=Math.max(1,findNum()-1);findShow();};
-$('findPlus').onclick=()=>{$('findNum').value=Math.min(65,findNum()+1);findShow();};
+$('findPlus').onclick=()=>{$('findNum').value=Math.min(findMax(),findNum()+1);findShow();};
 $('findNum').onchange=findShow;
 $('findShow').onclick=findShow;
 $('findStop').onclick=()=>locate('');
@@ -330,23 +369,27 @@ fetch('/api/presets').then(r=>r.json()).then(j=>showLooks(j.presets)).catch(()=>
 // LED values are linear; the screen is gamma-encoded, so dim LED values are lifted to look similar.
 const GAM=new Uint8Array(256).map((_,v)=>Math.round(255*Math.pow(v/255,1/2.2)));
 let cv=null,frames=0,fpsT=performance.now();
-// Drawn as seen from the street: strand A runs left from the controller (A65 far left),
-// strand B runs right (B65 far right), light 1 of each next to the controller in the middle.
+// Drawn as seen from the street: strand A runs left from the controller (last A light far
+// left), strand B runs right (last B light far right), light 1 of each next to the controller.
+// Frame: [outputs], per output [count lo][count hi], then RGB per light, A's lights first.
 const GAP=3;  // empty slots for the controller mark
-function slotOf(o,i,leds){return o===0?leds-1-i:leds+GAP+i;}
-function drawFrame(b){const outs=b[0],leds=b[1]|(b[2]<<8);
- if(!cv){$('live').innerHTML='<div class="liveRow"><canvas></canvas></div>'+
-  '<div class="liveLabels"><span>A65 · left</span><span>controller</span><span>right · B65</span></div>';
+let liveLabelKey='';
+function drawFrame(b){const outs=b[0],cnt=[],start=[];let off=1+outs*2;
+ for(let o=0;o<outs;o++){cnt.push(b[1+o*2]|(b[2+o*2]<<8));start.push(off);off+=cnt[o]*3;}
+ const cA=cnt[0],cB=outs>1?cnt[1]:0,key=cA+'/'+cB;
+ if(!cv||liveLabelKey!==key){liveLabelKey=key;$('live').innerHTML='<div class="liveRow"><canvas></canvas></div>'+
+  '<div class="liveLabels"><span>A'+cA+' · left</span><span>controller</span><span>right · B'+cB+'</span></div>';
   cv=$('live').querySelector('canvas');}
  const dpr=window.devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;
  if(cv.width!==Math.round(w*dpr)){cv.width=Math.round(w*dpr);cv.height=Math.round(h*dpr);}
  const g=cv.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,w,h);
- const slots=2*leds+GAP,step=w/slots,r=Math.max(1,Math.min(step*0.4,6));
- g.shadowBlur=0;g.fillStyle='#55554f';g.fillRect(step*(leds+GAP/2)-1,h*0.2,2,h*0.6);
- for(let o=0;o<Math.min(outs,2);o++)for(let i=0;i<leds;i++){const k=3+(o*leds+i)*3,R=b[k],G=b[k+1],B=b[k+2];
+ const slots=cA+GAP+cB,step=w/slots,r=Math.max(1,Math.min(step*0.4,6));
+ g.shadowBlur=0;g.fillStyle='#55554f';g.fillRect(step*(cA+GAP/2)-1,h*0.2,2,h*0.6);
+ for(let o=0;o<Math.min(outs,2);o++)for(let i=0;i<cnt[o];i++){const k=start[o]+i*3,R=b[k],G=b[k+1],B=b[k+2];
   const lit=R|G|B;g.fillStyle=lit?'rgb('+GAM[R]+','+GAM[G]+','+GAM[B]+')':'#2a2a27';
   g.shadowBlur=lit?r*3:0;g.shadowColor=g.fillStyle;
-  g.beginPath();g.arc(step*(slotOf(o,i,leds)+0.5),h/2,r,0,Math.PI*2);g.fill();}}
+  const slot=o===0?cA-1-i:cA+GAP+i;
+  g.beginPath();g.arc(step*(slot+0.5),h/2,r,0,Math.PI*2);g.fill();}}
 async function pollFrame(){if(document.hidden){setTimeout(pollFrame,500);return;}
  const t0=performance.now();
  try{const r=await fetch('/api/frame',{cache:'no-store'});drawFrame(new Uint8Array(await r.arrayBuffer()));frames++;}catch(e){}

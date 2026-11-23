@@ -5,8 +5,7 @@
 //
 // 1. Whole house (built in): starting at the far right end of B, back to the controller,
 //    then out along A to the far left end — one sweep across the front, right to left:
-//      path position 0..64   -> B65 .. B1  (B index 64 .. 0)
-//      path position 65..129 -> A1  .. A65 (A index 0 .. 64)
+//      last B light .. B1, then A1 .. last A light (lengths from ledCount[])
 //
 // 2. Paths made from zones: a name plus an ordered list of zones, each optionally
 //    reversed, each with optional invisible "gap" lights after it. Saved to /paths.bin
@@ -17,10 +16,12 @@ const char*    PATHS_FILE    = "/paths.bin";
 const uint32_t PATHS_MAGIC   = 0x48544150;  // "PATH"
 const uint16_t PATHS_VERSION = 1;
 
+// Builds the Whole house path from the current strand lengths.
 void initPaths() {
   int p = 0;
-  for (int i = NUM_LEDS - 1; i >= 0; i--) housePath[p++] = { 1, (uint16_t)i };  // B65 -> B1
-  for (int i = 0; i < NUM_LEDS; i++)      housePath[p++] = { 0, (uint16_t)i };  // A1 -> A65
+  for (int i = ledCount[1] - 1; i >= 0; i--) housePath[p++] = { 1, (uint16_t)i };  // last B -> B1
+  for (int i = 0; i < ledCount[0]; i++)      housePath[p++] = { 0, (uint16_t)i };  // A1 -> last A
+  houseLen = p;
 }
 
 void initZonePaths() {

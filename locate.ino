@@ -27,12 +27,12 @@ void handleLocateTimeout() {
 }
 
 void drawLocate() {
-  for (int o = 0; o < NUM_OUTPUTS; o++) fill_solid(frame[o], NUM_LEDS, CRGB(0, 0, 0));
+  for (int o = 0; o < NUM_OUTPUTS; o++) fill_solid(frame[o], MAX_LEDS, CRGB(0, 0, 0));
   for (int r = 0; r < locateCount; r++) {
     const ZoneRange& z = locateRanges[r];
     int step = (z.first <= z.last) ? 1 : -1;
     for (int i = z.first; ; i += step) {
-      frame[z.output][i] = (i == z.first) ? LOCATE_FIRST_COLOR : LOCATE_COLOR;
+      if (i < ledCount[z.output]) frame[z.output][i] = (i == z.first) ? LOCATE_FIRST_COLOR : LOCATE_COLOR;
       if (i == z.last) break;
     }
   }

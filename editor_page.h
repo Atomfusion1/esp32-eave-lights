@@ -151,9 +151,9 @@ function parseRanges(t){const out=[];
  return out;}
 function items(){const list=[];if(!st)return list;
  st.zones.forEach(z=>list.push({id:'z'+z.slot,name:z.name,desc:z.ranges,lights:parseRanges(z.ranges)}));
- list.push({id:'A',name:'Strand A (all)',desc:'A1-65',lights:parseRanges('A1-65')});
- list.push({id:'B',name:'Strand B (all)',desc:'B1-65',lights:parseRanges('B1-65')});
+ st.outputs.forEach(o=>{const r=o.id+'1-'+o.count;list.push({id:o.id,name:'Strand '+o.id+' (all)',desc:r,lights:parseRanges(r)});});
  return list;}
+function totalLights(){return st?st.outputs.reduce((a,o)=>a+o.count,0):0;}
 function itemById(id){return items().find(i=>i.id===id);}
 function placementLights(p){const it=itemById(p.item);if(!it)return [];
  return it.lights.slice(Math.max(0,p.from-1),Math.min(it.lights.length,p.to));}
@@ -176,7 +176,10 @@ function positions(p,n){const v=view(),W=v.width,H=v.height,pts=p.points;
 function size(){const v=view();if(!v)return;const w=$('stage').clientWidth,h=Math.round(w*v.height/v.width),dpr=window.devicePixelRatio||1;
  if(cv.width!==Math.round(w*dpr)||cv.height!==Math.round(h*dpr)){cv.width=Math.round(w*dpr);cv.height=Math.round(h*dpr);cv.style.height=h+'px';}
  ctx.setTransform(dpr,0,0,dpr,0,0);return {w,h};}
-function lightColor(l){if(!frame)return null;const leds=frame[1]|(frame[2]<<8),k=3+(l[0]*leds+l[1])*3;
+// Frame: [outputs], per output [count lo][count hi], then RGB per light, A's lights first.
+function lightColor(l){if(!frame)return null;const outs=frame[0];if(l[0]>=outs)return null;
+ let k=1+outs*2;for(let o=0;o<l[0];o++)k+=(frame[1+o*2]|(frame[2+o*2]<<8))*3;
+ const cnt=frame[1+l[0]*2]|(frame[2+l[0]*2]<<8);if(l[1]>=cnt)return null;k+=l[1]*3;
  const r=frame[k],g=frame[k+1],b=frame[k+2];return (r|g|b)?[GAM[r],GAM[g],GAM[b]]:null;}
 function draw(){const v=view();$('empty').hidden=!!v;cv.hidden=!v;if(!v)return;
  if(imgFor!==v.image){imgFor=v.image;img.onload=()=>draw();img.src=v.image;return;}
@@ -233,7 +236,7 @@ function renderPlist(){const v=view();$('editCard').hidden=$('addCard').hidden=!
   $('selInfo').textContent=drawing?'Click on the photo to add points ('+p.points.length+' so far).':'Drag the orange squares to adjust the line.';}
  // count placed lights on all photos
  const placed=new Set();layout.views.forEach(vw=>vw.placements.forEach(p=>placementLights(p).forEach(l=>placed.add(l[0]+':'+l[1]))));
- $('placedInfo').textContent='Placed '+placed.size+' of 130 lights across all photos.';
+ $('placedInfo').textContent='Placed '+placed.size+' of '+totalLights()+' lights across all photos.';
  $('stageHint').textContent=mode==='edit'?(drawing?'Drawing: click the first light, then corners, then the last light. Press Finish line when done.':'Edit mode: select a section to adjust it.'):'Live: the lights as they are right now.';}
 function renderAll(){renderViews();renderPlist();
  $('modeSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',b.dataset.m===mode));

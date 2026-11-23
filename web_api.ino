@@ -17,7 +17,10 @@
 //                         bgOn=0|1  bgColor=RRGGBB   (chase/comet background)
 //                       Invalid values change nothing and return 400. Returns the new state.
 //   GET  /api/frame     exact colors being sent right now (after power caps), binary:
-//                       [outputs][leds low][leds high] then R,G,B per LED, A first.
+//                       [outputs], per output [count low][count high], then R,G,B per
+//                       light, A's lights first.
+//   POST /api/strands   a=67 b=65   strand lengths (1-300), saved. Returns the state.
+//   POST /api/firmware  multipart .bin + password field: wireless firmware update (ota.ino)
 //   POST /api/locate    ranges=A23 | A1-12,B30-65   light only those (auto-off after 5 min)
 //                       stop=1                      back to normal. Returns the state.
 //   POST /api/zones     action=save   [id=N] name=Porch ranges=A1-12   (no id = new zone)
@@ -57,15 +60,15 @@ String stateJson() {
   json += ",\"outputs\":[";
   for (int o = 0; o < NUM_OUTPUTS; o++) {
     char buf[80];
-    snprintf(buf, sizeof(buf), "%s{\"id\":\"%c\",\"gpio\":%d,\"enabled\":%s,",
+    snprintf(buf, sizeof(buf), "%s{\"id\":\"%c\",\"gpio\":%d,\"enabled\":%s,\"count\":%u,",
              o ? "," : "", OUTPUT_LETTERS[o], OUTPUT_PINS[o],
-             OUTPUT_ENABLED[o] ? "true" : "false");
+             OUTPUT_ENABLED[o] ? "true" : "false", ledCount[o]);
     json += buf;
     json += channelFieldsJson(o);
     json += "}";
   }
   json += "],\"house\":{\"id\":\"house\",\"name\":\"Whole house\",\"length\":";
-  json += HOUSE_PATH_LEN;
+  json += houseLen;
   json += ",";
   json += channelFieldsJson(CH_HOUSE);
   json += "},\"zones\":[";
@@ -274,16 +277,20 @@ void handleSetState() {
   sendState();
 }
 
-// Live view: copies out[] (what FastLED is sending, after caps) into one binary reply.
+// Live view: copies out[] (what FastLED is sending, after caps) into one binary reply:
+//   [outputs] then per output [count low][count high], then R,G,B per light,
+//   all of A's lights first, then B's.
 // out[] holds plain RGB; the RBG reorder for the strand happens later inside FastLED.
 void handleGetFrame() {
-  static uint8_t buf[3 + NUM_OUTPUTS * NUM_LEDS * 3];
+  static uint8_t buf[1 + NUM_OUTPUTS * 2 + MAX_TOTAL_LEDS * 3];
   size_t n = 0;
   buf[n++] = NUM_OUTPUTS;
-  buf[n++] = NUM_LEDS & 0xFF;
-  buf[n++] = NUM_LEDS >> 8;
   for (int o = 0; o < NUM_OUTPUTS; o++) {
-    for (int i = 0; i < NUM_LEDS; i++) {
+    buf[n++] = ledCount[o] & 0xFF;
+    buf[n++] = ledCount[o] >> 8;
+  }
+  for (int o = 0; o < NUM_OUTPUTS; o++) {
+    for (int i = 0; i < ledCount[o]; i++) {
       buf[n++] = out[o][i].r;
       buf[n++] = out[o][i].g;
       buf[n++] = out[o][i].b;
@@ -291,6 +298,16 @@ void handleGetFrame() {
   }
   server.sendHeader("Cache-Control", "no-store");
   server.send_P(200, "application/octet-stream", (const char*)buf, n);
+}
+
+// Sets strand lengths: a=<lights on A> b=<lights on B> (1-MAX_LEDS each).
+void handleStrands() {
+  int a = server.hasArg("a") ? server.arg("a").toInt() : ledCount[0];
+  int b = server.hasArg("b") ? server.arg("b").toInt() : ledCount[1];
+  if (a < 1 || a > MAX_LEDS || b < 1 || b > MAX_LEDS) return sendError("each strand needs 1 to 300 lights");
+  stopLocate();
+  setLedCounts(a, b);
+  sendState();
 }
 
 void handleLocate() {
@@ -383,6 +400,8 @@ void startWeb() {
   server.on("/api/state", HTTP_POST, handleSetState);
   server.on("/api/frame", HTTP_GET, handleGetFrame);
   server.on("/api/locate", HTTP_POST, handleLocate);
+  server.on("/api/strands", HTTP_POST, handleStrands);
+  server.on("/api/firmware", HTTP_POST, handleFirmwareDone, handleFirmwareData);
   server.on("/api/zones", HTTP_POST, handleZones);
   server.on("/api/paths", HTTP_POST, handlePaths);
   server.on("/api/presets", HTTP_GET, handleGetPresets);

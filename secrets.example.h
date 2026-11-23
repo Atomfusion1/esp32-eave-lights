@@ -11,3 +11,6 @@
 // Password must be at least 8 characters.
 #define AP_SSID       "EaveLights"
 #define AP_PASSWORD   "change-me-123"
+
+// Password for wireless firmware updates (Arduino IDE network port and web page).
+#define OTA_PASSWORD  "change-me-too"

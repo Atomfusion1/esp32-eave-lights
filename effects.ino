@@ -1,6 +1,6 @@
 // effects — draws each channel's mode into frame[] and sends it, at a fixed frame rate.
 //
-// A channel draws onto a "line" of lights: a strand (65 lights) or a path (e.g. the
+// A channel draws onto a "line" of lights: a strand (ledCount lights) or a path (e.g. the
 // 130-light Whole house path). lineLength()/lineLight() map line positions to
 // physical lights, so every effect works the same on strands and paths.
 //
@@ -32,8 +32,8 @@ void resetPhase(int ch) {
 }
 
 int lineLength(int ch) {
-  if (ch < NUM_OUTPUTS) return NUM_LEDS;
-  if (ch == CH_HOUSE)   return HOUSE_PATH_LEN;
+  if (ch < NUM_OUTPUTS) return ledCount[ch];
+  if (ch == CH_HOUSE)   return houseLen;
   if (ch < CH_PATH0)    return zoneLen[ch - CH_ZONE0];
   return pathLen[ch - CH_PATH0];
 }

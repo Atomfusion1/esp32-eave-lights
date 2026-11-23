@@ -1,15 +1,25 @@
-// zones â€” named light ranges with their own settings, saved to /zones.bin.
+// zones - named light ranges with their own settings, saved to /zones.bin.
 //
 // Ranges are written like the page shows them: "A1-12, B30-65", "A12-1" (backwards),
 // "B5" (one light). Numbers are 1-based light numbers; stored 0-based.
 //
 // /zones.bin: header (magic, version, record size, count), then per zone slot:
-// ZoneDef followed by that zone's LightState. If the record size doesn't match (the
-// structs changed in a firmware update) the file is ignored and zones start empty.
+// ZoneDef followed by that zone's LightState. Version 1 (before 0.12.0) stored light
+// numbers as 8-bit; it is converted on load. Any other mismatch (structs changed in a
+// firmware update) means the file is ignored and zones start empty.
 
 const char*    ZONES_FILE    = "/zones.bin";
 const uint32_t ZONES_MAGIC   = 0x5A4E4F5A;  // "ZONZ"
-const uint16_t ZONES_VERSION = 1;
+const uint16_t ZONES_VERSION = 2;
+
+// Version 1 layout (8-bit light numbers), only used to convert old files.
+struct ZoneRangeV1 { uint8_t output; uint8_t first; uint8_t last; };
+struct ZoneDefV1 {
+  bool        used;
+  char        name[NAME_LEN];
+  uint8_t     rangeCount;
+  ZoneRangeV1 ranges[MAX_ZONE_RANGES];
+};
 
 void initZones() {
   for (int z = 0; z < MAX_ZONES; z++) {
@@ -21,15 +31,16 @@ void initZones() {
   }
 }
 
-// Rebuilds zone z's light order from its ranges.
+// Rebuilds zone z's light order from its ranges. Lights past the end of a strand
+// (if a strand was made shorter) are left out.
 void rebuildZone(int z) {
   uint16_t n = 0;
   if (zones[z].used) {
     for (int r = 0; r < zones[z].rangeCount; r++) {
       const ZoneRange& zr = zones[z].ranges[r];
       int step = (zr.first <= zr.last) ? 1 : -1;
-      for (int i = zr.first; n < HOUSE_PATH_LEN; i += step) {
-        zonePoints[z][n++] = { zr.output, (uint16_t)i };
+      for (int i = zr.first; n < MAX_TOTAL_LEDS; i += step) {
+        if (i < ledCount[zr.output]) zonePoints[z][n++] = { zr.output, (uint16_t)i };
         if (i == zr.last) break;
       }
     }
@@ -69,11 +80,15 @@ const char* parseRanges(const String& text, ZoneRange* outRanges, uint8_t& count
       while (pos < len && isdigit((unsigned char)text[pos])) { last = last * 10 + (text[pos++] - '0'); digits++; }
       if (!digits) return "missing light number after '-'";
     }
-    if (first < 1 || first > NUM_LEDS || last < 1 || last > NUM_LEDS) return "light numbers must be 1 to 65";
+    if (first < 1 || first > ledCount[out] || last < 1 || last > ledCount[out]) {
+      static char msg[64];
+      snprintf(msg, sizeof(msg), "strand %c has lights 1 to %u", OUTPUT_LETTERS[out], ledCount[out]);
+      return msg;
+    }
     while (pos < len && text[pos] == ' ') pos++;
     if (pos < len && text[pos] != ',') return "separate ranges with commas, e.g. A1-12, B30-65";
 
-    outRanges[count++] = { (uint8_t)out, (uint8_t)(first - 1), (uint8_t)(last - 1) };
+    outRanges[count++] = { (uint8_t)out, (uint16_t)(first - 1), (uint16_t)(last - 1) };
   }
   if (count == 0) return "enter at least one range, e.g. A1-12";
   return nullptr;
@@ -162,16 +177,31 @@ void loadZones() {
   File f = FFat.open(ZONES_FILE, "r");
   if (!f) return;
   FileHeader h;
-  uint16_t recordSize = sizeof(ZoneDef) + sizeof(LightState);
-  if (f.read((uint8_t*)&h, sizeof(h)) != sizeof(h) || h.magic != ZONES_MAGIC ||
-      h.version != ZONES_VERSION || h.recordSize != recordSize) {
+  bool okHeader = f.read((uint8_t*)&h, sizeof(h)) == sizeof(h) && h.magic == ZONES_MAGIC;
+  bool isV1 = okHeader && h.version == 1 &&
+              h.recordSize == sizeof(ZoneDefV1) + sizeof(LightState);
+  bool isV2 = okHeader && h.version == ZONES_VERSION &&
+              h.recordSize == sizeof(ZoneDef) + sizeof(LightState);
+  if (!isV1 && !isV2) {
     Serial.println("Zones: file is from a different firmware layout, starting with no zones");
     f.close();
     return;
   }
   int loaded = 0;
   for (int z = 0; z < h.count && z < MAX_ZONES; z++) {
-    if (f.read((uint8_t*)&zones[z], sizeof(ZoneDef)) != sizeof(ZoneDef)) break;
+    if (isV1) {
+      // Convert the old 8-bit light numbers.
+      ZoneDefV1 old;
+      if (f.read((uint8_t*)&old, sizeof(old)) != sizeof(old)) break;
+      zones[z].used = old.used;
+      memcpy(zones[z].name, old.name, NAME_LEN);
+      zones[z].rangeCount = old.rangeCount;
+      for (int r = 0; r < MAX_ZONE_RANGES; r++) {
+        zones[z].ranges[r] = { old.ranges[r].output, old.ranges[r].first, old.ranges[r].last };
+      }
+    } else {
+      if (f.read((uint8_t*)&zones[z], sizeof(ZoneDef)) != sizeof(ZoneDef)) break;
+    }
     if (f.read((uint8_t*)&states[CH_ZONE0 + z], sizeof(LightState)) != sizeof(LightState)) break;
     LightState& s = states[CH_ZONE0 + z];
     if (s.mode >= MODE_COUNT) s.mode = MODE_SOLID;
@@ -184,7 +214,8 @@ void loadZones() {
     if (zones[z].used) loaded++;
   }
   f.close();
-  Serial.printf("Zones: %d loaded\n", loaded);
+  Serial.printf("Zones: %d loaded%s\n", loaded, isV1 ? " (converted from the old format)" : "");
+  if (isV1) markStateChanged();   // write it back in the new format
   for (int z = 0; z < MAX_ZONES; z++) {
     if (!zones[z].used) continue;
     Serial.printf("  %s = %s (%u lights), %s\n", zones[z].name,

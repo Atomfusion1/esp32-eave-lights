@@ -12,6 +12,7 @@
 //   files.ino           house photos + layout.json for the House view editor (/files)
 //   led_output.ino      strand setup, power caps, showFrame()
 //   locate.ino          "Find a light": lights chosen lights only, auto-off
+//   ota.ino             wireless firmware updates (Arduino IDE network port + web upload)
 //   paths.ino           Whole house path, and paths made from zones (/paths.bin)
 //   presets.ino         saved looks: named effect settings, stored in /presets.bin
 //   settings_store.ino  strand/house settings in Preferences; mounts the FAT storage
@@ -32,6 +33,8 @@
 #include <WebServer.h>
 #include <Preferences.h>
 #include <FFat.h>
+#include <ArduinoOTA.h>
+#include <Update.h>
 
 #if __has_include("secrets.h")
 #include "secrets.h"
@@ -39,11 +42,21 @@
 #error "Missing secrets.h: copy secrets.example.h to secrets.h and fill in your Wi-Fi details"
 #endif
 
-#define FW_VERSION "0.11.0"
+// Password for wireless firmware updates. Set OTA_PASSWORD in secrets.h;
+// older secrets.h files without it fall back to the hotspot password.
+#ifndef OTA_PASSWORD
+#define OTA_PASSWORD AP_PASSWORD
+#endif
+
+#define FW_VERSION "0.12.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
-#define NUM_LEDS        65
+// Each strand's length is set on the page (Setup > Strand lengths) and saved;
+// arrays are sized for MAX_LEDS so lengths can change without new firmware.
+#define MAX_LEDS        300   // per strand
+#define DEFAULT_LEDS_A  67    // user, 2026-11-23: strand A has 67 lights
+#define DEFAULT_LEDS_B  65
 #define PIN_OUTPUT_A    8   // tested
 #define PIN_OUTPUT_B    9   // pin tested 2026-11-23 with strand A moved over; strand B itself untested
 #define ENABLE_OUTPUT_B 1   // 1 = drive GPIO 9 too
@@ -55,10 +68,14 @@
 #define CAP_BLUE        240
 #define CAP_CHANNEL_SUM 400  // white ~133 each = measured 1.26 A per strand
 
+// Lights on each strand right now (1..MAX_LEDS).
+uint16_t ledCount[NUM_OUTPUTS] = { DEFAULT_LEDS_A, DEFAULT_LEDS_B };
+#define MAX_TOTAL_LEDS (NUM_OUTPUTS * MAX_LEDS)
+
 // What effects draw into (full range, uncapped).
-CRGB frame[NUM_OUTPUTS][NUM_LEDS];
+CRGB frame[NUM_OUTPUTS][MAX_LEDS];
 // What actually gets sent to the LEDs (after power caps).
-CRGB out[NUM_OUTPUTS][NUM_LEDS];
+CRGB out[NUM_OUTPUTS][MAX_LEDS];
 
 // ---------- Light state (set from the web page, saved in flash) ----------
 enum Mode : uint8_t {
@@ -79,7 +96,7 @@ struct LightState {
   uint8_t fadeMin;      // fade mode: lowest level 0-255 (64 = 25%)
   uint8_t speed;        // chase/comet: lights per second (SPEED_MIN-SPEED_MAX)
   uint8_t size;         // chase: lit block length; comet: tail length (SIZE_MIN-SIZE_MAX)
-  bool    reverse;      // chase/comet: false = moves from light 1 toward light 65
+  bool    reverse;      // chase/comet: false = moves from light 1 toward the last light
   bool    bgOn;         // chase/comet: true = unlit lights show bgColor instead of off
   CRGB    bgColor;      // chase/comet background, also scaled by brightness
 };
@@ -103,9 +120,9 @@ struct PathPoint {
   uint16_t index;    // 0-based light on that strand (light 1 = index 0)
 };
 
-// "Whole house": B65 -> B1, then A1 -> A65 (built in paths.ino).
-#define HOUSE_PATH_LEN (NUM_OUTPUTS * NUM_LEDS)
-PathPoint housePath[HOUSE_PATH_LEN];
+// "Whole house": last B light -> B1, then A1 -> last A light (built in paths.ino).
+PathPoint housePath[MAX_TOTAL_LEDS];
+uint16_t  houseLen = 0;
 
 // ---------- Zones ----------
 // A zone is a name plus up to MAX_ZONE_RANGES light ranges, e.g. "Porch" = A1-12.
@@ -115,9 +132,9 @@ PathPoint housePath[HOUSE_PATH_LEN];
 #define NAME_LEN         24   // zone and saved-look names, including the ending 0
 
 struct ZoneRange {
-  uint8_t output;   // 0 = A, 1 = B
-  uint8_t first;    // 0-based, inclusive
-  uint8_t last;     // 0-based, inclusive; first > last = runs backwards
+  uint8_t  output;  // 0 = A, 1 = B
+  uint16_t first;   // 0-based, inclusive
+  uint16_t last;    // 0-based, inclusive; first > last = runs backwards
 };
 
 struct ZoneDef {
@@ -128,7 +145,7 @@ struct ZoneDef {
 };
 
 ZoneDef   zones[MAX_ZONES];
-PathPoint zonePoints[MAX_ZONES][HOUSE_PATH_LEN];  // each zone's lights in line order
+PathPoint zonePoints[MAX_ZONES][MAX_TOTAL_LEDS];  // each zone's lights in line order
 uint16_t  zoneLen[MAX_ZONES];                     // lights in each zone (0 if unused)
 
 // ---------- Paths made from zones ----------
@@ -138,7 +155,7 @@ uint16_t  zoneLen[MAX_ZONES];                     // lights in each zone (0 if u
 #define MAX_PATHS        8
 #define MAX_PATH_STEPS   12
 #define MAX_PATH_GAP     30
-#define MAX_PATH_LEN     (HOUSE_PATH_LEN + MAX_PATH_STEPS * MAX_PATH_GAP)
+#define MAX_PATH_LEN     (MAX_TOTAL_LEDS + MAX_PATH_STEPS * MAX_PATH_GAP)
 #define VIRTUAL_OUTPUT   0xFF   // PathPoint.output for a gap position (no real light)
 
 struct PathStep {
@@ -230,20 +247,21 @@ void setup() {
 
   Serial.println();
   Serial.println("ESP32-S3 Eave Lights v" FW_VERSION);
-  Serial.printf("Output A: GPIO %d, %d LEDs\n", PIN_OUTPUT_A, NUM_LEDS);
-#if ENABLE_OUTPUT_B
-  Serial.printf("Output B: GPIO %d, %d LEDs\n", PIN_OUTPUT_B, NUM_LEDS);
-#else
-  Serial.println("Output B: disabled");
-#endif
   Serial.printf("Flash: %u MB, PSRAM: %u MB\n",
                 ESP.getFlashChipSize() / (1024 * 1024),
                 ESP.getPsramSize() / (1024 * 1024));
 
-  initPaths();
   initZones();
   initZonePaths();
-  loadState();
+  loadState();          // includes the strand lengths
+  applyLedCounts();     // strands to their saved lengths
+  initPaths();          // Whole house path follows the lengths
+  Serial.printf("Output A: GPIO %d, %u lights\n", PIN_OUTPUT_A, ledCount[0]);
+#if ENABLE_OUTPUT_B
+  Serial.printf("Output B: GPIO %d, %u lights\n", PIN_OUTPUT_B, ledCount[1]);
+#else
+  Serial.println("Output B: disabled");
+#endif
   startStorage();
   startFiles();
   loadZones();
@@ -251,10 +269,12 @@ void setup() {
   loadPresets();
   startWifi();
   startWeb();
+  startOta();
 }
 
 void loop() {
   handleWifi();
+  handleOta();
   handleWeb();
   handleLocateTimeout();
   renderFrame();

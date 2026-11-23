@@ -49,10 +49,16 @@ void stopHotspot() {
   Serial.println("Wi-Fi: hotspot stopped");
 }
 
+// True once the board is reachable: on the home network or running its hotspot.
+bool networkUp() {
+  return WiFi.status() == WL_CONNECTED || hotspotActive;
+}
+
 void startMdns() {
   if (mdnsStarted) return;
   if (MDNS.begin(HOSTNAME)) {
     MDNS.addService("http", "tcp", 80);
+    MDNS.enableArduino(3232, true);   // lets the Arduino IDE list the board as a network port
     mdnsStarted = true;
   }
 }

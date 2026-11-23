@@ -9,6 +9,7 @@
 //
 // Keys per channel: "<a|b|c>_on", "_col", "_bri", "_mode", "_fsec", "_fmin", "_spd",
 // "_size", "_rev", "_bgon", "_bgc" (a = strand A, b = strand B, c = Whole house).
+// Strand lengths: "a_cnt", "b_cnt".
 // Versions before 0.4.0 used one set of keys without a prefix ("on", "color", ...);
 // those are used as the defaults, so both strands start from the old saved state.
 
@@ -84,6 +85,10 @@ void loadState() {
     s.bgOn        = prefs.getBool(outputKey(o, "bgon"), s.bgOn);
     s.bgColor     = CRGB(prefs.getUInt(outputKey(o, "bgc"), colorToRgb(s.bgColor)));
   }
+  // Strand lengths ("a_cnt", "b_cnt").
+  for (int o = 0; o < NUM_OUTPUTS; o++) {
+    ledCount[o] = constrain(prefs.getUShort(outputKey(o, "cnt"), ledCount[o]), 1, MAX_LEDS);
+  }
   prefs.end();
 
   Serial.println("State loaded:");
@@ -123,6 +128,7 @@ void handleStateSave() {
     prefs.putBool(outputKey(o, "bgon"), s.bgOn);
     prefs.putUInt(outputKey(o, "bgc"), colorToRgb(s.bgColor));
   }
+  for (int o = 0; o < NUM_OUTPUTS; o++) prefs.putUShort(outputKey(o, "cnt"), ledCount[o]);
   prefs.end();
 
   // Zone and path settings (on/off, color, ...) live in their files, so write them too.

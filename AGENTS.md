@@ -58,6 +58,13 @@ $ino  = "C:\Users\Admin\Desktop\ESP32_Eave_Lights\ESP32_Eave_Lights.ino"
 - After compiling, report the "Sketch uses … / Global variables use …" lines.
 - Only upload when the user asks: the board drives the house lights.
 
+## Wireless updates (v0.12.0+)
+
+The board is installed outside, so normally upload over Wi-Fi:
+- **Arduino IDE:** Tools → Port → `eavelights at 192.168.1.25` (network port), then Upload. The IDE asks for `OTA_PASSWORD` from `secrets.h`, or `AP_PASSWORD` if that isn't defined. From the command line: `--upload --port 192.168.1.25`. Only upload when the user asks.
+- **Web page:** Setup → Firmware update with the `.bin` from Sketch → Export compiled Binary (`POST /api/firmware?password=…`).
+- A failed update leaves the old firmware running (two 3 MB app slots). Any firmware that drops `ota.ino` loses wireless updates, and the next update then needs USB.
+
 ## Sketch layout: one `.ino` per task
 
 The user prefers **separate `.ino` files (IDE tabs) for different tasks** instead of `.h`/`.cpp` pairs.
@@ -72,6 +79,7 @@ ESP32_Eave_Lights/              folder name must equal the main sketch name
                                 layers strands → Whole house → zones, then Find-a-light overlay
   led_output.ino                strand setup, power caps, showFrame()
   locate.ino                    Find a light: show only chosen ranges, 5-min auto-off
+  ota.ino                       wireless updates: ArduinoOTA (IDE network port) + web .bin upload
   paths.ino                     Whole house path (B65→B1, A1→A65) and paths made from
                                 zones (steps: zone, reverse, gap) in /paths.bin
   presets.ino                   saved looks (name + LightState) in /presets.bin
@@ -105,6 +113,10 @@ How the IDE handles tabs:
 - `.bin` storage files have a `FileHeader` with the record size. Changing `LightState`, `ZoneDef`, `PathDef`/`PathStep` or `Preset` makes old files unreadable, and zones/saved looks start empty. Warn the user before changing those structs.
 
 Standalone throwaway test sketches go in their own folder under `tests/<name>/<name>.ino`, so they never get compiled into the main sketch.
+
+## Strand lengths
+
+Strand lengths are **not fixed in code**: `ledCount[]` is set on the page (Setup → Strand lengths, `POST /api/strands`) and saved (`a_cnt`, `b_cnt`). Arrays are sized for `MAX_LEDS` (300) per strand. Never use a fixed light count. Loop to `ledCount[o]`; the Whole house path is `houseLen`. `/api/frame` sends each strand's count. At boot all `MAX_LEDS` are cleared, then the controllers are trimmed with `setLeds()`.
 
 ## Firmware rules (from the handoff)
 
