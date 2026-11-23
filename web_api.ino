@@ -1,11 +1,10 @@
 // web_api — control page and JSON API on port 80.
 //
 //   GET  /            control page
-//   GET  /api/state   {"linked":bool, "version":..., "outputs":[{...}, {...}]}
+//   GET  /api/state   {"version":..., "outputs":[{...}, {...}]}
 //   POST /api/state   form-encoded body or URL query, any of:
-//                       output=all|a|b|0|1   which strand to change (default all;
-//                                            ignored while linked: changes go to all)
-//                       linked=0|1           1 copies strand A's settings to every strand
+//                       output=all|a|b|0|1   which strand to change (default all).
+//                                            "all" also lines up the fades.
 //                       on=0|1  color=RRGGBB  brightness=0-255  mode=solid|fade|test
 //                       fadeSeconds=2-60  fadeMin=0-255
 //                     Invalid values change nothing and return 400. Returns the new state.
@@ -17,9 +16,7 @@ WebServer server(80);
 const char* MODE_NAMES[MODE_COUNT] = { "solid", "fade", "test" };
 
 String stateJson() {
-  String json = "{\"linked\":";
-  json += linked ? "true" : "false";
-  json += ",\"version\":\"" FW_VERSION "\",\"outputs\":[";
+  String json = "{\"version\":\"" FW_VERSION "\",\"outputs\":[";
   for (int o = 0; o < NUM_OUTPUTS; o++) {
     const LightState& s = states[o];
     char buf[256];
@@ -81,22 +78,10 @@ void handleSetState() {
     newMode = (Mode)found;
   }
 
-  // ---- 2. Linking ----
+  // ---- 2. Apply to the target output(s) ----
   bool changed = false;
-  if (server.hasArg("linked")) {
-    String v = server.arg("linked");
-    bool wantLinked = (v == "1" || v == "true");
-    if (wantLinked && !linked) {
-      for (int o = 1; o < NUM_OUTPUTS; o++) states[o] = states[0];
-      syncFadePhases();
-    }
-    linked = wantLinked;
-    changed = true;
-  }
-
-  // ---- 3. Apply to the target output(s) ----
   for (int o = 0; o < NUM_OUTPUTS; o++) {
-    if (!linked && target >= 0 && o != target) continue;
+    if (target >= 0 && o != target) continue;
     LightState& s = states[o];
 
     if (server.hasArg("on")) {
@@ -119,6 +104,11 @@ void handleSetState() {
       s.fadeMin = (uint8_t)constrain(server.arg("fadeMin").toInt(), 0, 255);
       changed = true;
     }
+  }
+
+  // Changing both strands together: keep their fades in step.
+  if (target < 0 && (hasMode || server.hasArg("fadeSeconds") || server.hasArg("on"))) {
+    syncFadePhases();
   }
 
   if (changed) markStateChanged();
@@ -145,16 +135,16 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .seg{display:flex;gap:8px}
 .seg button{flex:1;padding:12px;border-radius:10px;border:1px solid var(--line);background:none;color:var(--text);cursor:pointer;font-size:15px}
 .seg button.sel{border-color:var(--accent);background:var(--accent);color:#fff}
-.seg button small{display:block;font-size:11px;opacity:.75}
-.switch{display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--text);font-size:15px;margin:0}
-.switch input{width:22px;height:22px;accent-color:var(--accent)}
+.seg button small{display:block;font-size:11px;opacity:.8}
+#tabs button{padding:10px 6px}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;border:1px solid rgba(128,128,128,.5);vertical-align:-1px}
 .status{color:var(--muted);font-size:13px;text-align:center}
 .hint{color:var(--muted);font-size:12px;margin:8px 0 0}
 </style></head><body><main>
 <h1>Eave Lights</h1>
 <div class="card">
-<label class="switch">Same on both strands <input id="linked" type="checkbox"></label>
-<div class="seg" id="tabs" style="margin-top:14px" hidden></div>
+<label>Strand</label>
+<div class="seg" id="tabs"></div>
 <p class="hint" id="disabledHint" hidden>This strand is turned off in the firmware (ENABLE_OUTPUT_B).</p>
 </div>
 <div class="card"><button id="power" class="power">…</button></div>
@@ -170,31 +160,38 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 </div>
 <p class="status" id="status">Connecting…</p>
 </main><script>
-const $=id=>document.getElementById(id);let st=null,sel=0,timer=null;
+const $=id=>document.getElementById(id);let st=null,timer=null;
+// sel = index of the strand being edited, or -1 for both
+let sel=0;try{const v=localStorage.getItem('eaveSel');if(v!==null)sel=+v;}catch(e){}
 const pct=v=>Math.round(v/2.55)+'%';
-function cur(){return st.outputs[st.linked?0:sel];}
+const both=()=>sel<0;
+function cur(){return st.outputs[both()?0:sel];}
+function anyOn(){return st.outputs.some(o=>o.on);}
+function pick(i){sel=i;try{localStorage.setItem('eaveSel',i);}catch(e){}show(st);}
 function show(s){st=s;if(sel>=s.outputs.length)sel=0;
- $('linked').checked=s.linked;$('tabs').hidden=s.linked;
- $('tabs').innerHTML=s.outputs.map((o,i)=>'<button data-i="'+i+'" class="'+(i===sel?'sel':'')+'">Strand '+o.id+
-  '<small>GPIO '+o.gpio+' · '+(o.on?'on':'off')+'</small></button>').join('');
- $('tabs').querySelectorAll('button').forEach(b=>b.onclick=()=>{sel=+b.dataset.i;show(st);});
+ $('tabs').innerHTML=s.outputs.map((o,i)=>'<button data-i="'+i+'" class="'+(i===sel?'sel':'')+'">'+
+  '<span class="dot" style="background:'+(o.on?o.color:'transparent')+'"></span>Strand '+o.id+
+  '<small>GPIO '+o.gpio+' · '+(o.on?'on':'off')+'</small></button>').join('')+
+  '<button data-i="-1" class="'+(both()?'sel':'')+'">Both<small>'+(s.outputs.every(o=>o.on)?'all on':anyOn()?'some on':'all off')+'</small></button>';
+ $('tabs').querySelectorAll('button').forEach(b=>b.onclick=()=>pick(+b.dataset.i));
  const o=cur();
- $('disabledHint').hidden=s.linked||o.enabled;
- $('power').textContent=(s.linked?'Both strands ':'Strand '+o.id+' ')+(o.on?'ON':'OFF');
- $('power').classList.toggle('on',o.on);
+ $('disabledHint').hidden=both()||o.enabled;
+ const isOn=both()?anyOn():o.on;
+ $('power').textContent=(both()?'Both strands ':'Strand '+o.id+' ')+(isOn?'ON':'OFF');
+ $('power').classList.toggle('on',isOn);
  $('color').value=o.color.toLowerCase();$('bri').value=o.brightness;$('briVal').textContent=pct(o.brightness);
  $('modes').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',b.dataset.mode===o.mode));
  $('fadeCard').hidden=o.mode!=='fade';
  $('fsec').value=o.fadeSeconds;$('fsecVal').textContent=o.fadeSeconds+' s';
  $('fmin').value=o.fadeMin;$('fminVal').textContent=pct(o.fadeMin);
  $('status').textContent='Connected · v'+s.version;}
-async function send(p){if(!st)return;p.output=st.linked?'all':st.outputs[sel].id;
+async function send(p){if(!st)return;p.output=both()?'all':st.outputs[sel].id;
  try{const r=await fetch('/api/state',{method:'POST',body:new URLSearchParams(p)});const j=await r.json();
   if(j.error){$('status').textContent=j.error;}else show(j);}
  catch(e){$('status').textContent='Not connected';}}
 function sendSoon(p){clearTimeout(timer);timer=setTimeout(()=>send(p),120);}
-$('linked').onchange=e=>send({linked:e.target.checked?1:0});
-$('power').onclick=()=>send({on:cur().on?0:1});
+// Both: if any strand is on, turn all off; otherwise turn all on.
+$('power').onclick=()=>send({on:(both()?anyOn():cur().on)?0:1});
 $('color').oninput=e=>sendSoon({color:e.target.value.slice(1)});
 $('bri').oninput=e=>{$('briVal').textContent=pct(e.target.value);sendSoon({brightness:e.target.value});};
 $('modes').querySelectorAll('button').forEach(b=>b.onclick=()=>send({mode:b.dataset.mode}));

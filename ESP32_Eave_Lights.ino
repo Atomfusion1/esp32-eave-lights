@@ -31,7 +31,7 @@
 #error "Missing secrets.h: copy secrets.example.h to secrets.h and fill in your Wi-Fi details"
 #endif
 
-#define FW_VERSION "0.4.0"
+#define FW_VERSION "0.4.1"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
@@ -77,9 +77,6 @@ LightState states[NUM_OUTPUTS] = {
   { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64 },
   { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64 },
 };
-
-// true = both strands show the same thing; every change is applied to all outputs.
-bool linked = true;
 
 const char  OUTPUT_LETTERS[NUM_OUTPUTS] = { 'A', 'B' };
 const int   OUTPUT_PINS[NUM_OUTPUTS]    = { PIN_OUTPUT_A, PIN_OUTPUT_B };

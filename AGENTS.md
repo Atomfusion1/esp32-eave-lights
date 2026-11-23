@@ -66,7 +66,7 @@ The user prefers **separate `.ino` files (IDE tabs) for different tasks** instea
 ESP32_Eave_Lights/              folder name must equal the main sketch name
   ESP32_Eave_Lights.ino         MAIN: must stay in the repo root, never move or rename.
                                 defines, includes, LightState/Mode types, states[] per output,
-                                linked flag, globals, setup(), loop()
+                                globals, setup(), loop()
   effects.ino                   draws the current mode (solid/fade/test) into frame[] at 50 fps
   led_output.ino                strand setup, power caps, showFrame()
   settings_store.ino            saves/loads LightState in flash (Preferences), delayed save
@@ -90,7 +90,7 @@ Standalone throwaway test sketches go in their own folder under `tests/<name>/<n
 ## Firmware rules (from the handoff)
 
 - LED color order is **`RBG`**, chipset `WS2811`. Never change it to `GRB`.
-- Output A = GPIO 8 (tested). Output B = GPIO 9 (`ENABLE_OUTPUT_B 1`; pin verified with strand A in v0.3.0, the installed strand B not yet connected). Since v0.4.0 each output has its own `LightState` in `states[]`; `linked = true` applies every change to all outputs.
+- Output A = GPIO 8 (tested). Output B = GPIO 9 (`ENABLE_OUTPUT_B 1`; pin verified with strand A in v0.3.0, the installed strand B not yet connected). Each output has its own `LightState` in `states[]` (v0.4+). The API's `output=all` changes every strand and lines up their fades.
 - Every frame goes through `showFrame()` so the power caps are always applied. Never call `FastLED.show()` on raw colors.
 - `initOutputs()` stays the first line of `setup()` (sends OFF).
 - No blocking `delay()` in `loop()`. Use `millis()` timing.

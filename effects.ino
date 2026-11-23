@@ -6,7 +6,7 @@ const uint32_t FRAME_MS = 20;      // 50 frames per second
 // so changing the speed slider changes the rate smoothly instead of jumping.
 uint16_t fadePhase[NUM_OUTPUTS] = { 0 };
 
-// Makes every output's fade line up with output A (used when linking strands).
+// Makes every output's fade line up with output A (used when both strands are changed together).
 void syncFadePhases() {
   for (int o = 1; o < NUM_OUTPUTS; o++) fadePhase[o] = fadePhase[0];
 }

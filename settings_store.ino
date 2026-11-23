@@ -1,9 +1,9 @@
-// settings_store — keeps each output's light state (and the linked flag) in flash
+// settings_store — keeps each output's light state in flash
 // (ESP32 Preferences / NVS), so the lights come back the way they were after a
 // power cut or reboot. Saves are delayed SAVE_DELAY_MS after the last change, so
 // dragging a slider doesn't write flash dozens of times.
 //
-// Keys: "linked", then per output "<a|b>_on", "_col", "_bri", "_mode", "_fsec", "_fmin".
+// Keys per output: "<a|b>_on", "_col", "_bri", "_mode", "_fsec", "_fmin".
 // Versions before 0.4.0 used one set of keys without a prefix ("on", "color", ...);
 // those are used as the defaults, so both strands start from the old saved state.
 
@@ -38,8 +38,6 @@ void loadState() {
   old.fadeSeconds = prefs.getUChar("fsec", old.fadeSeconds);
   old.fadeMin     = prefs.getUChar("fmin", old.fadeMin);
 
-  linked = prefs.getBool("linked", true);
-
   for (int o = 0; o < NUM_OUTPUTS; o++) {
     LightState& s = states[o];
     s.on          = prefs.getBool(outputKey(o, "on"), old.on);
@@ -53,7 +51,7 @@ void loadState() {
   }
   prefs.end();
 
-  Serial.printf("State loaded: strands %s\n", linked ? "linked" : "separate");
+  Serial.println("State loaded:");
   for (int o = 0; o < NUM_OUTPUTS; o++) {
     const LightState& s = states[o];
     Serial.printf("  %c: %s, #%02X%02X%02X, brightness %u, mode %u, fade %us min %u\n",
@@ -62,7 +60,7 @@ void loadState() {
   }
 }
 
-// Call after changing `states` or `linked`; the save happens a little later in handleStateSave().
+// Call after changing `states`; the save happens a little later in handleStateSave().
 void markStateChanged() {
   stateDirty = true;
   stateDirtyMs = millis();
@@ -73,7 +71,6 @@ void handleStateSave() {
   stateDirty = false;
 
   prefs.begin(PREFS_NAMESPACE, false);
-  prefs.putBool("linked", linked);
   for (int o = 0; o < NUM_OUTPUTS; o++) {
     const LightState& s = states[o];
     prefs.putBool(outputKey(o, "on"), s.on);
