@@ -35,6 +35,8 @@ The system should be extensible: initially 2 physical outputs × 65 LEDs, but av
 | Startup | Lights showing white at power-up until the ESP32 boots is **accepted**. Firmware sends OFF as the first thing in `setup()`. No 24 V power switch planned. |
 | Power limit | Per-color caps: red 240, green 240, blue 240; mixed colors limited to a channel sum of 400 (white ≈ 133 each). White at 100 each measured 1.1 A per strand; white at 133 each (v0.1.2 test pattern) measured **1.26 A** per strand (2026-11-23, one strand). |
 | Data wiring | Direct 3.3 V for now. **74AHCT125 not yet purchased**; required before permanent outdoor install. |
+| Live view | v0.5.0: page polls `GET /api/frame` (exact post-cap RGB per LED). Measured **9.4 updates/s**, dots match the real strand (2026-11-23). Fast effects look choppier on the page than on the lights (50 fps); accepted. WebSockets later if needed. |
+| Effects | Must be deterministic (settings + elapsed time only, no randomness) so a browser simulation can reproduce them exactly. |
 | Wi-Fi | Join home 2.4 GHz network; fall back to its own access point if that fails. Credentials in untracked `secrets.h`. |
 
 ## 2. Verified hardware and test results

@@ -3,7 +3,7 @@
 // power cut or reboot. Saves are delayed SAVE_DELAY_MS after the last change, so
 // dragging a slider doesn't write flash dozens of times.
 //
-// Keys per output: "<a|b>_on", "_col", "_bri", "_mode", "_fsec", "_fmin".
+// Keys per output: "<a|b>_on", "_col", "_bri", "_mode", "_fsec", "_fmin", "_spd", "_size", "_rev".
 // Versions before 0.4.0 used one set of keys without a prefix ("on", "color", ...);
 // those are used as the defaults, so both strands start from the old saved state.
 
@@ -48,15 +48,20 @@ void loadState() {
     s.fadeSeconds = constrain(prefs.getUChar(outputKey(o, "fsec"), old.fadeSeconds),
                               FADE_SECONDS_MIN, FADE_SECONDS_MAX);
     s.fadeMin     = prefs.getUChar(outputKey(o, "fmin"), old.fadeMin);
+    s.speed       = constrain(prefs.getUChar(outputKey(o, "spd"), s.speed), SPEED_MIN, SPEED_MAX);
+    s.size        = constrain(prefs.getUChar(outputKey(o, "size"), s.size), SIZE_MIN, SIZE_MAX);
+    s.reverse     = prefs.getBool(outputKey(o, "rev"), s.reverse);
   }
   prefs.end();
 
   Serial.println("State loaded:");
   for (int o = 0; o < NUM_OUTPUTS; o++) {
     const LightState& s = states[o];
-    Serial.printf("  %c: %s, #%02X%02X%02X, brightness %u, mode %u, fade %us min %u\n",
+    Serial.printf("  %c: %s, #%02X%02X%02X, brightness %u, mode %u, fade %us min %u, "
+                  "speed %u size %u %s\n",
                   OUTPUT_LETTERS[o], s.on ? "ON" : "OFF", s.color.r, s.color.g, s.color.b,
-                  s.brightness, s.mode, s.fadeSeconds, s.fadeMin);
+                  s.brightness, s.mode, s.fadeSeconds, s.fadeMin,
+                  s.speed, s.size, s.reverse ? "reverse" : "forward");
   }
 }
 
@@ -79,6 +84,9 @@ void handleStateSave() {
     prefs.putUChar(outputKey(o, "mode"), s.mode);
     prefs.putUChar(outputKey(o, "fsec"), s.fadeSeconds);
     prefs.putUChar(outputKey(o, "fmin"), s.fadeMin);
+    prefs.putUChar(outputKey(o, "spd"), s.speed);
+    prefs.putUChar(outputKey(o, "size"), s.size);
+    prefs.putBool(outputKey(o, "rev"), s.reverse);
   }
   prefs.end();
   Serial.println("State saved");

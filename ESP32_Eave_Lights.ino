@@ -31,7 +31,7 @@
 #error "Missing secrets.h: copy secrets.example.h to secrets.h and fill in your Wi-Fi details"
 #endif
 
-#define FW_VERSION "0.5.0"
+#define FW_VERSION "0.6.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
@@ -57,8 +57,10 @@ enum Mode : uint8_t {
   MODE_SOLID = 0,   // steady color
   MODE_FADE  = 1,   // color breathes in and out
   MODE_TEST  = 2,   // red/green/blue/white/off cycle, ignores color and brightness
+  MODE_CHASE = 3,   // blocks of `size` lit lights with equal gaps, moving along the strand
+  MODE_COMET = 4,   // one bright head with a `size`-long fading tail, travels the strand and wraps
 };
-#define MODE_COUNT 3
+#define MODE_COUNT 5
 
 struct LightState {
   bool    on;
@@ -67,15 +69,22 @@ struct LightState {
   Mode    mode;
   uint8_t fadeSeconds;  // fade mode: seconds per breath (FADE_SECONDS_MIN-FADE_SECONDS_MAX)
   uint8_t fadeMin;      // fade mode: lowest level 0-255 (64 = 25%)
+  uint8_t speed;        // chase/comet: lights per second (SPEED_MIN-SPEED_MAX)
+  uint8_t size;         // chase: lit block length; comet: tail length (SIZE_MIN-SIZE_MAX)
+  bool    reverse;      // chase/comet: false = moves from light 1 toward light 65
 };
 
 #define FADE_SECONDS_MIN 2
 #define FADE_SECONDS_MAX 60
+#define SPEED_MIN 1
+#define SPEED_MAX 100
+#define SIZE_MIN  1
+#define SIZE_MAX  30
 
 // One state per output (strand). Defaults used on first boot (nothing saved yet).
 LightState states[NUM_OUTPUTS] = {
-  { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64 },
-  { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64 },
+  { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64, 10, 5, false },
+  { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64, 10, 5, false },
 };
 
 const char  OUTPUT_LETTERS[NUM_OUTPUTS] = { 'A', 'B' };

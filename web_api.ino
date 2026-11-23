@@ -5,8 +5,10 @@
 //   POST /api/state   form-encoded body or URL query, any of:
 //                       output=all|a|b|0|1   which strand to change (default all).
 //                                            "all" also lines up the fades.
-//                       on=0|1  color=RRGGBB  brightness=0-255  mode=solid|fade|test
+//                       on=0|1  color=RRGGBB  brightness=0-255
+//                       mode=solid|fade|test|chase|comet
 //                       fadeSeconds=2-60  fadeMin=0-255
+//                       speed=1-100 (lights/s)  size=1-30  reverse=0|1
 //                     Invalid values change nothing and return 400. Returns the new state.
 //   GET  /api/frame   the exact colors being sent to the LEDs right now (after power caps),
 //                     binary: [outputs][leds low byte][leds high byte] then R,G,B per LED,
@@ -16,7 +18,7 @@
 
 WebServer server(80);
 
-const char* MODE_NAMES[MODE_COUNT] = { "solid", "fade", "test" };
+const char* MODE_NAMES[MODE_COUNT] = { "solid", "fade", "test", "chase", "comet" };
 
 String stateJson() {
   String json = "{\"version\":\"" FW_VERSION "\",\"outputs\":[";
@@ -26,11 +28,11 @@ String stateJson() {
     snprintf(buf, sizeof(buf),
              "%s{\"id\":\"%c\",\"gpio\":%d,\"enabled\":%s,\"on\":%s,"
              "\"color\":\"#%02X%02X%02X\",\"brightness\":%u,\"mode\":\"%s\","
-             "\"fadeSeconds\":%u,\"fadeMin\":%u}",
+             "\"fadeSeconds\":%u,\"fadeMin\":%u,\"speed\":%u,\"size\":%u,\"reverse\":%s}",
              o ? "," : "", OUTPUT_LETTERS[o], OUTPUT_PINS[o],
              OUTPUT_ENABLED[o] ? "true" : "false", s.on ? "true" : "false",
              s.color.r, s.color.g, s.color.b, s.brightness, MODE_NAMES[s.mode],
-             s.fadeSeconds, s.fadeMin);
+             s.fadeSeconds, s.fadeMin, s.speed, s.size, s.reverse ? "true" : "false");
     json += buf;
   }
   json += "]}";
@@ -77,7 +79,7 @@ void handleSetState() {
     for (int i = 0; i < MODE_COUNT; i++) {
       if (v == MODE_NAMES[i]) found = i;
     }
-    if (found < 0) return sendError("mode must be solid, fade or test");
+    if (found < 0) return sendError("mode must be solid, fade, test, chase or comet");
     newMode = (Mode)found;
   }
 
@@ -107,11 +109,25 @@ void handleSetState() {
       s.fadeMin = (uint8_t)constrain(server.arg("fadeMin").toInt(), 0, 255);
       changed = true;
     }
+    if (server.hasArg("speed")) {
+      s.speed = (uint8_t)constrain(server.arg("speed").toInt(), SPEED_MIN, SPEED_MAX);
+      changed = true;
+    }
+    if (server.hasArg("size")) {
+      s.size = (uint8_t)constrain(server.arg("size").toInt(), SIZE_MIN, SIZE_MAX);
+      changed = true;
+    }
+    if (server.hasArg("reverse")) {
+      String v = server.arg("reverse");
+      s.reverse = (v == "1" || v == "true");
+      changed = true;
+    }
   }
 
-  // Changing both strands together: keep their fades in step.
-  if (target < 0 && (hasMode || server.hasArg("fadeSeconds") || server.hasArg("on"))) {
-    syncFadePhases();
+  // Changing both strands together: keep their fades and movement in step.
+  if (target < 0 && (hasMode || server.hasArg("on") || server.hasArg("fadeSeconds") ||
+                     server.hasArg("speed") || server.hasArg("size") || server.hasArg("reverse"))) {
+    syncPhases();
   }
 
   if (changed) markStateChanged();
@@ -154,7 +170,8 @@ button.power{width:100%;padding:16px;font-size:18px;font-weight:600;border-radiu
 button.power.on{background:var(--accent);color:#fff}
 input[type=color]{width:100%;height:56px;border:none;border-radius:10px;background:none;padding:0}
 input[type=range]{width:100%;accent-color:var(--accent)}
-.seg{display:flex;gap:8px}
+.seg{display:flex;gap:8px;flex-wrap:wrap}
+#modes button{flex:1 1 28%}
 .seg button{flex:1;padding:12px;border-radius:10px;border:1px solid var(--line);background:none;color:var(--text);cursor:pointer;font-size:15px}
 .seg button.sel{border-color:var(--accent);background:var(--accent);color:#fff}
 .seg button small{display:block;font-size:11px;opacity:.8}
@@ -179,8 +196,15 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 <div class="card"><label>Color</label><input id="color" type="color"></div>
 <div class="card"><label>Brightness <span id="briVal"></span></label><input id="bri" type="range" min="0" max="255"></div>
 <div class="card"><label>Mode</label><div class="seg" id="modes">
-<button data-mode="solid">Solid</button><button data-mode="fade">Fade</button><button data-mode="test">Test</button>
+<button data-mode="solid">Solid</button><button data-mode="fade">Fade</button><button data-mode="chase">Chase</button>
+<button data-mode="comet">Comet</button><button data-mode="test">Test</button>
 </div></div>
+<div class="card" id="motionCard" hidden>
+<label>Speed: <span id="spdVal"></span></label><input id="spd" type="range" min="1" max="100">
+<label style="margin-top:14px"><span id="sizeName"></span>: <span id="sizeVal"></span></label><input id="size" type="range" min="1" max="30">
+<label style="margin-top:14px">Direction</label>
+<div class="seg" id="dir"><button data-rev="0">Light 1 → 65</button><button data-rev="1">Light 65 → 1</button></div>
+</div>
 <div class="card" id="fadeCard" hidden>
 <label>Fade speed: <span id="fsecVal"></span> per breath</label><input id="fsec" type="range" min="2" max="60">
 <label style="margin-top:14px">Fade lowest level: <span id="fminVal"></span></label><input id="fmin" type="range" min="0" max="230">
@@ -212,6 +236,11 @@ function show(s){st=s;if(sel>=s.outputs.length)sel=0;
  $('fadeCard').hidden=o.mode!=='fade';
  $('fsec').value=o.fadeSeconds;$('fsecVal').textContent=o.fadeSeconds+' s';
  $('fmin').value=o.fadeMin;$('fminVal').textContent=pct(o.fadeMin);
+ const moving=o.mode==='chase'||o.mode==='comet';$('motionCard').hidden=!moving;
+ $('spd').value=o.speed;$('spdVal').textContent=o.speed+' lights/s';
+ $('sizeName').textContent=o.mode==='comet'?'Tail length':'Lit block length';
+ $('size').value=o.size;$('sizeVal').textContent=o.size+(o.size===1?' light':' lights');
+ $('dir').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',(b.dataset.rev==='1')===o.reverse));
  $('status').textContent='Connected · v'+s.version;}
 async function send(p){if(!st)return;p.output=both()?'all':st.outputs[sel].id;
  try{const r=await fetch('/api/state',{method:'POST',body:new URLSearchParams(p)});const j=await r.json();
@@ -225,6 +254,9 @@ $('bri').oninput=e=>{$('briVal').textContent=pct(e.target.value);sendSoon({brigh
 $('modes').querySelectorAll('button').forEach(b=>b.onclick=()=>send({mode:b.dataset.mode}));
 $('fsec').oninput=e=>{$('fsecVal').textContent=e.target.value+' s';sendSoon({fadeSeconds:e.target.value});};
 $('fmin').oninput=e=>{$('fminVal').textContent=pct(e.target.value);sendSoon({fadeMin:e.target.value});};
+$('spd').oninput=e=>{$('spdVal').textContent=e.target.value+' lights/s';sendSoon({speed:e.target.value});};
+$('size').oninput=e=>{$('sizeVal').textContent=e.target.value+(e.target.value==='1'?' light':' lights');sendSoon({size:e.target.value});};
+$('dir').querySelectorAll('button').forEach(b=>b.onclick=()=>send({reverse:b.dataset.rev}));
 fetch('/api/state').then(r=>r.json()).then(show).catch(()=>$('status').textContent='Not connected');
 
 // ---- Live view: polls /api/frame, one request at a time, ~10 per second ----
