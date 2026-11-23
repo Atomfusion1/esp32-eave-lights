@@ -8,16 +8,31 @@
 //   PSRAM: OPI PSRAM
 //
 // Tabs (the IDE joins them after this file, in alphabetical order):
-//   led_output.ino    power caps + sending frames to the strands
-//   test_pattern.ino  red/green/blue/white/off test cycle
+//   effects.ino         draws the current mode into frame[] each frame
+//   led_output.ino      strand setup, power caps, showFrame()
+//   settings_store.ino  saves/loads the light state in flash (survives power cuts)
+//   test_pattern.ino    red/green/blue/white/off test cycle
+//   web_api.ino         web page + JSON API on port 80
+//   wifi.ino            home Wi-Fi with hotspot fallback, mDNS name
 //
-// All #defines and shared globals live in this file so every tab can use them.
+// All #defines, #includes, shared types and globals live in this file so every tab can use them.
 //
-// Stage 1: LED baseline. No Wi-Fi yet.
+// Stage 2: Wi-Fi control. Copy secrets.example.h to secrets.h and fill in your Wi-Fi.
 
 #include <FastLED.h>
+#include <WiFi.h>
+#include <ESPmDNS.h>
+#include <WebServer.h>
+#include <Preferences.h>
 
-#define FW_VERSION "0.1.2"
+#if __has_include("secrets.h")
+#include "secrets.h"
+#else
+#error "Missing secrets.h: copy secrets.example.h to secrets.h and fill in your Wi-Fi details"
+#endif
+
+#define FW_VERSION "0.2.0"
+#define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
 #define NUM_LEDS        65
@@ -30,19 +45,37 @@
 #define CAP_RED         240
 #define CAP_GREEN       240
 #define CAP_BLUE        240
-#define CAP_CHANNEL_SUM 400  // white ~133 each. Not yet measured (white 100 each = ~1.1 A per strand)
+#define CAP_CHANNEL_SUM 400  // white ~133 each = measured 1.26 A per strand
 
 // What effects draw into (full range, uncapped).
 CRGB frame[NUM_OUTPUTS][NUM_LEDS];
 // What actually gets sent to the LEDs (after power caps).
 CRGB out[NUM_OUTPUTS][NUM_LEDS];
 
+// ---------- Light state (set from the web page, saved in flash) ----------
+enum Mode : uint8_t {
+  MODE_SOLID = 0,   // steady color
+  MODE_FADE  = 1,   // color breathes in and out
+  MODE_TEST  = 2,   // red/green/blue/white/off cycle, ignores color and brightness
+};
+#define MODE_COUNT 3
+
+struct LightState {
+  bool    on;
+  CRGB    color;
+  uint8_t brightness;   // 0-255, applied before the power caps
+  Mode    mode;
+};
+
+// Defaults used on first boot (nothing saved yet).
+LightState state = { false, CRGB(255, 140, 40), 128, MODE_SOLID };
+
 void setup() {
   // Send OFF before anything else so the power-up white ends as soon as possible.
   initOutputs();
 
   Serial.begin(115200);
-  delay(1000);  // give USB serial time to connect; lights are already off
+  delay(500);
 
   Serial.println();
   Serial.println("ESP32-S3 Eave Lights v" FW_VERSION);
@@ -55,8 +88,15 @@ void setup() {
   Serial.printf("Flash: %u MB, PSRAM: %u MB\n",
                 ESP.getFlashChipSize() / (1024 * 1024),
                 ESP.getPsramSize() / (1024 * 1024));
+
+  loadState();
+  startWifi();
+  startWeb();
 }
 
 void loop() {
-  runTestPattern();
+  handleWifi();
+  handleWeb();
+  renderFrame();
+  handleStateSave();
 }

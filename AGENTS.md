@@ -64,10 +64,16 @@ The user prefers **separate `.ino` files (IDE tabs) for different tasks** instea
 
 ```text
 ESP32_Eave_Lights/              folder name must equal the main sketch name
-  ESP32_Eave_Lights.ino         MAIN: must stay in the repo root, never move or rename
+  ESP32_Eave_Lights.ino         MAIN: must stay in the repo root, never move or rename.
+                                defines, includes, LightState/Mode types, globals, setup(), loop()
+  effects.ino                   draws the current mode (solid/fade/test) into frame[] at 50 fps
   led_output.ino                strand setup, power caps, showFrame()
+  settings_store.ino            saves/loads LightState in flash (Preferences), delayed save
   test_pattern.ino              red/green/blue/white/off test cycle
-  <task>.ino                    add new tasks the same way (wifi.ino, web_api.ino, effects.ino ...)
+  web_api.ino                   control page + JSON API (GET/POST /api/state)
+  wifi.ino                      home Wi-Fi, hotspot fallback, mDNS eavelights.local
+  secrets.h                     Wi-Fi passwords, gitignored (copy from secrets.example.h)
+  <task>.ino                    add new tasks the same way
   Docs/                         handoff and notes (ignored by the compiler)
 ```
 

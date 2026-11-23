@@ -33,7 +33,7 @@ The system should be extensible: initially 2 physical outputs × 65 LEDs, but av
 | Output A | GPIO 8, 65 LEDs, WS2811, `RBG` (tested). |
 | Output B | GPIO 9 (planned, **untested**). Present in code, disabled by a compile flag until strand B is wired. GPIO 8/9 are the Arduino default I2C pins: any future I2C device must use other pins explicitly. |
 | Startup | Lights showing white at power-up until the ESP32 boots is **accepted**. Firmware sends OFF as the first thing in `setup()`. No 24 V power switch planned. |
-| Power limit | Per-color caps: red 240, green 240, blue 240; mixed colors limited to a channel sum of 400 (white ≈ 133 each). White at 100 each measured 1.1 A per strand; **white at 133 not yet measured**. |
+| Power limit | Per-color caps: red 240, green 240, blue 240; mixed colors limited to a channel sum of 400 (white ≈ 133 each). White at 100 each measured 1.1 A per strand; white at 133 each (v0.1.2 test pattern) measured **1.26 A** per strand (2026-11-23, one strand). |
 | Data wiring | Direct 3.3 V for now. **74AHCT125 not yet purchased**; required before permanent outdoor install. |
 | Wi-Fi | Join home 2.4 GHz network; fall back to its own access point if that fails. Credentials in untracked `secrets.h`. |
 

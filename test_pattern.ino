@@ -1,5 +1,5 @@
-// test_pattern — steps all strands through red, green, blue, white, off.
-// Non-blocking: call runTestPattern() every loop(); it changes color every STEP_MS.
+// test_pattern — red, green, blue, white, off cycle for checking colors and measuring current.
+// testPatternColor() returns the color for the current step; the step changes every STEP_MS.
 
 struct TestStep {
   CRGB color;
@@ -17,21 +17,16 @@ const TestStep TEST_STEPS[] = {
 const int NUM_TEST_STEPS = sizeof(TEST_STEPS) / sizeof(TEST_STEPS[0]);
 const uint32_t STEP_MS = 2000;
 
-void runTestPattern() {
+CRGB testPatternColor() {
   static int step = -1;
   static uint32_t lastStepMs = 0;
   uint32_t now = millis();
 
-  if (step >= 0 && now - lastStepMs < STEP_MS) return;
-
-  step = (step + 1) % NUM_TEST_STEPS;
-  lastStepMs = now;
-
-  for (int o = 0; o < NUM_OUTPUTS; o++) {
-    fill_solid(frame[o], NUM_LEDS, TEST_STEPS[step].color);
+  if (step < 0 || now - lastStepMs >= STEP_MS) {
+    step = (step + 1) % NUM_TEST_STEPS;
+    lastStepMs = now;
+    CRGB sent = capPixel(TEST_STEPS[step].color);
+    Serial.printf("%-5s -> sent R%d G%d B%d\n", TEST_STEPS[step].name, sent.r, sent.g, sent.b);
   }
-  showFrame();
-
-  CRGB sent = out[0][0];
-  Serial.printf("%-5s -> sent R%d G%d B%d\n", TEST_STEPS[step].name, sent.r, sent.g, sent.b);
+  return TEST_STEPS[step].color;
 }
