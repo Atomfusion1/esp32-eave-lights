@@ -31,14 +31,14 @@
 #error "Missing secrets.h: copy secrets.example.h to secrets.h and fill in your Wi-Fi details"
 #endif
 
-#define FW_VERSION "0.3.0"
+#define FW_VERSION "0.4.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
 #define NUM_LEDS        65
 #define PIN_OUTPUT_A    8   // tested
 #define PIN_OUTPUT_B    9   // pin tested 2026-11-23 with strand A moved over; strand B itself untested
-#define ENABLE_OUTPUT_B 1   // 1 = drive GPIO 9 too; both outputs currently show the same thing
+#define ENABLE_OUTPUT_B 1   // 1 = drive GPIO 9 too
 #define NUM_OUTPUTS     2
 
 // ---------- Power caps (from one-strand measurements at 24 V) ----------
@@ -72,8 +72,18 @@ struct LightState {
 #define FADE_SECONDS_MIN 2
 #define FADE_SECONDS_MAX 60
 
-// Defaults used on first boot (nothing saved yet).
-LightState state = { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64 };
+// One state per output (strand). Defaults used on first boot (nothing saved yet).
+LightState states[NUM_OUTPUTS] = {
+  { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64 },
+  { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64 },
+};
+
+// true = both strands show the same thing; every change is applied to all outputs.
+bool linked = true;
+
+const char  OUTPUT_LETTERS[NUM_OUTPUTS] = { 'A', 'B' };
+const int   OUTPUT_PINS[NUM_OUTPUTS]    = { PIN_OUTPUT_A, PIN_OUTPUT_B };
+const bool  OUTPUT_ENABLED[NUM_OUTPUTS] = { true, ENABLE_OUTPUT_B };
 
 void setup() {
   // Send OFF before anything else so the power-up white ends as soon as possible.

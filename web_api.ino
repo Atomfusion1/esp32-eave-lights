@@ -1,11 +1,14 @@
 // web_api — control page and JSON API on port 80.
 //
-//   GET  /            control page (on/off, color, brightness, mode)
-//   GET  /api/state   current state as JSON
-//   POST /api/state   change any of: on=0|1, color=RRGGBB (or #RRGGBB),
-//                     brightness=0-255, mode=solid|fade|test,
-//                     fadeSeconds=2-60, fadeMin=0-255
-//                     (form-encoded body or URL query); returns the new state
+//   GET  /            control page
+//   GET  /api/state   {"linked":bool, "version":..., "outputs":[{...}, {...}]}
+//   POST /api/state   form-encoded body or URL query, any of:
+//                       output=all|a|b|0|1   which strand to change (default all;
+//                                            ignored while linked: changes go to all)
+//                       linked=0|1           1 copies strand A's settings to every strand
+//                       on=0|1  color=RRGGBB  brightness=0-255  mode=solid|fade|test
+//                       fadeSeconds=2-60  fadeMin=0-255
+//                     Invalid values change nothing and return 400. Returns the new state.
 //
 // No login: anyone on the same network can use it. Fine on a home network.
 
@@ -14,15 +17,31 @@ WebServer server(80);
 const char* MODE_NAMES[MODE_COUNT] = { "solid", "fade", "test" };
 
 String stateJson() {
-  char buf[256];
-  snprintf(buf, sizeof(buf),
-           "{\"on\":%s,\"color\":\"#%02X%02X%02X\",\"brightness\":%u,"
-           "\"mode\":\"%s\",\"fadeSeconds\":%u,\"fadeMin\":%u,\"version\":\"%s\"}",
-           state.on ? "true" : "false",
-           state.color.r, state.color.g, state.color.b,
-           state.brightness, MODE_NAMES[state.mode],
-           state.fadeSeconds, state.fadeMin, FW_VERSION);
-  return String(buf);
+  String json = "{\"linked\":";
+  json += linked ? "true" : "false";
+  json += ",\"version\":\"" FW_VERSION "\",\"outputs\":[";
+  for (int o = 0; o < NUM_OUTPUTS; o++) {
+    const LightState& s = states[o];
+    char buf[256];
+    snprintf(buf, sizeof(buf),
+             "%s{\"id\":\"%c\",\"gpio\":%d,\"enabled\":%s,\"on\":%s,"
+             "\"color\":\"#%02X%02X%02X\",\"brightness\":%u,\"mode\":\"%s\","
+             "\"fadeSeconds\":%u,\"fadeMin\":%u}",
+             o ? "," : "", OUTPUT_LETTERS[o], OUTPUT_PINS[o],
+             OUTPUT_ENABLED[o] ? "true" : "false", s.on ? "true" : "false",
+             s.color.r, s.color.g, s.color.b, s.brightness, MODE_NAMES[s.mode],
+             s.fadeSeconds, s.fadeMin);
+    json += buf;
+  }
+  json += "]}";
+  return json;
+}
+
+void sendError(const char* message) {
+  String body = "{\"error\":\"";
+  body += message;
+  body += "\"}";
+  server.send(400, "application/json", body);
 }
 
 void handleGetState() {
@@ -30,48 +49,76 @@ void handleGetState() {
 }
 
 void handleSetState() {
-  bool changed = false;
-
-  if (server.hasArg("on")) {
-    String v = server.arg("on");
-    state.on = (v == "1" || v == "true" || v == "on");
-    changed = true;
+  // ---- 1. Parse and validate everything first, so a bad value changes nothing ----
+  int target = -1;  // -1 = all outputs
+  if (server.hasArg("output")) {
+    String v = server.arg("output");
+    v.toLowerCase();
+    if (v == "all")                 target = -1;
+    else if (v == "a" || v == "0")  target = 0;
+    else if (v == "b" || v == "1")  target = 1;
+    else return sendError("output must be all, a or b");
   }
-  if (server.hasArg("color")) {
+
+  bool hasColor = server.hasArg("color");
+  CRGB newColor;
+  if (hasColor) {
     String v = server.arg("color");
     if (v.startsWith("#")) v = v.substring(1);
-    if (v.length() != 6) {
-      server.send(400, "application/json", "{\"error\":\"color must be RRGGBB\"}");
-      return;
-    }
-    state.color = CRGB((uint32_t)strtoul(v.c_str(), nullptr, 16));
-    changed = true;
+    if (v.length() != 6) return sendError("color must be RRGGBB");
+    newColor = CRGB((uint32_t)strtoul(v.c_str(), nullptr, 16));
   }
-  if (server.hasArg("brightness")) {
-    state.brightness = (uint8_t)constrain(server.arg("brightness").toInt(), 0, 255);
-    changed = true;
-  }
-  if (server.hasArg("mode")) {
+
+  bool hasMode = server.hasArg("mode");
+  Mode newMode = MODE_SOLID;
+  if (hasMode) {
     String v = server.arg("mode");
     int found = -1;
     for (int i = 0; i < MODE_COUNT; i++) {
       if (v == MODE_NAMES[i]) found = i;
     }
-    if (found < 0) {
-      server.send(400, "application/json", "{\"error\":\"mode must be solid, fade or test\"}");
-      return;
+    if (found < 0) return sendError("mode must be solid, fade or test");
+    newMode = (Mode)found;
+  }
+
+  // ---- 2. Linking ----
+  bool changed = false;
+  if (server.hasArg("linked")) {
+    String v = server.arg("linked");
+    bool wantLinked = (v == "1" || v == "true");
+    if (wantLinked && !linked) {
+      for (int o = 1; o < NUM_OUTPUTS; o++) states[o] = states[0];
+      syncFadePhases();
     }
-    state.mode = (Mode)found;
+    linked = wantLinked;
     changed = true;
   }
-  if (server.hasArg("fadeSeconds")) {
-    state.fadeSeconds = (uint8_t)constrain(server.arg("fadeSeconds").toInt(),
-                                           FADE_SECONDS_MIN, FADE_SECONDS_MAX);
-    changed = true;
-  }
-  if (server.hasArg("fadeMin")) {
-    state.fadeMin = (uint8_t)constrain(server.arg("fadeMin").toInt(), 0, 255);
-    changed = true;
+
+  // ---- 3. Apply to the target output(s) ----
+  for (int o = 0; o < NUM_OUTPUTS; o++) {
+    if (!linked && target >= 0 && o != target) continue;
+    LightState& s = states[o];
+
+    if (server.hasArg("on")) {
+      String v = server.arg("on");
+      s.on = (v == "1" || v == "true" || v == "on");
+      changed = true;
+    }
+    if (hasColor) { s.color = newColor; changed = true; }
+    if (server.hasArg("brightness")) {
+      s.brightness = (uint8_t)constrain(server.arg("brightness").toInt(), 0, 255);
+      changed = true;
+    }
+    if (hasMode) { s.mode = newMode; changed = true; }
+    if (server.hasArg("fadeSeconds")) {
+      s.fadeSeconds = (uint8_t)constrain(server.arg("fadeSeconds").toInt(),
+                                         FADE_SECONDS_MIN, FADE_SECONDS_MAX);
+      changed = true;
+    }
+    if (server.hasArg("fadeMin")) {
+      s.fadeMin = (uint8_t)constrain(server.arg("fadeMin").toInt(), 0, 255);
+      changed = true;
+    }
   }
 
   if (changed) markStateChanged();
@@ -95,17 +142,25 @@ button.power{width:100%;padding:16px;font-size:18px;font-weight:600;border-radiu
 button.power.on{background:var(--accent);color:#fff}
 input[type=color]{width:100%;height:56px;border:none;border-radius:10px;background:none;padding:0}
 input[type=range]{width:100%;accent-color:var(--accent)}
-.modes{display:flex;gap:8px}
-.modes button{flex:1;padding:12px;border-radius:10px;border:1px solid var(--line);background:none;color:var(--text);cursor:pointer}
-.modes button.sel{border-color:var(--accent);background:var(--accent);color:#fff}
+.seg{display:flex;gap:8px}
+.seg button{flex:1;padding:12px;border-radius:10px;border:1px solid var(--line);background:none;color:var(--text);cursor:pointer;font-size:15px}
+.seg button.sel{border-color:var(--accent);background:var(--accent);color:#fff}
+.seg button small{display:block;font-size:11px;opacity:.75}
+.switch{display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--text);font-size:15px;margin:0}
+.switch input{width:22px;height:22px;accent-color:var(--accent)}
 .status{color:var(--muted);font-size:13px;text-align:center}
 .hint{color:var(--muted);font-size:12px;margin:8px 0 0}
 </style></head><body><main>
 <h1>Eave Lights</h1>
+<div class="card">
+<label class="switch">Same on both strands <input id="linked" type="checkbox"></label>
+<div class="seg" id="tabs" style="margin-top:14px" hidden></div>
+<p class="hint" id="disabledHint" hidden>This strand is turned off in the firmware (ENABLE_OUTPUT_B).</p>
+</div>
 <div class="card"><button id="power" class="power">…</button></div>
 <div class="card"><label>Color</label><input id="color" type="color"></div>
 <div class="card"><label>Brightness <span id="briVal"></span></label><input id="bri" type="range" min="0" max="255"></div>
-<div class="card"><label>Mode</label><div class="modes">
+<div class="card"><label>Mode</label><div class="seg" id="modes">
 <button data-mode="solid">Solid</button><button data-mode="fade">Fade</button><button data-mode="test">Test</button>
 </div></div>
 <div class="card" id="fadeCard" hidden>
@@ -115,24 +170,36 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 </div>
 <p class="status" id="status">Connecting…</p>
 </main><script>
-const $=id=>document.getElementById(id);let st={};let timer=null;
-function show(s){st=s;
- $('power').textContent=s.on?'ON':'OFF';$('power').classList.toggle('on',s.on);
- $('color').value=s.color.toLowerCase();$('bri').value=s.brightness;$('briVal').textContent=Math.round(s.brightness/2.55)+'%';
- document.querySelectorAll('.modes button').forEach(b=>b.classList.toggle('sel',b.dataset.mode===s.mode));
- $('fadeCard').hidden=s.mode!=='fade';
- $('fsec').value=s.fadeSeconds;$('fsecVal').textContent=s.fadeSeconds+' s';
- $('fmin').value=s.fadeMin;$('fminVal').textContent=Math.round(s.fadeMin/2.55)+'%';
+const $=id=>document.getElementById(id);let st=null,sel=0,timer=null;
+const pct=v=>Math.round(v/2.55)+'%';
+function cur(){return st.outputs[st.linked?0:sel];}
+function show(s){st=s;if(sel>=s.outputs.length)sel=0;
+ $('linked').checked=s.linked;$('tabs').hidden=s.linked;
+ $('tabs').innerHTML=s.outputs.map((o,i)=>'<button data-i="'+i+'" class="'+(i===sel?'sel':'')+'">Strand '+o.id+
+  '<small>GPIO '+o.gpio+' · '+(o.on?'on':'off')+'</small></button>').join('');
+ $('tabs').querySelectorAll('button').forEach(b=>b.onclick=()=>{sel=+b.dataset.i;show(st);});
+ const o=cur();
+ $('disabledHint').hidden=s.linked||o.enabled;
+ $('power').textContent=(s.linked?'Both strands ':'Strand '+o.id+' ')+(o.on?'ON':'OFF');
+ $('power').classList.toggle('on',o.on);
+ $('color').value=o.color.toLowerCase();$('bri').value=o.brightness;$('briVal').textContent=pct(o.brightness);
+ $('modes').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',b.dataset.mode===o.mode));
+ $('fadeCard').hidden=o.mode!=='fade';
+ $('fsec').value=o.fadeSeconds;$('fsecVal').textContent=o.fadeSeconds+' s';
+ $('fmin').value=o.fadeMin;$('fminVal').textContent=pct(o.fadeMin);
  $('status').textContent='Connected · v'+s.version;}
-async function send(p){try{const r=await fetch('/api/state',{method:'POST',body:new URLSearchParams(p)});show(await r.json());}
+async function send(p){if(!st)return;p.output=st.linked?'all':st.outputs[sel].id;
+ try{const r=await fetch('/api/state',{method:'POST',body:new URLSearchParams(p)});const j=await r.json();
+  if(j.error){$('status').textContent=j.error;}else show(j);}
  catch(e){$('status').textContent='Not connected';}}
 function sendSoon(p){clearTimeout(timer);timer=setTimeout(()=>send(p),120);}
-$('power').onclick=()=>send({on:st.on?0:1});
+$('linked').onchange=e=>send({linked:e.target.checked?1:0});
+$('power').onclick=()=>send({on:cur().on?0:1});
 $('color').oninput=e=>sendSoon({color:e.target.value.slice(1)});
-$('bri').oninput=e=>{$('briVal').textContent=Math.round(e.target.value/2.55)+'%';sendSoon({brightness:e.target.value});};
-document.querySelectorAll('.modes button').forEach(b=>b.onclick=()=>send({mode:b.dataset.mode}));
+$('bri').oninput=e=>{$('briVal').textContent=pct(e.target.value);sendSoon({brightness:e.target.value});};
+$('modes').querySelectorAll('button').forEach(b=>b.onclick=()=>send({mode:b.dataset.mode}));
 $('fsec').oninput=e=>{$('fsecVal').textContent=e.target.value+' s';sendSoon({fadeSeconds:e.target.value});};
-$('fmin').oninput=e=>{$('fminVal').textContent=Math.round(e.target.value/2.55)+'%';sendSoon({fadeMin:e.target.value});};
+$('fmin').oninput=e=>{$('fminVal').textContent=pct(e.target.value);sendSoon({fadeMin:e.target.value});};
 fetch('/api/state').then(r=>r.json()).then(show).catch(()=>$('status').textContent='Not connected');
 </script></body></html>)rawhtml";
 

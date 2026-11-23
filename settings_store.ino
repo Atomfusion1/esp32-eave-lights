@@ -1,7 +1,11 @@
-// settings_store — keeps the light state in flash (ESP32 Preferences / NVS),
-// so the lights come back the way they were after a power cut or reboot.
-// Saves are delayed SAVE_DELAY_MS after the last change, so dragging a slider
-// doesn't write flash dozens of times.
+// settings_store — keeps each output's light state (and the linked flag) in flash
+// (ESP32 Preferences / NVS), so the lights come back the way they were after a
+// power cut or reboot. Saves are delayed SAVE_DELAY_MS after the last change, so
+// dragging a slider doesn't write flash dozens of times.
+//
+// Keys: "linked", then per output "<a|b>_on", "_col", "_bri", "_mode", "_fsec", "_fmin".
+// Versions before 0.4.0 used one set of keys without a prefix ("on", "color", ...);
+// those are used as the defaults, so both strands start from the old saved state.
 
 Preferences prefs;
 const char*    PREFS_NAMESPACE = "eave";
@@ -10,26 +14,55 @@ const uint32_t SAVE_DELAY_MS   = 2000;
 bool     stateDirty   = false;
 uint32_t stateDirtyMs = 0;
 
-void loadState() {
-  prefs.begin(PREFS_NAMESPACE, true);  // read-only
-  state.on         = prefs.getBool("on", state.on);
-  uint32_t rgb     = prefs.getUInt("color", ((uint32_t)state.color.r << 16) |
-                                            ((uint32_t)state.color.g << 8) | state.color.b);
-  state.color      = CRGB(rgb);
-  state.brightness = prefs.getUChar("bri", state.brightness);
-  uint8_t m        = prefs.getUChar("mode", state.mode);
-  state.mode       = (m < MODE_COUNT) ? (Mode)m : MODE_SOLID;
-  state.fadeSeconds = constrain(prefs.getUChar("fsec", state.fadeSeconds),
-                                FADE_SECONDS_MIN, FADE_SECONDS_MAX);
-  state.fadeMin    = prefs.getUChar("fmin", state.fadeMin);
-  prefs.end();
-
-  Serial.printf("State loaded: %s, #%02X%02X%02X, brightness %u, mode %u, fade %us min %u\n",
-                state.on ? "ON" : "OFF", state.color.r, state.color.g, state.color.b,
-                state.brightness, state.mode, state.fadeSeconds, state.fadeMin);
+uint32_t colorToRgb(CRGB c) {
+  return ((uint32_t)c.r << 16) | ((uint32_t)c.g << 8) | c.b;
 }
 
-// Call after changing `state`; the save happens a little later in handleStateSave().
+// Builds "a_on" etc. for output o.
+const char* outputKey(int o, const char* name) {
+  static char key[16];
+  snprintf(key, sizeof(key), "%c_%s", 'a' + o, name);
+  return key;
+}
+
+void loadState() {
+  prefs.begin(PREFS_NAMESPACE, true);  // read-only
+
+  // Pre-0.4.0 single-state values, used as defaults for every output.
+  LightState old = states[0];
+  old.on          = prefs.getBool("on", old.on);
+  old.color       = CRGB(prefs.getUInt("color", colorToRgb(old.color)));
+  old.brightness  = prefs.getUChar("bri", old.brightness);
+  uint8_t om      = prefs.getUChar("mode", old.mode);
+  old.mode        = (om < MODE_COUNT) ? (Mode)om : MODE_SOLID;
+  old.fadeSeconds = prefs.getUChar("fsec", old.fadeSeconds);
+  old.fadeMin     = prefs.getUChar("fmin", old.fadeMin);
+
+  linked = prefs.getBool("linked", true);
+
+  for (int o = 0; o < NUM_OUTPUTS; o++) {
+    LightState& s = states[o];
+    s.on          = prefs.getBool(outputKey(o, "on"), old.on);
+    s.color       = CRGB(prefs.getUInt(outputKey(o, "col"), colorToRgb(old.color)));
+    s.brightness  = prefs.getUChar(outputKey(o, "bri"), old.brightness);
+    uint8_t m     = prefs.getUChar(outputKey(o, "mode"), old.mode);
+    s.mode        = (m < MODE_COUNT) ? (Mode)m : MODE_SOLID;
+    s.fadeSeconds = constrain(prefs.getUChar(outputKey(o, "fsec"), old.fadeSeconds),
+                              FADE_SECONDS_MIN, FADE_SECONDS_MAX);
+    s.fadeMin     = prefs.getUChar(outputKey(o, "fmin"), old.fadeMin);
+  }
+  prefs.end();
+
+  Serial.printf("State loaded: strands %s\n", linked ? "linked" : "separate");
+  for (int o = 0; o < NUM_OUTPUTS; o++) {
+    const LightState& s = states[o];
+    Serial.printf("  %c: %s, #%02X%02X%02X, brightness %u, mode %u, fade %us min %u\n",
+                  OUTPUT_LETTERS[o], s.on ? "ON" : "OFF", s.color.r, s.color.g, s.color.b,
+                  s.brightness, s.mode, s.fadeSeconds, s.fadeMin);
+  }
+}
+
+// Call after changing `states` or `linked`; the save happens a little later in handleStateSave().
 void markStateChanged() {
   stateDirty = true;
   stateDirtyMs = millis();
@@ -40,13 +73,16 @@ void handleStateSave() {
   stateDirty = false;
 
   prefs.begin(PREFS_NAMESPACE, false);
-  prefs.putBool("on", state.on);
-  prefs.putUInt("color", ((uint32_t)state.color.r << 16) |
-                         ((uint32_t)state.color.g << 8) | state.color.b);
-  prefs.putUChar("bri", state.brightness);
-  prefs.putUChar("mode", state.mode);
-  prefs.putUChar("fsec", state.fadeSeconds);
-  prefs.putUChar("fmin", state.fadeMin);
+  prefs.putBool("linked", linked);
+  for (int o = 0; o < NUM_OUTPUTS; o++) {
+    const LightState& s = states[o];
+    prefs.putBool(outputKey(o, "on"), s.on);
+    prefs.putUInt(outputKey(o, "col"), colorToRgb(s.color));
+    prefs.putUChar(outputKey(o, "bri"), s.brightness);
+    prefs.putUChar(outputKey(o, "mode"), s.mode);
+    prefs.putUChar(outputKey(o, "fsec"), s.fadeSeconds);
+    prefs.putUChar(outputKey(o, "fmin"), s.fadeMin);
+  }
   prefs.end();
   Serial.println("State saved");
 }
