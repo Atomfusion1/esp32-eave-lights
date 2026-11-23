@@ -11,10 +11,14 @@
 //                                house = Whole house path, z<N> = zone slot N,
 //                                p<N> = zone path slot N.
 //                         on=0|1  color=RRGGBB  brightness=0-255
-//                         mode=solid|fade|test|chase|comet
+//                         mode=solid|fade|test|chase|comet|rainbow|rainbowcycle|wipe|
+//                              gradient|stripes|alternate|colorcycle|twinkle|bounce|center|
+//                              meteor|running|sparkle|fire|lightning|strobe
+//                              (what speed/size mean per mode: top of effects_more.ino)
 //                         fadeSeconds=2-60  fadeMin=0-255
-//                         speed=1-100 (lights/s)  size=1-30  reverse=0|1
-//                         bgOn=0|1  bgColor=RRGGBB   (chase/comet background)
+//                         speed=1-100  size=1-30  reverse=0|1
+//                         bgOn=0|1  bgColor=RRGGBB   (background)
+//                         colorCount=1-5  color2..color5=RRGGBB   (color list)
 //                       Invalid values change nothing and return 400. Returns the new state.
 //   GET  /api/frame     exact colors being sent right now (after power caps), binary:
 //                       [outputs], per output [count low][count high], then R,G,B per
@@ -40,7 +44,26 @@
 //
 // No login: anyone on the same network can use it. Fine on a home network.
 
-const char* MODE_NAMES[MODE_COUNT] = { "solid", "fade", "test", "chase", "comet" };
+// Same order as enum Mode.
+const char* MODE_NAMES[MODE_COUNT] = {
+  "solid", "fade", "test", "chase", "comet",
+  "rainbow", "rainbowcycle", "wipe", "gradient", "stripes", "alternate", "colorcycle",
+  "twinkle", "bounce", "center", "meteor", "running", "sparkle", "fire", "lightning", "strobe"
+};
+
+// "colorCount":N,"colors":["#RRGGBB",x4] (colors 2-5), without braces.
+String colorListJson(const LightState& s) {
+  String j = "\"colorCount\":";
+  j += s.colorCount;
+  j += ",\"colors\":[";
+  for (int k = 0; k < MAX_COLORS - 1; k++) {
+    char c[12];
+    snprintf(c, sizeof(c), "%s\"#%02X%02X%02X\"", k ? "," : "", s.extra[k].r, s.extra[k].g, s.extra[k].b);
+    j += c;
+  }
+  j += "]";
+  return j;
+}
 
 // ---------- JSON ----------
 
@@ -56,7 +79,7 @@ String channelFieldsJson(int ch) {
            MODE_NAMES[s.mode], s.fadeSeconds, s.fadeMin, s.speed, s.size,
            s.reverse ? "true" : "false",
            s.bgOn ? "true" : "false", s.bgColor.r, s.bgColor.g, s.bgColor.b);
-  return String(buf);
+  return String(buf) + "," + colorListJson(s);
 }
 
 String stateJson() {
@@ -142,11 +165,13 @@ String presetsJson() {
     char buf[200];
     snprintf(buf, sizeof(buf),
              "%s{\"id\":%d,\"name\":\"%s\",\"mode\":\"%s\",\"color\":\"#%02X%02X%02X\","
-             "\"bgOn\":%s,\"bgColor\":\"#%02X%02X%02X\"}",
+             "\"bgOn\":%s,\"bgColor\":\"#%02X%02X%02X\",",
              first ? "" : ",", p, presets[p].name, MODE_NAMES[s.mode],
              s.color.r, s.color.g, s.color.b, s.bgOn ? "true" : "false",
              s.bgColor.r, s.bgColor.g, s.bgColor.b);
     json += buf;
+    json += colorListJson(s);
+    json += "}";
     first = false;
   }
   json += "],\"scenes\":";
@@ -222,6 +247,15 @@ void handleSetState() {
   CRGB newBgColor;
   if (hasBgColor && !parseColorArg("bgColor", newBgColor)) return sendError("bgColor must be RRGGBB");
 
+  // color2..color5 = colors 2-5 of the color list
+  bool hasExtra[MAX_COLORS - 1] = { false };
+  CRGB newExtra[MAX_COLORS - 1];
+  for (int k = 0; k < MAX_COLORS - 1; k++) {
+    char name[8] = { 'c', 'o', 'l', 'o', 'r', (char)('2' + k), 0 };
+    hasExtra[k] = server.hasArg(name);
+    if (hasExtra[k] && !parseColorArg(name, newExtra[k])) return sendError("colors must be RRGGBB");
+  }
+
   bool hasMode = server.hasArg("mode");
   Mode newMode = MODE_SOLID;
   if (hasMode) {
@@ -230,7 +264,7 @@ void handleSetState() {
     for (int i = 0; i < MODE_COUNT; i++) {
       if (v == MODE_NAMES[i]) found = i;
     }
-    if (found < 0) return sendError("mode must be solid, fade, test, chase or comet");
+    if (found < 0) return sendError("unknown mode");
     newMode = (Mode)found;
   }
 
@@ -273,6 +307,13 @@ void handleSetState() {
     if (server.hasArg("reverse")) { s.reverse = argIsTrue("reverse"); changed = true; }
     if (server.hasArg("bgOn"))    { s.bgOn = argIsTrue("bgOn"); changed = true; }
     if (hasBgColor) { s.bgColor = newBgColor; changed = true; }
+    if (server.hasArg("colorCount")) {
+      s.colorCount = (uint8_t)constrain(server.arg("colorCount").toInt(), 1, MAX_COLORS);
+      changed = true;
+    }
+    for (int k = 0; k < MAX_COLORS - 1; k++) {
+      if (hasExtra[k]) { s.extra[k] = newExtra[k]; changed = true; }
+    }
   }
 
   // Changing both strands together: keep their fades and movement in step.

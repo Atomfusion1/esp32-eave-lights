@@ -4,13 +4,13 @@
 // "B5" (one light). Numbers are 1-based light numbers; stored 0-based.
 //
 // /zones.bin: header (magic, version, record size, count), then per zone slot:
-// ZoneDef followed by that zone's LightState. Version 1 (before 0.12.0) stored light
-// numbers as 8-bit; it is converted on load. Any other mismatch (structs changed in a
-// firmware update) means the file is ignored and zones start empty.
+// ZoneDef followed by that zone's LightState. Older versions are converted on load:
+// v1 (before 0.12.0) 8-bit light numbers, v2 (before 0.15.0) settings without the color
+// list. Any other mismatch means the file is ignored and zones start empty.
 
 const char*    ZONES_FILE    = "/zones.bin";
 const uint32_t ZONES_MAGIC   = 0x5A4E4F5A;  // "ZONZ"
-const uint16_t ZONES_VERSION = 2;
+const uint16_t ZONES_VERSION = 3;
 
 // Version 1 layout (8-bit light numbers), only used to convert old files.
 struct ZoneRangeV1 { uint8_t output; uint8_t first; uint8_t last; };
@@ -178,15 +178,20 @@ void loadZones() {
   if (!f) return;
   FileHeader h;
   bool okHeader = f.read((uint8_t*)&h, sizeof(h)) == sizeof(h) && h.magic == ZONES_MAGIC;
+  // v1: 8-bit light numbers + old settings; v2: 16-bit numbers + old settings;
+  // v3 (current): 16-bit numbers + settings with the color list.
   bool isV1 = okHeader && h.version == 1 &&
-              h.recordSize == sizeof(ZoneDefV1) + sizeof(LightState);
-  bool isV2 = okHeader && h.version == ZONES_VERSION &&
+              h.recordSize == sizeof(ZoneDefV1) + sizeof(LightStateV1);
+  bool isV2 = okHeader && h.version == 2 &&
+              h.recordSize == sizeof(ZoneDef) + sizeof(LightStateV1);
+  bool isV3 = okHeader && h.version == ZONES_VERSION &&
               h.recordSize == sizeof(ZoneDef) + sizeof(LightState);
-  if (!isV1 && !isV2) {
+  if (!isV1 && !isV2 && !isV3) {
     Serial.println("Zones: file is from a different firmware layout, starting with no zones");
     f.close();
     return;
   }
+  bool converted = isV1 || isV2;
   int loaded = 0;
   for (int z = 0; z < h.count && z < MAX_ZONES; z++) {
     if (isV1) {
@@ -202,20 +207,22 @@ void loadZones() {
     } else {
       if (f.read((uint8_t*)&zones[z], sizeof(ZoneDef)) != sizeof(ZoneDef)) break;
     }
-    if (f.read((uint8_t*)&states[CH_ZONE0 + z], sizeof(LightState)) != sizeof(LightState)) break;
-    LightState& s = states[CH_ZONE0 + z];
-    if (s.mode >= MODE_COUNT) s.mode = MODE_SOLID;
-    s.fadeSeconds = constrain(s.fadeSeconds, FADE_SECONDS_MIN, FADE_SECONDS_MAX);
-    s.speed = constrain(s.speed, SPEED_MIN, SPEED_MAX);
-    s.size = constrain(s.size, SIZE_MIN, SIZE_MAX);
+    if (converted) {
+      LightStateV1 old;
+      if (f.read((uint8_t*)&old, sizeof(old)) != sizeof(old)) break;
+      states[CH_ZONE0 + z] = upgradeState(old);
+    } else {
+      if (f.read((uint8_t*)&states[CH_ZONE0 + z], sizeof(LightState)) != sizeof(LightState)) break;
+    }
+    sanitizeState(states[CH_ZONE0 + z]);
     zones[z].name[NAME_LEN - 1] = 0;
     if (zones[z].rangeCount > MAX_ZONE_RANGES) zones[z].used = false;
     rebuildZone(z);
     if (zones[z].used) loaded++;
   }
   f.close();
-  Serial.printf("Zones: %d loaded%s\n", loaded, isV1 ? " (converted from the old format)" : "");
-  if (isV1) markStateChanged();   // write it back in the new format
+  Serial.printf("Zones: %d loaded%s\n", loaded, converted ? " (converted from the old format)" : "");
+  if (converted) markStateChanged();   // write it back in the new format
   for (int z = 0; z < MAX_ZONES; z++) {
     if (!zones[z].used) continue;
     Serial.printf("  %s = %s (%u lights), %s\n", zones[z].name,

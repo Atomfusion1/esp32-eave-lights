@@ -6,7 +6,14 @@
 
 const char*    PRESETS_FILE    = "/presets.bin";
 const uint32_t PRESETS_MAGIC   = 0x54455250;  // "PRET"
-const uint16_t PRESETS_VERSION = 1;
+const uint16_t PRESETS_VERSION = 2;   // v1 (before 0.15.0): settings without the color list
+
+// Version 1 record, only used to convert old files.
+struct PresetV1 {
+  bool         used;
+  char         name[NAME_LEN];
+  LightStateV1 look;
+};
 
 // Saves channel ch's current settings as `name`. A look with the same name is replaced.
 const char* savePreset(const String& name, int ch, int& newId) {
@@ -58,25 +65,32 @@ void loadPresets() {
   File f = FFat.open(PRESETS_FILE, "r");
   if (!f) return;
   FileHeader h;
-  if (f.read((uint8_t*)&h, sizeof(h)) != sizeof(h) || h.magic != PRESETS_MAGIC ||
-      h.version != PRESETS_VERSION || h.recordSize != sizeof(Preset)) {
+  bool okHeader = f.read((uint8_t*)&h, sizeof(h)) == sizeof(h) && h.magic == PRESETS_MAGIC;
+  bool isV1 = okHeader && h.version == 1 && h.recordSize == sizeof(PresetV1);
+  bool isV2 = okHeader && h.version == PRESETS_VERSION && h.recordSize == sizeof(Preset);
+  if (!isV1 && !isV2) {
     Serial.println("Saved looks: file is from a different firmware layout, starting empty");
     f.close();
     return;
   }
   int loaded = 0;
   for (int p = 0; p < h.count && p < MAX_PRESETS; p++) {
-    if (f.read((uint8_t*)&presets[p], sizeof(Preset)) != sizeof(Preset)) break;
+    if (isV1) {
+      PresetV1 old;
+      if (f.read((uint8_t*)&old, sizeof(old)) != sizeof(old)) break;
+      presets[p].used = old.used;
+      memcpy(presets[p].name, old.name, NAME_LEN);
+      presets[p].look = upgradeState(old.look);
+    } else {
+      if (f.read((uint8_t*)&presets[p], sizeof(Preset)) != sizeof(Preset)) break;
+    }
     presets[p].name[NAME_LEN - 1] = 0;
-    LightState& s = presets[p].look;
-    if (s.mode >= MODE_COUNT) s.mode = MODE_SOLID;
-    s.fadeSeconds = constrain(s.fadeSeconds, FADE_SECONDS_MIN, FADE_SECONDS_MAX);
-    s.speed = constrain(s.speed, SPEED_MIN, SPEED_MAX);
-    s.size = constrain(s.size, SIZE_MIN, SIZE_MAX);
+    sanitizeState(presets[p].look);
     if (presets[p].used) loaded++;
   }
   f.close();
-  Serial.printf("Saved looks: %d loaded\n", loaded);
+  Serial.printf("Saved looks: %d loaded%s\n", loaded, isV1 ? " (converted from the old format)" : "");
+  if (isV1) savePresetsFile();   // write it back in the new format
 }
 
 void savePresetsFile() {

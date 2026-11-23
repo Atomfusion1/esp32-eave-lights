@@ -5,7 +5,9 @@
 // physical lights, so every effect works the same on strands and paths.
 //
 // Every effect depends only on its settings and elapsed time (no randomness), so a
-// browser simulation can reproduce it exactly later.
+// browser simulation can reproduce it exactly later. Effects that look random (twinkle,
+// sparkle, meteor, lightning) use hash32() of light number and time slot instead.
+// The basic effects are here; the rest are in effects_more.ino.
 
 const uint32_t FRAME_MS = 20;      // 50 frames per second
 
@@ -16,12 +18,16 @@ uint16_t fadePhase[NUM_CHANNELS] = { 0 };
 // Chase/comet position per channel, in 1/256ths of a light (fixed point 24.8).
 uint32_t motionPos[NUM_CHANNELS] = { 0 };
 
+// Milliseconds since the channel's effect started (timed effects: twinkle, lightning...).
+uint32_t effectMs[NUM_CHANNELS] = { 0 };
+
 // Makes both strands' fade and movement line up with strand A
 // (used when both strands are changed together).
 void syncPhases() {
   for (int o = 1; o < NUM_OUTPUTS; o++) {
     fadePhase[o] = fadePhase[0];
     motionPos[o] = motionPos[0];
+    effectMs[o]  = effectMs[0];
   }
 }
 
@@ -29,6 +35,7 @@ void syncPhases() {
 void resetPhase(int ch) {
   fadePhase[ch] = 0;
   motionPos[ch] = 0;
+  effectMs[ch]  = 0;
 }
 
 int lineLength(int ch) {
@@ -141,6 +148,8 @@ void drawChannel(int ch, uint32_t dtMs) {
     return;
   }
 
+  effectMs[ch] += dtMs;
+
   CRGB c;
   switch (s.mode) {
     case MODE_SOLID:
@@ -163,6 +172,23 @@ void drawChannel(int ch, uint32_t dtMs) {
     case MODE_COMET:
       drawComet(ch, dtMs);
       break;
+    // effects_more.ino
+    case MODE_RAINBOW:      drawRainbowWave(ch, dtMs);  break;
+    case MODE_RAINBOWCYCLE: drawRainbowCycle(ch);       break;
+    case MODE_WIPE:         drawWipe(ch, dtMs);         break;
+    case MODE_GRADIENT:     drawGradient(ch, dtMs);     break;
+    case MODE_STRIPES:      drawStripes(ch, dtMs);      break;
+    case MODE_ALTERNATE:    drawAlternate(ch);          break;
+    case MODE_COLORCYCLE:   drawColorCycle(ch);         break;
+    case MODE_TWINKLE:      drawTwinkle(ch);            break;
+    case MODE_BOUNCE:       drawBounce(ch, dtMs);       break;
+    case MODE_CENTER:       drawCenter(ch, dtMs);       break;
+    case MODE_METEOR:       drawMeteor(ch, dtMs);       break;
+    case MODE_RUNNING:      drawRunning(ch, dtMs);      break;
+    case MODE_SPARKLE:      drawSparkle(ch);            break;
+    case MODE_FIRE:         drawFire(ch);               break;
+    case MODE_LIGHTNING:    drawLightning(ch);          break;
+    case MODE_STROBE:       drawStrobe(ch);             break;
   }
 }
 

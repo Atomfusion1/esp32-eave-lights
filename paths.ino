@@ -14,7 +14,7 @@
 
 const char*    PATHS_FILE    = "/paths.bin";
 const uint32_t PATHS_MAGIC   = 0x48544150;  // "PATH"
-const uint16_t PATHS_VERSION = 1;
+const uint16_t PATHS_VERSION = 2;   // v1 (before 0.15.0): settings without the color list
 
 // Builds the Whole house path from the current strand lengths.
 void initPaths() {
@@ -146,9 +146,10 @@ void loadZonePaths() {
   File f = FFat.open(PATHS_FILE, "r");
   if (!f) return;
   FileHeader h;
-  uint16_t recordSize = sizeof(PathDef) + sizeof(LightState);
-  if (f.read((uint8_t*)&h, sizeof(h)) != sizeof(h) || h.magic != PATHS_MAGIC ||
-      h.version != PATHS_VERSION || h.recordSize != recordSize) {
+  bool okHeader = f.read((uint8_t*)&h, sizeof(h)) == sizeof(h) && h.magic == PATHS_MAGIC;
+  bool isV1 = okHeader && h.version == 1 && h.recordSize == sizeof(PathDef) + sizeof(LightStateV1);
+  bool isV2 = okHeader && h.version == PATHS_VERSION && h.recordSize == sizeof(PathDef) + sizeof(LightState);
+  if (!isV1 && !isV2) {
     Serial.println("Paths: file is from a different firmware layout, starting with no paths");
     f.close();
     return;
@@ -156,19 +157,22 @@ void loadZonePaths() {
   int loaded = 0;
   for (int p = 0; p < h.count && p < MAX_PATHS; p++) {
     if (f.read((uint8_t*)&pathDefs[p], sizeof(PathDef)) != sizeof(PathDef)) break;
-    if (f.read((uint8_t*)&states[CH_PATH0 + p], sizeof(LightState)) != sizeof(LightState)) break;
-    LightState& s = states[CH_PATH0 + p];
-    if (s.mode >= MODE_COUNT) s.mode = MODE_SOLID;
-    s.fadeSeconds = constrain(s.fadeSeconds, FADE_SECONDS_MIN, FADE_SECONDS_MAX);
-    s.speed = constrain(s.speed, SPEED_MIN, SPEED_MAX);
-    s.size = constrain(s.size, SIZE_MIN, SIZE_MAX);
+    if (isV1) {
+      LightStateV1 old;
+      if (f.read((uint8_t*)&old, sizeof(old)) != sizeof(old)) break;
+      states[CH_PATH0 + p] = upgradeState(old);
+    } else {
+      if (f.read((uint8_t*)&states[CH_PATH0 + p], sizeof(LightState)) != sizeof(LightState)) break;
+    }
+    sanitizeState(states[CH_PATH0 + p]);
     pathDefs[p].name[NAME_LEN - 1] = 0;
     if (pathDefs[p].stepCount > MAX_PATH_STEPS) pathDefs[p].used = false;
     if (pathDefs[p].used) loaded++;
   }
   f.close();
   rebuildAllZonePaths();
-  Serial.printf("Paths: %d loaded\n", loaded);
+  Serial.printf("Paths: %d loaded%s\n", loaded, isV1 ? " (converted from the old format)" : "");
+  if (isV1) markStateChanged();   // write it back in the new format
   for (int p = 0; p < MAX_PATHS; p++) {
     if (!pathDefs[p].used) continue;
     Serial.printf("  %s = %s (%u positions), %s\n", pathDefs[p].name, pathStepsText(p).c_str(),

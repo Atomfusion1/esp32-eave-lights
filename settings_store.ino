@@ -9,7 +9,7 @@
 //
 // Keys per channel: "<a|b|c>_on", "_col", "_bri", "_mode", "_fsec", "_fmin", "_spd",
 // "_size", "_rev", "_bgon", "_bgc" (a = strand A, b = strand B, c = Whole house).
-// Strand lengths: "a_cnt", "b_cnt".
+// Strand lengths: "a_cnt", "b_cnt". Color list (v0.15.0+): "_ncol" and colors 2-5 "_x0".."_x3".
 // Versions before 0.4.0 used one set of keys without a prefix ("on", "color", ...);
 // those are used as the defaults, so both strands start from the old saved state.
 
@@ -22,6 +22,22 @@ const uint32_t SAVE_DELAY_MS   = 2000;
 
 bool     stateDirty   = false;
 uint32_t stateDirtyMs = 0;
+
+// Converts a pre-0.15.0 saved state; colors 2-5 get the defaults.
+LightState upgradeState(const LightStateV1& o) {
+  LightState s = { o.on, o.color, o.brightness, o.mode, o.fadeSeconds, o.fadeMin, o.speed, o.size,
+                   o.reverse, o.bgOn, o.bgColor, DEFAULT_EXTRA_COLORS };
+  return s;
+}
+
+// Keeps loaded/received values in range.
+void sanitizeState(LightState& s) {
+  if (s.mode >= MODE_COUNT) s.mode = MODE_SOLID;
+  s.fadeSeconds = constrain(s.fadeSeconds, FADE_SECONDS_MIN, FADE_SECONDS_MAX);
+  s.speed = constrain(s.speed, SPEED_MIN, SPEED_MAX);
+  s.size = constrain(s.size, SIZE_MIN, SIZE_MAX);
+  s.colorCount = constrain(s.colorCount, 1, MAX_COLORS);
+}
 
 uint32_t colorToRgb(CRGB c) {
   return ((uint32_t)c.r << 16) | ((uint32_t)c.g << 8) | c.b;
@@ -84,6 +100,12 @@ void loadState() {
     s.reverse     = prefs.getBool(outputKey(o, "rev"), s.reverse);
     s.bgOn        = prefs.getBool(outputKey(o, "bgon"), s.bgOn);
     s.bgColor     = CRGB(prefs.getUInt(outputKey(o, "bgc"), colorToRgb(s.bgColor)));
+    s.colorCount  = prefs.getUChar(outputKey(o, "ncol"), s.colorCount);
+    for (int k = 0; k < MAX_COLORS - 1; k++) {
+      char name[4] = { 'x', (char)('0' + k), 0 };
+      s.extra[k] = CRGB(prefs.getUInt(outputKey(o, name), colorToRgb(s.extra[k])));
+    }
+    sanitizeState(s);
   }
   // Strand lengths ("a_cnt", "b_cnt").
   for (int o = 0; o < NUM_OUTPUTS; o++) {
@@ -128,6 +150,11 @@ void handleStateSave() {
     prefs.putBool(outputKey(o, "rev"), s.reverse);
     prefs.putBool(outputKey(o, "bgon"), s.bgOn);
     prefs.putUInt(outputKey(o, "bgc"), colorToRgb(s.bgColor));
+    prefs.putUChar(outputKey(o, "ncol"), s.colorCount);
+    for (int k = 0; k < MAX_COLORS - 1; k++) {
+      char name[4] = { 'x', (char)('0' + k), 0 };
+      prefs.putUInt(outputKey(o, name), colorToRgb(s.extra[k]));
+    }
   }
   for (int o = 0; o < NUM_OUTPUTS; o++) prefs.putUShort(outputKey(o, "cnt"), ledCount[o]);
   prefs.end();

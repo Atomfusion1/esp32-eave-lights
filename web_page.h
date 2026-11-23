@@ -51,7 +51,8 @@ select.picker{font-size:17px;font-weight:600;padding:12px}
 .seg button{flex:1;padding:11px;border-radius:10px;border:1px solid var(--line);background:none;color:var(--text);cursor:pointer;font-size:15px}
 .seg button.sel{border-color:var(--accent);background:var(--accent);color:#fff}
 .seg.small button{flex:0 0 auto;padding:5px 10px;font-size:13px;border-radius:8px}
-#modes button{flex:1 1 28%}
+.colorRow{display:flex;gap:8px}
+.colorRow input[type=color]{flex:1;min-width:0;height:44px}
 .btn{padding:10px 14px;border-radius:10px;border:1px solid var(--line);background:none;color:var(--text);cursor:pointer;font-size:15px}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .btn.danger{color:var(--bad)}
@@ -159,29 +160,30 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <p class="err" id="lookErr" hidden></p>
 </div>
 <div class="card">
-<div class="grid2">
-<div><label>Color</label><input id="color" type="color"></div>
-<div><label>Brightness <span id="briVal"></span></label><input id="bri" type="range" min="0" max="255" style="margin-top:14px"></div>
+<label>Effect</label>
+<select class="picker" id="modeSel"></select>
+<p class="hint" id="modeHint"></p>
+<div id="colorBox" style="margin-top:14px">
+<label id="colorLabel">Color</label>
+<div class="colorRow" id="colorRow"><input id="color" type="color"></div>
+<div class="row" id="colorCountRow" style="margin-top:8px">
+<button class="btn" id="colorLess">− color</button><button class="btn" id="colorMore">+ color</button><span class="hint" id="colorCountTxt" style="margin:0"></span>
 </div>
-<label style="margin-top:14px">Mode</label>
-<div class="seg" id="modes">
-<button data-mode="solid">Solid</button><button data-mode="fade">Fade</button><button data-mode="chase">Chase</button>
-<button data-mode="comet">Comet</button><button data-mode="test">Test</button>
 </div>
-<details class="inner" id="motionFold" hidden><summary id="motionSum"></summary>
-<label style="margin-top:10px">Speed: <span id="spdVal"></span></label><input id="spd" type="range" min="1" max="100">
-<label style="margin-top:14px"><span id="sizeName"></span>: <span id="sizeVal"></span></label><input id="size" type="range" min="1" max="30">
-<label style="margin-top:14px">Direction</label>
-<div class="seg" id="dir"><button data-rev="0"></button><button data-rev="1"></button></div>
-<label style="margin-top:14px">Background (lights between / behind the effect)</label>
+<p class="hint" id="noColorHint" hidden>This effect makes its own colors.</p>
+<label style="margin-top:14px">Brightness <span id="briVal"></span></label><input id="bri" type="range" min="0" max="255">
+<details class="inner" id="setFold"><summary id="setSum"></summary>
+<div id="spdBox"><label style="margin-top:10px"><span id="spdName"></span>: <span id="spdVal"></span></label><input id="spd" type="range" min="1" max="100"></div>
+<div id="sizeBox"><label style="margin-top:14px"><span id="sizeName"></span>: <span id="sizeVal"></span></label><input id="size" type="range" min="1" max="30"></div>
+<div id="fsecBox"><label style="margin-top:14px"><span id="fsecName"></span>: <span id="fsecVal"></span></label><input id="fsec" type="range" min="2" max="60"></div>
+<div id="fminBox"><label style="margin-top:14px">Lowest level: <span id="fminVal"></span></label><input id="fmin" type="range" min="0" max="230">
+<p class="hint">Below about 20% the dim end may show steps.</p></div>
+<div id="dirBox"><label style="margin-top:14px">Direction</label>
+<div class="seg" id="dir"><button data-rev="0"></button><button data-rev="1"></button></div></div>
+<div id="bgBox"><label style="margin-top:14px">Background (lights between / behind the effect)</label>
 <div class="seg" id="bg"><button data-bg="0">Off</button><button data-bg="1">On</button></div>
 <input id="bgColor" type="color" style="margin-top:10px" hidden>
-<p class="hint" id="bgHint" hidden>Uses the same brightness. Lights every light, so it adds current.</p>
-</details>
-<details class="inner" id="fadeFold" hidden><summary id="fadeSum"></summary>
-<label style="margin-top:10px">Fade speed: <span id="fsecVal"></span> per breath</label><input id="fsec" type="range" min="2" max="60">
-<label style="margin-top:14px">Fade lowest level: <span id="fminVal"></span></label><input id="fmin" type="range" min="0" max="230">
-<p class="hint">Below about 20% the dim end may show steps.</p>
+<p class="hint" id="bgHint" hidden>Uses the same brightness. Lights every light, so it adds current.</p></div>
 </details>
 </div>
 </section>
@@ -338,26 +340,7 @@ function show(s){st=s;
  const isOn=both()?anyStrandOn():o.on;
  $('power').textContent=curName()+' — '+(isOn?'ON':'OFF');$('power').classList.toggle('on',isOn);
  $('lookTarget').textContent='· tap to apply to '+curName();
- // look
- $('color').value=o.color.toLowerCase();$('bri').value=o.brightness;$('briVal').textContent=pct(o.brightness);
- $('modes').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',b.dataset.mode===o.mode));
- const moving=o.mode==='chase'||o.mode==='comet';
- const [fwd,rev]=house()?['Right → left','Left → right']:zoneSel()?['As listed','Reversed']:pathSel()?['In path order','Reversed']
-  :o.id==='A'?['Light 1 → '+o.count+' (outward, left)','Light '+o.count+' → 1 (inward)']
-  :o.id==='B'?['Light 1 → '+o.count+' (outward, right)','Light '+o.count+' → 1 (inward)']:['Outward','Inward'];
- $('dir').children[0].textContent=fwd;$('dir').children[1].textContent=rev;
- $('motionFold').hidden=!moving;
- $('motionSum').textContent=(o.mode==='comet'?'Comet':'Chase')+' settings · '+o.speed+' lights/s · '+(o.mode==='comet'?'tail ':'block ')+o.size+' · '+(o.reverse?rev:fwd).split(' (')[0]+' · background '+(o.bgOn?'on':'off');
- $('spd').value=o.speed;$('spdVal').textContent=o.speed+' lights/s';
- $('sizeName').textContent=o.mode==='comet'?'Tail length':'Lit block length';
- $('size').value=o.size;$('sizeVal').textContent=o.size+(o.size===1?' light':' lights');
- $('dir').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',(b.dataset.rev==='1')===o.reverse));
- $('bg').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',(b.dataset.bg==='1')===o.bgOn));
- $('bgColor').hidden=!o.bgOn;$('bgHint').hidden=!o.bgOn;$('bgColor').value=o.bgColor.toLowerCase();
- $('fadeFold').hidden=o.mode!=='fade';
- $('fadeSum').textContent='Fade settings · '+o.fadeSeconds+' s per breath · lowest '+pct(o.fadeMin);
- $('fsec').value=o.fadeSeconds;$('fsecVal').textContent=o.fadeSeconds+' s';
- $('fmin').value=o.fadeMin;$('fminVal').textContent=pct(o.fadeMin);
+ renderLook(o);
  // setup
  $('strandSum').textContent='A '+s.outputs[0].count+(s.outputs[1]?' · B '+s.outputs[1].count:'');
  $('zoneSum').textContent=s.zones.length+' of 12';$('pathSum').textContent=s.paths.length+' of 8';$('fwSum').textContent='v'+s.version;
@@ -393,22 +376,94 @@ $('power').onclick=()=>send({on:(both()?anyStrandOn():cur().on)?0:1});
 $('allOff').onclick=async()=>{const j=await post('/api/all-off',{});if(!j.error)show(j);};
 $('color').oninput=e=>sendSoon({color:e.target.value.slice(1)});
 $('bri').oninput=e=>{$('briVal').textContent=pct(e.target.value);sendSoon({brightness:e.target.value});};
-$('modes').querySelectorAll('button').forEach(b=>b.onclick=()=>send({mode:b.dataset.mode}));
+$('modeSel').onchange=e=>send({mode:e.target.value});
 $('fsec').oninput=e=>{$('fsecVal').textContent=e.target.value+' s';sendSoon({fadeSeconds:e.target.value});};
 $('fmin').oninput=e=>{$('fminVal').textContent=pct(e.target.value);sendSoon({fadeMin:e.target.value});};
-$('spd').oninput=e=>{$('spdVal').textContent=e.target.value+' lights/s';sendSoon({speed:e.target.value});};
-$('size').oninput=e=>{$('sizeVal').textContent=e.target.value+(e.target.value==='1'?' light':' lights');sendSoon({size:e.target.value});};
+$('spd').oninput=e=>{const m=modeById(cur().mode),v=+e.target.value;$('spdVal').textContent=m.fmt?m.fmt(v):v;sendSoon({speed:v});};
+$('size').oninput=e=>{const m=modeById(cur().mode),v=+e.target.value;$('sizeVal').textContent=m.sizeFmt?m.sizeFmt(v):v+(v===1?' light':' lights');sendSoon({size:v});};
 $('dir').querySelectorAll('button').forEach(b=>b.onclick=()=>send({reverse:b.dataset.rev}));
 $('bg').querySelectorAll('button').forEach(b=>b.onclick=()=>send({bgOn:b.dataset.bg}));
 $('bgColor').oninput=e=>sendSoon({bgColor:e.target.value.slice(1)});
 // remember whether the mode fold-outs are open
-['motionFold','fadeFold'].forEach(id=>{$(id).open=store.get('eave_'+id,false);$(id).addEventListener('toggle',()=>store.set('eave_'+id,$(id).open));});
+// remember whether the effect settings fold-out is open
+$('setFold').open=store.get('eaveSetFold',false);$('setFold').addEventListener('toggle',()=>store.set('eaveSetFold',$('setFold').open));
+
+// ================= Effects: what each one uses =================
+// colors: 0 = makes its own, 1 = one color, 'multi' = color list (min colors).
+// spd/size/fsec: label for that slider (missing = not used); fmt formats the speed value.
+// dir: true = show direction (or [forward label, reverse label] to override); bg: background.
+const lps=v=>v+' lights/s',still=v=>v<=1?'still':v+' lights/s';
+const MODES=[
+ {g:'Basic',id:'solid',name:'Solid',colors:1,hint:'One steady color.'},
+ {g:'Basic',id:'fade',name:'Fade (breathe)',colors:1,fsec:'Seconds per breath',fmin:1,hint:'The color slowly breathes in and out.'},
+ {g:'Basic',id:'test',name:'Test colors',colors:0,hint:'Red, green, blue, white, off: for checking lights and current.'},
+ {g:'Motion',id:'chase',name:'Chase',colors:1,spd:'Speed',fmt:lps,size:'Lit block length',dir:true,bg:1,hint:'Blocks of light with gaps, moving along.'},
+ {g:'Motion',id:'comet',name:'Comet',colors:1,spd:'Speed',fmt:lps,size:'Tail length',dir:true,bg:1,hint:'A bright head with a fading tail.'},
+ {g:'Motion',id:'bounce',name:'Bounce (scanner)',colors:1,spd:'Speed',fmt:lps,size:'Tail length',bg:1,hint:'A comet sweeping back and forth.'},
+ {g:'Motion',id:'center',name:'Center out / in',colors:'multi',spd:'Speed',fmt:lps,size:'Ripple width',dir:['Outward','Inward'],bg:1,hint:'Ripples from the middle (the controller, on Whole house) to the ends, or back in. Colors alternate per ripple.'},
+ {g:'Motion',id:'meteor',name:'Meteor',colors:1,spd:'Speed',fmt:lps,size:'Tail length',dir:true,bg:1,hint:'A comet with a broken, sparkly trail.'},
+ {g:'Motion',id:'running',name:'Running lights',colors:1,spd:'Speed',fmt:lps,size:'Wave length',dir:true,bg:1,hint:'A smooth wave of brightness rolling along.'},
+ {g:'Motion',id:'wipe',name:'Color wipe',colors:'multi',min:1,spd:'Speed',fmt:lps,dir:true,hint:'Fills light by light with each color in turn. One color: fills, then wipes off.'},
+ {g:'Color',id:'rainbow',name:'Rainbow wave',colors:0,spd:'Speed',fmt:lps,size:'Rainbow length (×5 lights)',dir:true,hint:'A rainbow scrolling along the lights.'},
+ {g:'Color',id:'rainbowcycle',name:'Rainbow cycle',colors:0,spd:'Speed',fmt:v=>Math.round(600/v)+' s per rainbow',hint:'All lights one color, slowly going through the rainbow.'},
+ {g:'Color',id:'gradient',name:'Gradient',colors:'multi',min:2,spd:'Drift',fmt:still,dir:true,hint:'Blends through your colors from one end to the other. Drift 1 = still.'},
+ {g:'Holiday',id:'stripes',name:'Stripes / candy cane',colors:'multi',min:2,spd:'Slide',fmt:still,size:'Stripe width',dir:true,hint:'Bands of your colors (red/white, red/green…). Slide 1 = still.'},
+ {g:'Holiday',id:'alternate',name:'Alternating swap',colors:'multi',min:2,spd:'Swap speed',fmt:v=>(10/v).toFixed(v>=10?1:0)+' s per swap',size:'Group size',hint:'Every other light (or group) in your colors, swapping on a beat.'},
+ {g:'Holiday',id:'colorcycle',name:'Color cycle',colors:'multi',min:2,fsec:'Seconds per color',hint:'All lights hold each color, then fade to the next.'},
+ {g:'Holiday',id:'twinkle',name:'Twinkle',colors:'multi',min:1,spd:'Twinkle speed',fmt:v=>(v/10).toFixed(1)+'×',size:'Density',sizeFmt:v=>Math.min(v*3,90)+'%',bg:1,hint:'Lights gently twinkle in your colors over the background.'},
+ {g:'Sparkle',id:'sparkle',name:'Sparkle',colors:'multi',min:1,colorNames:['Base','Sparkle'],spd:'Rate',fmt:v=>v,size:'Density',hint:'Quick flashes of color 2 (or white) over color 1.'},
+ {g:'Sparkle',id:'fire',name:'Fire / candle',colors:1,spd:'Flicker speed',fmt:v=>v,hint:'Warm candle-like flicker. Orange or amber works best.'},
+ {g:'Sparkle',id:'lightning',name:'Lightning',colors:1,spd:'How often',fmt:v=>'about every '+Math.round(60/v)+' s',bg:1,hint:'Occasional flashes and flickers; dark (or background) in between.'},
+ {g:'Sparkle',id:'strobe',name:'Strobe / flash',colors:1,spd:'Flash rate',fmt:v=>(v/10).toFixed(1)+' per second',bg:1,hint:'Fast on/off flashing. Use sparingly: it can bother neighbors and drivers.'},
+];
+const modeById=id=>MODES.find(m=>m.id===id)||MODES[0];
+(function buildModeSelect(){const groups=[...new Set(MODES.map(m=>m.g))];
+ $('modeSel').innerHTML=groups.map(g=>'<optgroup label="'+g+'">'+MODES.filter(m=>m.g===g).map(m=>'<option value="'+m.id+'">'+m.name+'</option>').join('')+'</optgroup>').join('');})();
+
+// The current colors (1-5) of a channel: color, then colors 2-5.
+const colorsOf=o=>[o.color].concat(o.colors||[]).slice(0,Math.max(1,o.colorCount||1));
+function renderLook(o){const m=modeById(o.mode);
+ $('modeSel').value=m.id;$('modeHint').textContent=m.hint||'';
+ // colors
+ $('colorBox').hidden=!m.colors;$('noColorHint').hidden=!!m.colors;
+ const multi=m.colors==='multi',list=multi?colorsOf(o):[o.color];
+ $('colorLabel').textContent=multi?(m.colorNames?m.colorNames.join(' / ')+' colors':'Colors (in order)'):'Color';
+ const row=$('colorRow');
+ while(row.children.length>list.length)row.removeChild(row.lastChild);
+ while(row.children.length<list.length){const k=row.children.length,inp=document.createElement('input');inp.type='color';
+  inp.oninput=e=>sendSoon({['color'+(k+1)]:e.target.value.slice(1)});row.appendChild(inp);}
+ list.forEach((c,k)=>{if(document.activeElement!==row.children[k])row.children[k].value=c.toLowerCase();});
+ $('colorCountRow').hidden=!multi;
+ $('colorLess').disabled=list.length<=(m.min||1);$('colorMore').disabled=list.length>=5;
+ $('colorCountTxt').textContent=list.length+' of 5';
+ $('bri').value=o.brightness;$('briVal').textContent=pct(o.brightness);
+ // settings: show only what this effect uses
+ const [fwd,rev]=Array.isArray(m.dir)?m.dir:house()?['Right → left','Left → right']:zoneSel()?['As listed','Reversed']:pathSel()?['In path order','Reversed']
+  :o.id==='A'?['Light 1 → '+o.count+' (outward, left)','Light '+o.count+' → 1 (inward)']
+  :o.id==='B'?['Light 1 → '+o.count+' (outward, right)','Light '+o.count+' → 1 (inward)']:['Outward','Inward'];
+ $('dir').children[0].textContent=fwd;$('dir').children[1].textContent=rev;
+ const parts=[];
+ $('spdBox').hidden=!m.spd;if(m.spd){$('spdName').textContent=m.spd;$('spd').value=o.speed;$('spdVal').textContent=m.fmt(o.speed);parts.push(m.spd.toLowerCase()+' '+m.fmt(o.speed));}
+ $('sizeBox').hidden=!m.size;if(m.size){$('sizeName').textContent=m.size;$('size').value=o.size;const sv=m.sizeFmt?m.sizeFmt(o.size):o.size+(o.size===1?' light':' lights');$('sizeVal').textContent=sv;parts.push(m.size.toLowerCase().split(' (')[0]+' '+sv);}
+ $('fsecBox').hidden=!m.fsec;if(m.fsec){$('fsecName').textContent=m.fsec;$('fsec').value=o.fadeSeconds;$('fsecVal').textContent=o.fadeSeconds+' s';parts.push(o.fadeSeconds+' s');}
+ $('fminBox').hidden=!m.fmin;if(m.fmin){$('fmin').value=o.fadeMin;$('fminVal').textContent=pct(o.fadeMin);parts.push('lowest '+pct(o.fadeMin));}
+ $('dirBox').hidden=!m.dir;if(m.dir)parts.push((o.reverse?rev:fwd).split(' (')[0]);
+ $('bgBox').hidden=!m.bg;if(m.bg)parts.push('background '+(o.bgOn?'on':'off'));
+ $('setFold').hidden=!parts.length;$('setSum').textContent='Settings · '+parts.join(' · ');
+ $('dir').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',(b.dataset.rev==='1')===o.reverse));
+ $('bg').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',(b.dataset.bg==='1')===o.bgOn));
+ $('bgColor').hidden=!o.bgOn;$('bgHint').hidden=!o.bgOn;$('bgColor').value=o.bgColor.toLowerCase();}
+$('colorLess').onclick=()=>{const o=cur();send({colorCount:Math.max(1,colorsOf(o).length-1)});};
+$('colorMore').onclick=()=>{const o=cur();send({colorCount:Math.min(5,colorsOf(o).length+1)});};
 
 // ================= Saved looks =================
 function showLooks(list){looks=list||[];
- $('looks').innerHTML=looks.map(p=>'<span class="chip" data-id="'+p.id+'" title="'+esc(p.mode)+'">'+
-  '<span class="dot" style="background:'+p.color+'"></span>'+(p.bgOn?'<span class="dot" style="background:'+p.bgColor+'"></span>':'')+
-  esc(p.name)+'<span class="x" data-x="'+p.id+'" title="Delete">×</span></span>').join('');
+ $('looks').innerHTML=looks.map(p=>{const m=modeById(p.mode),cs=m.colors==='multi'?colorsOf(p):m.colors?[p.color]:[];
+  return '<span class="chip" data-id="'+p.id+'" title="'+esc(m.name)+'">'+
+  (m.colors?'':'<span class="dot" style="background:linear-gradient(90deg,red,yellow,lime,cyan,blue,magenta)"></span>')+
+  cs.map(c=>'<span class="dot" style="background:'+c+'"></span>').join('')+
+  (p.bgOn&&m.bg?'<span class="dot" style="background:'+p.bgColor+'"></span>':'')+
+  esc(p.name)+'<span class="x" data-x="'+p.id+'" title="Delete">×</span></span>';}).join('');
  $('looksEmpty').hidden=looks.length>0;
  $('looks').querySelectorAll('.chip').forEach(c=>c.onclick=async e=>{
   const x=e.target.dataset.x;
@@ -507,8 +562,10 @@ $('pathCancel').onclick=resetPathForm;
 function toB64(u8){let s='';for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000));return btoa(s);}
 function fromB64(b){const s=atob(b),u=new Uint8Array(s.length);for(let i=0;i<s.length;i++)u[i]=s.charCodeAt(i);return u;}
 // Settings of a strand / Whole house in the form /api/state accepts.
-function chanFields(o){return {on:o.on?1:0,color:o.color,brightness:o.brightness,mode:o.mode,fadeSeconds:o.fadeSeconds,fadeMin:o.fadeMin,
- speed:o.speed,size:o.size,reverse:o.reverse?1:0,bgOn:o.bgOn?1:0,bgColor:o.bgColor};}
+function chanFields(o){const f={on:o.on?1:0,color:o.color,brightness:o.brightness,mode:o.mode,fadeSeconds:o.fadeSeconds,fadeMin:o.fadeMin,
+ speed:o.speed,size:o.size,reverse:o.reverse?1:0,bgOn:o.bgOn?1:0,bgColor:o.bgColor};
+ if(o.colors){f.colorCount=o.colorCount;o.colors.forEach((c,k)=>f['color'+(k+2)]=c);}
+ return f;}
 $('backupBtn').onclick=async()=>{const say=t=>$('backupStatus').textContent=t;
  try{say('Collecting files…');const s=await (await fetch('/api/state')).json();
   const list=(await (await fetch('/api/files')).json()).files||[],files=[];

@@ -50,7 +50,7 @@
 #define OTA_PASSWORD AP_PASSWORD
 #endif
 
-#define FW_VERSION "0.14.0"
+#define FW_VERSION "0.15.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
@@ -80,28 +80,63 @@ CRGB frame[NUM_OUTPUTS][MAX_LEDS];
 CRGB out[NUM_OUTPUTS][MAX_LEDS];
 
 // ---------- Light state (set from the web page, saved in flash) ----------
+// Numbers are stored in saved files: only ever add new modes at the end.
 enum Mode : uint8_t {
-  MODE_SOLID = 0,   // steady color
-  MODE_FADE  = 1,   // color breathes in and out
-  MODE_TEST  = 2,   // red/green/blue/white/off cycle, ignores color and brightness
-  MODE_CHASE = 3,   // blocks of `size` lit lights with equal gaps, moving along the strand
-  MODE_COMET = 4,   // one bright head with a `size`-long fading tail, travels the strand and wraps
+  MODE_SOLID        = 0,   // steady color
+  MODE_FADE         = 1,   // color breathes in and out
+  MODE_TEST         = 2,   // red/green/blue/white/off cycle, ignores color and brightness
+  MODE_CHASE        = 3,   // blocks of `size` lit lights with equal gaps, moving
+  MODE_COMET        = 4,   // bright head with a `size`-long fading tail, travels and wraps
+  MODE_RAINBOW      = 5,   // rainbow scrolling along the line; size*5 lights per rainbow
+  MODE_RAINBOWCYCLE = 6,   // all lights one color, cycling through the rainbow
+  MODE_WIPE         = 7,   // fills the line light by light with each color in turn
+  MODE_GRADIENT     = 8,   // blend across the colors from one end to the other; speed > 1 drifts
+  MODE_STRIPES      = 9,   // bands of `size` lights in each color; speed > 1 slides
+  MODE_ALTERNATE    = 10,  // groups of `size` lights alternate colors, swapping on a beat
+  MODE_COLORCYCLE   = 11,  // whole line fades through the colors, fadeSeconds per color
+  MODE_TWINKLE      = 12,  // lights twinkle in the colors over the background
+  MODE_BOUNCE       = 13,  // comet sweeping back and forth
+  MODE_CENTER       = 14,  // ripples from the center (controller on Whole house) out, or in
+  MODE_METEOR       = 15,  // comet with a broken, sparkly trail
+  MODE_RUNNING      = 16,  // smooth brightness wave rolling along the line
+  MODE_SPARKLE      = 17,  // quick flashes (color 2, or white) over color 1
+  MODE_FIRE         = 18,  // candle-like flicker in color 1
+  MODE_LIGHTNING    = 19,  // occasional flashes in color 1, dark (or background) between
+  MODE_STROBE       = 20,  // on/off flashing in color 1
 };
-#define MODE_COUNT 5
+#define MODE_COUNT 21
+
+#define MAX_COLORS 5   // colors for multi-color effects: color + up to 4 extra
 
 struct LightState {
   bool    on;
-  CRGB    color;
+  CRGB    color;        // color 1
   uint8_t brightness;   // 0-255, applied before the power caps
   Mode    mode;
-  uint8_t fadeSeconds;  // fade mode: seconds per breath (FADE_SECONDS_MIN-FADE_SECONDS_MAX)
+  uint8_t fadeSeconds;  // fade: seconds per breath; color cycle: seconds per color
   uint8_t fadeMin;      // fade mode: lowest level 0-255 (64 = 25%)
-  uint8_t speed;        // chase/comet: lights per second (SPEED_MIN-SPEED_MAX)
-  uint8_t size;         // chase: lit block length; comet: tail length (SIZE_MIN-SIZE_MAX)
-  bool    reverse;      // chase/comet: false = moves from light 1 toward the last light
-  bool    bgOn;         // chase/comet: true = unlit lights show bgColor instead of off
-  CRGB    bgColor;      // chase/comet background, also scaled by brightness
+  uint8_t speed;        // moving effects: speed (SPEED_MIN-SPEED_MAX), meaning per effect
+  uint8_t size;         // moving effects: length/width/density (SIZE_MIN-SIZE_MAX)
+  bool    reverse;      // direction (center: true = inward)
+  bool    bgOn;         // true = unlit lights show bgColor instead of off
+  CRGB    bgColor;      // background, also scaled by brightness
+  uint8_t colorCount;   // colors used by multi-color effects (1-MAX_COLORS): color + extra
+  CRGB    extra[MAX_COLORS - 1];  // colors 2-5
 };
+
+// LightState before v0.15.0 (no color list). Only used to convert old saved files.
+struct LightStateV1 {
+  bool    on;
+  CRGB    color;
+  uint8_t brightness;
+  Mode    mode;
+  uint8_t fadeSeconds, fadeMin, speed, size;
+  bool    reverse, bgOn;
+  CRGB    bgColor;
+};
+
+// Colors 2-5 for anything that hasn't chosen its own: white, red, green, blue.
+#define DEFAULT_EXTRA_COLORS 2, { CRGB(255, 255, 255), CRGB(255, 0, 0), CRGB(0, 255, 0), CRGB(0, 0, 255) }
 
 #define FADE_SECONDS_MIN 2
 #define FADE_SECONDS_MAX 60
@@ -190,16 +225,16 @@ uint16_t  pathLen[MAX_PATHS];                    // positions in each path, gaps
 
 // Defaults used on first boot (nothing saved yet). Zone states are set in initZones().
 LightState states[NUM_CHANNELS] = {
-  { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64, 10, 5, false, false, CRGB(16, 32, 64) },  // strand A
-  { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64, 10, 5, false, false, CRGB(16, 32, 64) },  // strand B
-  { false, CRGB(255, 140, 40), 128, MODE_COMET, 5, 64, 20, 8, false, false, CRGB(16, 32, 64) },  // Whole house
+  { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64, 10, 5, false, false, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS },  // strand A
+  { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64, 10, 5, false, false, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS },  // strand B
+  { false, CRGB(255, 140, 40), 128, MODE_COMET, 5, 64, 20, 8, false, false, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS },  // Whole house
 };
 // A new zone starts as steady warm white, off.
 const LightState ZONE_DEFAULT_STATE =
-  { false, CRGB(255, 160, 60), 160, MODE_SOLID, 5, 64, 10, 5, false, false, CRGB(16, 32, 64) };
+  { false, CRGB(255, 160, 60), 160, MODE_SOLID, 5, 64, 10, 5, false, false, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS };
 // A new zone path starts as an orange comet, off.
 const LightState PATH_DEFAULT_STATE =
-  { false, CRGB(255, 140, 40), 128, MODE_COMET, 5, 64, 20, 8, false, false, CRGB(16, 32, 64) };
+  { false, CRGB(255, 140, 40), 128, MODE_COMET, 5, 64, 20, 8, false, false, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS };
 
 // ---------- Saved looks (presets) ----------
 // A named copy of a channel's settings (everything except on/off), e.g. "Xmas chase".

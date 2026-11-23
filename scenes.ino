@@ -7,7 +7,14 @@
 
 const char*    SCENES_FILE    = "/scenes.bin";
 const uint32_t SCENES_MAGIC   = 0x4E454353;  // "SCEN"
-const uint16_t SCENES_VERSION = 1;
+const uint16_t SCENES_VERSION = 2;   // v1 (before 0.15.0): settings without the color list
+
+// Version 1 record, only used to convert old files.
+struct SceneV1 {
+  bool         used;
+  char         name[NAME_LEN];
+  LightStateV1 states[NUM_CHANNELS];
+};
 
 bool channelInUse(int ch) {
   if (ch < CH_ZONE0) return true;
@@ -100,27 +107,37 @@ void loadScenes() {
   File f = FFat.open(SCENES_FILE, "r");
   if (!f) return;
   FileHeader h;
-  if (f.read((uint8_t*)&h, sizeof(h)) != sizeof(h) || h.magic != SCENES_MAGIC ||
-      h.version != SCENES_VERSION || h.recordSize != sizeof(Scene)) {
+  bool okHeader = f.read((uint8_t*)&h, sizeof(h)) == sizeof(h) && h.magic == SCENES_MAGIC;
+  bool isV1 = okHeader && h.version == 1 && h.recordSize == sizeof(SceneV1);
+  bool isV2 = okHeader && h.version == SCENES_VERSION && h.recordSize == sizeof(Scene);
+  if (!isV1 && !isV2) {
     Serial.println("Scenes: file is from a different firmware layout, starting empty");
     f.close();
     return;
   }
   int loaded = 0;
   for (int s = 0; s < h.count && s < MAX_SCENES; s++) {
-    if (f.read((uint8_t*)&scenes[s], sizeof(Scene)) != sizeof(Scene)) break;
-    scenes[s].name[NAME_LEN - 1] = 0;
-    for (int ch = 0; ch < NUM_CHANNELS; ch++) {
-      LightState& ls = scenes[s].states[ch];
-      if (ls.mode >= MODE_COUNT) ls.mode = MODE_SOLID;
-      ls.fadeSeconds = constrain(ls.fadeSeconds, FADE_SECONDS_MIN, FADE_SECONDS_MAX);
-      ls.speed = constrain(ls.speed, SPEED_MIN, SPEED_MAX);
-      ls.size = constrain(ls.size, SIZE_MIN, SIZE_MAX);
+    if (isV1) {
+      // Read one old scene at a time (heap, it's ~360 bytes) and convert it.
+      SceneV1* old = new SceneV1;
+      bool ok = f.read((uint8_t*)old, sizeof(SceneV1)) == sizeof(SceneV1);
+      if (ok) {
+        scenes[s].used = old->used;
+        memcpy(scenes[s].name, old->name, NAME_LEN);
+        for (int ch = 0; ch < NUM_CHANNELS; ch++) scenes[s].states[ch] = upgradeState(old->states[ch]);
+      }
+      delete old;
+      if (!ok) break;
+    } else {
+      if (f.read((uint8_t*)&scenes[s], sizeof(Scene)) != sizeof(Scene)) break;
     }
+    scenes[s].name[NAME_LEN - 1] = 0;
+    for (int ch = 0; ch < NUM_CHANNELS; ch++) sanitizeState(scenes[s].states[ch]);
     if (scenes[s].used) loaded++;
   }
   f.close();
-  Serial.printf("Scenes: %d loaded\n", loaded);
+  Serial.printf("Scenes: %d loaded%s\n", loaded, isV1 ? " (converted from the old format)" : "");
+  if (isV1) saveScenesFile();   // write it back in the new format
 }
 
 void saveScenesFile() {
