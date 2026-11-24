@@ -1,7 +1,7 @@
 # ESP32-S3 House Eave Lighting — Project Handoff
 
 **Date:** 2026-11-23 (updated end of day)  
-**Status:** Firmware **v0.23.0** written and compiling. The board is installed outside on strand A (67 lights, GPIO 8) and updated over Wi-Fi. Strand B (GPIO 9) not yet connected. See **§0** for what works, what's untested and what's next.  
+**Status:** Firmware **v0.24.0** written and compiling. The board is installed outside on strand A (67 lights, GPIO 8) and updated over Wi-Fi. Strand B (GPIO 9) not yet connected. See **§0** for what works, what's untested and what's next.  
 **Purpose:** Give a new VS Code/Codex coding session the hardware facts, target architecture, safety constraints and current state without requiring the conversation history. How to build, upload and lay out code: [AGENTS.md](../AGENTS.md).
 
 ## 0. Current state & next steps (end of 2026-11-23)
@@ -9,7 +9,7 @@
 **Running on the board and confirmed by the user** (up to about v0.14):
 Wi-Fi control page at `http://eavelights.local` (192.168.1.25), saved settings, live view (~9.4 updates/s), strand A/B/Both, Whole house path, solid/fade/chase/comet with background, zones (7 mapped right→left: Right Side B65-40, Front House B41-19, Porch B18-1, Porch 2 A1-5, Front Garage A6-12, Street Garage A13-23, Left Side A24-67), paths with jumps, Find a light, saved looks, strand lengths, wireless updates (IDE network port), house-photo editor with 3 photos, 4-tab page, click-a-zone-to-show.
 
-**Written and compiling, not yet confirmed on hardware/browser** (v0.15–v0.23):
+**Written and compiling, not yet confirmed on hardware/browser** (v0.15–v0.24):
 - v0.15: 21 effects (+ rainbow, gradient, stripes, twinkle, fire, lightning, strobe…), 1–5 color list; saved-file converters.
 - v0.16: Apply/Discard for look changes; All lights off → All lights on (as before).
 - v0.17: playlists of scenes with minutes, yearly date ranges, Follow the calendar (NTP clock, US Eastern); live preview of unapplied changes.
@@ -20,9 +20,10 @@ Wi-Fi control page at `http://eavelights.local` (192.168.1.25), saved settings, 
 - v0.22: Animation effect (Custom group): 8 animations of up to 16 looping steps (move ± lights with smooth glide + wrap, fade / switch to a painting or the colors, hold), in `animations.ino`, `/anims.bin`, `/api/anims`; editor under Lights → ✎ Edit steps.
 - v0.22.1: painting follows Apply/Discard (in "on Apply" mode paint goes to a draft on the board, `paintDraft`, shown only in the preview until Apply); eyedropper (Shift/Ctrl + click or the Pick tool) and brush brightness (per-light level; Pick copies it).
 - v0.23: paintings and animations are libraries (up to 30 each: New, Copy, Rename, Delete). One used by a saved scene or look is locked (🔒): editing makes a copy, so saved scenes never change; one in use can't be deleted. Deleting a zone/path/scene cleans up references (path steps, scenes' slot settings, "All on", playlist steps, house-photo sections unlinked) so reused slot numbers don't inherit them. Calendar fallback for dates no playlist covers: keep / lights off / an everyday playlist.
+- v0.24: scenes in a grouped drop-down (Everyday, New Year's, Valentine's … Christmas, Other; group guessed from the name until set), built-in read-only "Blank" (all off, plain warm white, stops playlists, clears All on), up to 40 scenes. Groups in /scenegroups.bin.
 
 **Next steps:**
-1. Test v0.15–v0.23 on the house (effects, Apply/preview, a 2-scene playlist, the calendar after a power cycle, painting one zone, the timer, an animation).
+1. Test v0.15–v0.24 on the house (effects, Apply/preview, a 2-scene playlist, the calendar after a power cycle, painting one zone, the timer, an animation).
 2. **Download a backup** (Setup → Backup & restore) and keep it on the PC.
 3. **Change the default passwords** in `secrets.h` (`AP_PASSWORD` is still `change-me-123`; add `OTA_PASSWORD`). Upload once using the old password.
 4. Hardware before long-term outdoor use: 74AHCT125 buffer + ~330 Ω per data line, connect and test strand B (count, colors), measure current with both strands at the brightest scene, fuses per branch, weatherproof enclosure, don't reuse the damaged Y-splitter.
@@ -73,6 +74,7 @@ The system should be extensible: initially 2 physical outputs × 65 LEDs, but av
 | Paintings & animations library | v0.23.0: up to 30 each, named, in slots (MAX_PATTERNS / MAX_ANIMS; `size` stays within SIZE_MAX 30). Paintings live in PSRAM. "Locked" = used by a saved scene (a channel that is on in it) or saved look, directly or through an animation (`lookUsers()` in scenes.ino): the page edits a copy. Delete refused while anything (incl. animations and current settings) uses it. paintmeta.bin v2 (converter from v1); patterns.bin record format unchanged, rewritten at 30 records; only changed paintings are rewritten. |
 | Deleting zones/paths/scenes | v0.23.0: slots are reused, so deletes clean up: zone → removed from path steps, scenes reset that slot (`forgetChannel`), "All on" mask bit cleared, house-photo sections unlinked by the page (kept, labelled "(deleted zone)"); path → scenes reset; scene → removed from playlist steps; playlist → fallback reset. |
 | Calendar fallback | v0.23.0: Preferences "fallback": -1 keep (old behaviour), -2 lights off when a playlist's dates end (and allOnMask cleared so the timer doesn't bring the old look back), 0+ = everyday playlist. |
+| Scene groups & Blank | v0.24.0: group id per scene slot in /scenegroups.bin (ids fixed in GROUPS in web_page.h, never renumber; 0 = not set, page guesses from the name). Blank = `action=blank` (applyBlank in scenes.ino), not a stored scene. MAX_SCENES 16 → 40 (same record, longer file). |
 | House view look | v0.20: "Downlight" scallops like the real pucks (Throw/Spread multiples of light spacing), "Glow", and per-section "Points only" for side eaves seen up the roof line. |
 | Bends, hidden parts, swatches | v0.19.0: House editor lines take bends anywhere (drag the line; double-click a bend to remove) and parts can be hidden (lights behind e.g. the garage still count for spacing, not drawn; layout `hidden`). Paintings have names; brush swatches (up to 12) saved in `/paintmeta.bin`. |
 | Custom painted patterns | v0.18.0: effect "Custom" shows one of 8 patterns (a color per physical light, so shared by strands/zones/paths). Painted on the page by tapping/dragging over the live view (photo or strip); saved immediately to `/patterns.bin`, no Apply. |

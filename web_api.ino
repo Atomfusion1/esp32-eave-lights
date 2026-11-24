@@ -36,7 +36,8 @@
 //   POST /api/paths     action=save   [id=N] name=Front sweep steps=0:0:0,2:1:3
 //                         steps = zone slot : reverse 0|1 : gap lights after (0-30), in order
 //                       action=delete id=N. Returns the state.
-//   POST /api/scenes    action=save name=Xmas | action=apply id=N | action=delete id=N
+//   POST /api/scenes    action=save name=Xmas [group=N] | action=apply id=N | action=delete id=N
+//                       action=group id=N group=N | action=blank (everything off, plain looks)
 //   GET/POST /api/programs   playlists & calendar (see handlePrograms / schedule.ino)
 //   GET/POST /api/custom     custom painted patterns (see patterns.ino)
 //   GET/POST /api/anims      animations (see animations.ino)
@@ -513,14 +514,19 @@ void handleScenes() {
   String action = server.arg("action");
   int id = server.arg("id").length() ? server.arg("id").toInt() : -1;
   const char* err;
-  if (action == "save")        err = saveScene(server.arg("name"));
+  if (action == "save")        err = saveScene(server.arg("name"), server.hasArg("group") ? server.arg("group").toInt() : -1);
+  else if (action == "group")  err = setSceneGroup(id, server.arg("group").toInt());
+  else if (action == "blank") {
+    applyBlank();
+    return sendState();
+  }
   else if (action == "delete") err = deleteScene(id);
   else if (action == "apply") {
     err = applyScene(id, true);
     if (err) return sendError(err);
     return sendState();
   } else {
-    err = "action must be save, apply or delete";
+    err = "action must be save, apply, group, blank or delete";
   }
   if (err) return sendError(err);
   handleGetPresets();

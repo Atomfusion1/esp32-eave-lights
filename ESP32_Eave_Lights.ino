@@ -53,7 +53,7 @@
 #define OTA_PASSWORD AP_PASSWORD
 #endif
 
-#define FW_VERSION "0.23.0"
+#define FW_VERSION "0.24.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
@@ -299,7 +299,7 @@ Preset presets[MAX_PRESETS];
 // A named snapshot of every channel's settings (strands, Whole house, all zones, all
 // zone paths, including on/off), e.g. "Xmas". Applying it restores the whole house.
 // Zones/paths themselves (their lights) are not part of a scene: all scenes share them.
-#define MAX_SCENES 16
+#define MAX_SCENES 40   // grew from 16 in v0.24 (same record format, the file just gets longer)
 
 struct Scene {
   bool       used;

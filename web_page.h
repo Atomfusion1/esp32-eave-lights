@@ -137,9 +137,17 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <div id="liveSlotHome"></div>
 <div class="card">
 <h2>Scenes</h2>
-<div class="chips" id="scenes"></div>
-<p class="hint" id="scenesEmpty">No scenes yet. Set up the whole house in the Lights tab, then save it here as a scene, e.g. "Xmas".</p>
+<div class="row"><select class="picker" id="sceneSel"></select><button class="btn primary" id="sceneShow">Show</button></div>
+<div class="chips" id="sceneDots" style="margin-top:8px"></div>
+<div class="row" id="sceneTools" style="margin-top:8px"><span class="hint" style="margin:0;flex:0 0 auto">Group</span><select id="sceneGroupSel"></select><button class="btn danger" id="sceneDel">Delete</button></div>
+<p class="hint" id="scenesEmpty">No scenes yet. Start from Blank (or any look), set up the house in the Lights tab, then save it here as a scene, e.g. "Xmas".</p>
 <div class="row" style="margin-top:12px"><button class="btn" id="saveScene">Save current scene…</button></div>
+<div id="sceneForm" class="sub" hidden>
+<label>Name</label><input id="sceneName" type="text" maxlength="23" list="sceneNames" placeholder="e.g. Xmas classic"><datalist id="sceneNames"></datalist>
+<label style="margin-top:10px">Group</label><select id="sceneNewGroup"></select>
+<p class="hint">Saves what every strand, zone and path is doing right now. Using an existing name replaces that scene.</p>
+<div class="row"><button class="btn" id="sceneCancel">Cancel</button><button class="btn primary" id="sceneSaveGo">Save scene</button></div>
+</div>
 <p class="err" id="sceneErr" hidden></p>
 </div>
 <div class="card">
@@ -658,23 +666,65 @@ $('saveLook').onclick=async()=>{if(hasPending()&&!confirm('Saving uses the setti
  if(j.error)showErr('lookErr',j.error);else{showErr('lookErr');showLooks(j.presets);}};
 
 // ================= Scenes =================
+// Groups, in the order of the year. The board stores only the id: never renumber.
+// 0 = not set yet: shown in the group its name suggests (guessGroup).
+const GROUPS=[{id:14,name:'Everyday'},{id:1,name:'New Year\'s'},{id:2,name:'Valentine\'s Day'},{id:3,name:'St. Patrick\'s Day'},
+ {id:4,name:'Easter & spring'},{id:5,name:'Patriotic (Memorial Day, July 4th, Labor Day)'},{id:6,name:'Fall'},{id:7,name:'Halloween'},
+ {id:8,name:'Thanksgiving'},{id:9,name:'Christmas & holidays'},{id:10,name:'Winter'},{id:11,name:'Party & birthdays'},{id:12,name:'Sports'},{id:13,name:'Other'}];
+const GUESSES=[[9,/x-?mas|christmas|santa|noel|holly|candy ?cane|elf|reindeer|hanukk?ah|kwanzaa|nativity|grinch/],[1,/new ?year|nye/],
+ [2,/valent|cupid|heart|love/],[3,/patrick|irish|shamrock|clover/],[4,/easter|bunny|spring/],
+ [5,/july|4th|fourth|patriot|usa|america|memorial|labor|veteran|flag|red,? ?white/],[7,/hallow|spook|pumpkin|ghost|witch|scary|boo\b|monster/],
+ [8,/thanks|turkey|harvest|pilgrim/],[6,/fall|autumn/],[10,/winter|snow|ice|frost/],[11,/birthday|party|b-?day|celebrat/],
+ [12,/game|team|sport|football|baseball|hockey|basketball|soccer|buckeye|browns|bengals|guardians/],
+ [14,/normal|every|warm|white|default|daily|night|porch|plain|basic/]];
+const guessGroup=name=>{const n=String(name).toLowerCase();const g=GUESSES.find(x=>x[1].test(n));return g?g[0]:13;};
+const sceneGroupOf=s=>s.group||guessGroup(s.name);
+// <option>s of the scenes, grouped by holiday (for every scene drop-down).
+function sceneOptions(selId){return GROUPS.map(g=>{const list=sceneList.filter(s=>sceneGroupOf(s)===g.id);
+ return list.length?'<optgroup label="'+esc(g.name)+'">'+list.map(s=>'<option value="'+s.id+'"'+(s.id===selId?' selected':'')+'>'+esc(s.name)+'</option>').join('')+'</optgroup>':'';}).join('');}
+const groupOptions=()=>GROUPS.map(g=>'<option value="'+g.id+'">'+esc(g.name)+'</option>').join('');
+let sceneSelId=store.get('eaveScene','blank');
 function showScenes(list){sceneList=list||[];refreshLocks();
- $('scenes').innerHTML=sceneList.map(s=>'<span class="chip" data-id="'+s.id+'" title="'+s.on+' parts on">'+
-  s.colors.map(c=>'<span class="dot" style="background:'+c+'"></span>').join('')+esc(s.name)+
-  '<span class="x" data-x="'+s.id+'" title="Delete">×</span></span>').join('');
+ if(sceneSelId!=='blank'&&!sceneList.some(s=>String(s.id)===String(sceneSelId)))sceneSelId='blank';
+ $('sceneSel').innerHTML='<optgroup label="Start fresh"><option value="blank">Blank: everything off</option></optgroup>'+sceneOptions(-1);
+ $('sceneSel').value=String(sceneSelId);
+ $('sceneNames').innerHTML=sceneList.map(s=>'<option value="'+esc(s.name)+'">').join('');
  $('scenesEmpty').hidden=sceneList.length>0;
- if(typeof progData!=='undefined'&&progData)showPrograms(progData);   // playlists show scene names
- $('scenes').querySelectorAll('.chip').forEach(c=>c.onclick=async e=>{
-  const x=e.target.dataset.x;
-  if(x!==undefined){const s=sceneList.find(l=>l.id===+x);if(!confirm('Delete scene "'+s.name+'"?'))return;
-   const j=await post('/api/scenes',{action:'delete',id:x});if(j.error)showErr('sceneErr',j.error);else{showErr('sceneErr');showScenes(j.scenes);}return;}
-  if(hasPending())stopPreview();pending={};pendingTarget=null;await discardPaint();   // a scene replaces any unapplied changes
-  const j=await post('/api/scenes',{action:'apply',id:c.dataset.id});
-  if(j.error)showErr('sceneErr',j.error);else{showErr('sceneErr');show(j);}});}
-$('saveScene').onclick=async()=>{if(hasPending()&&!confirm('Your unapplied changes to '+pendingName+' will be applied first so they are part of the scene. Continue?'))return;
- await applyPending();const name=prompt('Name for this scene (e.g. Xmas, Halloween, Normal). Saves what every strand, zone and path is doing right now. Same name replaces it.');
- if(!name)return;const j=await post('/api/scenes',{action:'save',name});
+ renderSceneInfo();
+ if(typeof progData!=='undefined'&&progData)showPrograms(progData);}   // playlists show scene names
+function renderSceneInfo(){const s=sceneList.find(x=>String(x.id)===String(sceneSelId));
+ $('sceneTools').hidden=!s;
+ $('sceneDots').innerHTML=s?s.colors.map(c=>'<span class="dot" style="background:'+c+'"></span>').join('')+'<span class="hint" style="margin:0">'+s.on+' parts on</span>'
+  :'<span class="hint" style="margin:0">Turns everything off and sets every strand, zone and path back to plain warm white, to build a new look from. Your saved scenes don\'t change.</span>';
+ if(s){$('sceneGroupSel').innerHTML=groupOptions();$('sceneGroupSel').value=String(sceneGroupOf(s));}}
+$('sceneSel').onchange=e=>{sceneSelId=e.target.value;store.set('eaveScene',sceneSelId);renderSceneInfo();};
+$('sceneShow').onclick=async()=>{const blank=sceneSelId==='blank';
+ if(blank&&!confirm('Start from Blank? Everything turns off and every strand, zone and path goes back to plain warm white (a playlist that is playing stops). Saved scenes and looks are not changed.'))return;
+ if(hasPending())stopPreview();pending={};pendingTarget=null;await discardPaint();   // a scene replaces any unapplied changes
+ const j=await post('/api/scenes',blank?{action:'blank'}:{action:'apply',id:sceneSelId});
+ if(j.error)showErr('sceneErr',j.error);else{showErr('sceneErr');show(j);if(blank)loadPrograms();}};
+$('sceneGroupSel').onchange=async e=>{const j=await post('/api/scenes',{action:'group',id:sceneSelId,group:e.target.value});
  if(j.error)showErr('sceneErr',j.error);else{showErr('sceneErr');showScenes(j.scenes);}};
+$('sceneDel').onclick=async()=>{const s=sceneList.find(x=>String(x.id)===String(sceneSelId));if(!s||!confirm('Delete scene "'+s.name+'"? Playlists that use it drop it.'))return;
+ const j=await post('/api/scenes',{action:'delete',id:s.id});if(j.error)showErr('sceneErr',j.error);else{showErr('sceneErr');showScenes(j.scenes);loadPrograms();}};
+// Save: name + group (the group follows the name until you pick one).
+let sceneGroupTouched=false;
+$('saveScene').onclick=async()=>{if(hasPending()&&!confirm('Your unapplied changes to '+pendingName+' will be applied first so they are part of the scene. Continue?'))return;
+ await applyPending();const s=sceneList.find(x=>String(x.id)===String(sceneSelId));
+ $('sceneName').value=s?s.name:'';$('sceneNewGroup').innerHTML=groupOptions();$('sceneNewGroup').value=String(s?sceneGroupOf(s):14);
+ sceneGroupTouched=!!s;$('sceneForm').hidden=false;$('sceneName').focus();};
+$('sceneName').oninput=()=>{const nm=$('sceneName').value,old=sceneList.find(x=>x.name.toLowerCase()===nm.trim().toLowerCase());
+ if(old){$('sceneNewGroup').value=String(sceneGroupOf(old));}else if(!sceneGroupTouched&&nm.trim())$('sceneNewGroup').value=String(guessGroup(nm));};
+$('sceneNewGroup').onchange=()=>{sceneGroupTouched=true;};
+$('sceneCancel').onclick=()=>{$('sceneForm').hidden=true;};
+$('sceneSaveGo').onclick=async()=>{const name=$('sceneName').value.trim();if(!name){showErr('sceneErr','Enter a name for the scene.');return;}
+ const old=sceneList.find(x=>x.name.toLowerCase()===name.toLowerCase());
+ if(old&&!confirm('Replace scene "'+old.name+'" with what the lights are doing now?'))return;
+ const j=await post('/api/scenes',{action:'save',name,group:$('sceneNewGroup').value});
+ if(j.error){showErr('sceneErr',j.error);return;}
+ showErr('sceneErr');$('sceneForm').hidden=true;
+ const saved=(j.scenes||[]).find(x=>x.name.toLowerCase()===name.toLowerCase());if(saved){sceneSelId=String(saved.id);store.set('eaveScene',sceneSelId);}
+ showScenes(j.scenes);};
 function loadLooksAndScenes(){return fetch('/api/presets').then(r=>r.json()).then(j=>{showLooks(j.presets);showScenes(j.scenes);}).catch(()=>{});}
 
 // ================= Playlists & calendar =================
@@ -744,7 +794,7 @@ $('progStop').onclick=()=>progAction({action:'stop'});
 function renderProgSteps(){$('progNeedsScenes').hidden=sceneList.length>0;$('progStepHead').hidden=!progSteps.length;
  $('progDateRow').hidden=!$('progDates').checked;
  $('progSteps').innerHTML=progSteps.map((s,i)=>'<div class="stepRow"><select data-ps="'+i+'">'+
-  sceneList.map(sc=>'<option value="'+sc.id+'"'+(sc.id===s.scene?' selected':'')+'>'+esc(sc.name)+'</option>').join('')+
+  sceneOptions(s.scene)+
   (sceneList.some(sc=>sc.id===s.scene)?'':'<option selected value="-1">(deleted scene)</option>')+'</select>'+
   '<input type="number" min="0.25" step="0.25" value="'+s.minutes+'" data-pm="'+i+'" style="width:84px;flex:0 0 84px" title="Minutes this scene shows">'+
   '<button class="btn" data-pu="'+i+'" title="Move up"'+(i?'':' disabled')+'>↑</button>'+

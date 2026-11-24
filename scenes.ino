@@ -113,8 +113,48 @@ void forgetChannel(int ch, const LightState& def) {
   allOnMask &= ~(1UL << ch);
 }
 
+// ---- Scene groups (Everyday, Christmas, ...): one number per scene slot ----
+// The page has the group names (GROUPS in web_page.h); the board only stores the number,
+// in /scenegroups.bin, so scenes.bin's format didn't have to change.
+const char*    SCENEGROUPS_FILE  = "/scenegroups.bin";
+const uint32_t SCENEGROUPS_MAGIC = 0x50524753;  // "SGRP"
+#define MAX_SCENE_GROUPS 32
+uint8_t sceneGroup[MAX_SCENES];
+
+void loadSceneGroups() {
+  memset(sceneGroup, 0, sizeof(sceneGroup));
+  if (!storageOk || !FFat.exists(SCENEGROUPS_FILE)) return;
+  File f = FFat.open(SCENEGROUPS_FILE, "r");
+  if (!f) return;
+  FileHeader h;
+  if (f.read((uint8_t*)&h, sizeof(h)) == sizeof(h) && h.magic == SCENEGROUPS_MAGIC && h.recordSize == 1) {
+    f.read(sceneGroup, min((int)h.count, MAX_SCENES));
+    for (int s = 0; s < MAX_SCENES; s++) if (sceneGroup[s] >= MAX_SCENE_GROUPS) sceneGroup[s] = 0;
+  }
+  f.close();
+}
+
+void saveSceneGroups() {
+  if (!storageOk || savesBlocked) return;
+  File f = FFat.open(SCENEGROUPS_FILE, "w");
+  if (!f) return;
+  FileHeader h = { SCENEGROUPS_MAGIC, 1, 1, MAX_SCENES };
+  f.write((const uint8_t*)&h, sizeof(h));
+  f.write(sceneGroup, MAX_SCENES);
+  f.close();
+}
+
+const char* setSceneGroup(int id, int group) {
+  if (id < 0 || id >= MAX_SCENES || !scenes[id].used) return "scene not found";
+  if (group < 0 || group >= MAX_SCENE_GROUPS) return "unknown group";
+  sceneGroup[id] = group;
+  saveSceneGroups();
+  return nullptr;
+}
+
 // Saves the current settings of every channel as `name`. Same name replaces it.
-const char* saveScene(const String& name) {
+// group: 0+ = that group; -1 = keep the replaced scene's group (new scene: 0).
+const char* saveScene(const String& name, int group) {
   char cleanName[NAME_LEN];
   if (!copyName(name, cleanName)) return "enter a name for the scene";
 
@@ -122,16 +162,35 @@ const char* saveScene(const String& name) {
   for (int s = 0; s < MAX_SCENES && id < 0; s++) {
     if (scenes[s].used && strcasecmp(scenes[s].name, cleanName) == 0) id = s;
   }
+  bool replacing = id >= 0;
   for (int s = 0; s < MAX_SCENES && id < 0; s++) {
     if (!scenes[s].used) id = s;
   }
-  if (id < 0) return "all 16 scenes are used; delete one first";
+  if (id < 0) return "all 40 scenes are used; delete one first";
 
   scenes[id].used = true;
   strcpy(scenes[id].name, cleanName);
   for (int ch = 0; ch < NUM_CHANNELS; ch++) scenes[id].states[ch] = states[ch];
   saveScenesFile();
+  if (group >= 0 && group < MAX_SCENE_GROUPS) sceneGroup[id] = group;
+  else if (!replacing) sceneGroup[id] = 0;
+  saveSceneGroups();
   return nullptr;
+}
+
+// "Blank": a clean start, not a saved scene (nothing to overwrite or delete). Every
+// strand, zone and path off and back to plain warm white; no playlist; nothing for
+// "All on" to bring back.
+void applyBlank() {
+  stopLocate();
+  stopProgram();
+  for (int ch = 0; ch < NUM_CHANNELS; ch++) {
+    states[ch] = ZONE_DEFAULT_STATE;
+    resetPhase(ch);
+  }
+  allOnMask = 0;
+  markStateChanged();
+  Serial.println("Scene: blank");
 }
 
 // save = false when a playlist switches scenes: no flash write on every swap (the
@@ -153,6 +212,8 @@ const char* deleteScene(int id) {
   if (id < 0 || id >= MAX_SCENES || !scenes[id].used) return "scene not found";
   scenes[id].used = false;
   scenes[id].name[0] = 0;
+  sceneGroup[id] = 0;
+  saveSceneGroups();
   saveScenesFile();
   // Playlists drop their steps for it, so a new scene in this slot isn't played by them.
   bool changed = false;
@@ -201,13 +262,16 @@ String scenesJson() {
     json += onCount;
     json += ",\"colors\":[";
     json += colors;
-    json += "]}";
+    json += "],\"group\":";
+    json += sceneGroup[s];
+    json += "}";
   }
   json += "]";
   return json;
 }
 
 void loadScenes() {
+  loadSceneGroups();
   for (int s = 0; s < MAX_SCENES; s++) {
     scenes[s].used = false;
     scenes[s].name[0] = 0;
