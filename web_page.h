@@ -1264,8 +1264,9 @@ function drawPhoto(fi){const v=layout.views[photoView];let im=imgs[v.image];
   pos.forEach((q,i)=>{if(hid.includes(q.seg))return;   // behind something on this photo
    const c=lightRGB(fi,ls[i][0],ls[i][1]),x=q.x*w,y=q.y*h;
    dots.push({box:'photo',o:ls[i][0],i:ls[i][1],x,y,r:Math.max(Math.min(sp*0.5,R),7)});
-   if(!c){if(painting){pctx.globalCompositeOperation='source-over';pctx.strokeStyle='rgba(255,255,255,0.35)';pctx.lineWidth=1;
-     pctx.beginPath();pctx.arc(x,y,Math.max(2.5,sp*0.08),0,7);pctx.stroke();pctx.globalCompositeOperation='lighter';}return;}
+   // off: a faint ring, so the layout still shows with everything off (brighter while painting)
+   if(!c){pctx.globalCompositeOperation='source-over';pctx.strokeStyle=painting?'rgba(255,255,255,0.35)':'rgba(255,255,255,0.18)';pctx.lineWidth=1;
+     pctx.beginPath();pctx.arc(x,y,Math.max(2.5,sp*0.08),0,7);pctx.stroke();pctx.globalCompositeOperation='lighter';return;}
    drawLight(pctx,x,y,c,sp,R,pset);});});
  pctx.globalCompositeOperation='source-over';}
 
