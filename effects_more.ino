@@ -18,6 +18,7 @@
 //   Fire / candle   color, speed = flicker speed
 //   Lightning       color (flash), speed = how often, background between flashes
 //   Strobe          color, speed = flashes (speed/10 per second, max 10), background
+//   Sway            colors, size = stripe width (also how far it swings), speed/10 lights/s, reverse
 //
 // Everything is calculated from settings and elapsed time; "random" looks come from
 // hash32(), so the same settings always give the same pattern.
@@ -340,4 +341,28 @@ void drawStrobe(int ch) {
   uint32_t onMs = min(period / 2, (uint32_t)50);
   bool on = (effectMs[ch] % period) < onMs;
   fillLine(ch, on ? litColor(s.color, s, 255) : bgOrOff(s));
+}
+
+// Sway: stripes of `size` lights in each color glide one stripe width along the line,
+// then back, and so on, blending smoothly between lights (slow at each end).
+// speed/10 = lights per second (0.1-10); reverse = the first move goes the other way.
+void drawSway(int ch) {
+  const LightState& s = states[ch];
+  int len = lineLength(ch);
+  int band = max((int)s.size, 1), nb = bandCount(s);
+  uint32_t halfMs = (uint32_t)band * 10000UL / max((int)s.speed, 1);  // one swing; speed/10 lights/s
+  if (halfMs < 50) halfMs = 50;
+  uint32_t t = effectMs[ch] % (2 * halfMs);
+  uint32_t p = (uint32_t)(((uint64_t)(t < halfMs ? t : 2 * halfMs - t) << 16) / halfMs);   // 0-65536 and back
+  int32_t off = (int32_t)(((uint64_t)band * 256 * easeInOut16(min(p, (uint32_t)65535))) >> 16);   // 1/256 lights
+  int32_t period = band * nb;
+  for (int i = 0; i < len; i++) {
+    int32_t q = i * 256 - off;                                   // where this light's color comes from
+    int32_t j = (q >= 0) ? (q >> 8) : -(((-q) + 255) >> 8);      // floor
+    uint8_t frac = q - j * 256;
+    int32_t k1 = ((j % period) + period) % period, k2 = (k1 + 1) % period;
+    CRGB c = bandColor(s, k1 / band);
+    if (frac) c = blend(c, bandColor(s, k2 / band), frac);
+    putLight(ch, i, c);
+  }
 }

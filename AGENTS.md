@@ -85,7 +85,7 @@ ESP32_Eave_Lights/              folder name must equal the main sketch name
   animations.ino                MODE_ANIM: animation `size` (1-8) = looping steps (hold, move
                                 ±lights with glide + wrap, fade/switch to colors or a painting);
                                 /api/anims, /anims.bin (AnimDef/AnimStep in the main tab)
-  effects_more.ino              the 16 extra effects (rainbow, gradient, stripes, twinkle,
+  effects_more.ino              the extra effects (rainbow, gradient, stripes, sway, twinkle,
                                 fire, lightning…); what speed/size mean per effect is
                                 listed at the top. Must match the MODES table in web_page.h
   effects.ino                   draws each channel (solid/fade/test/chase/comet) at 50 fps;

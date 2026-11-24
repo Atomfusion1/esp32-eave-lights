@@ -579,6 +579,7 @@ const MODES=[
  {g:'Color',id:'gradient',name:'Gradient',colors:'multi',min:2,spd:'Drift',fmt:still,dir:true,hint:'Blends through your colors from one end to the other. Drift 1 = still.'},
  {g:'Holiday',id:'stripes',name:'Stripes / candy cane',colors:'multi',min:2,spd:'Slide',fmt:still,size:'Stripe width',dir:true,hint:'Bands of your colors (red/white, red/green…). Slide 1 = still.'},
  {g:'Holiday',id:'alternate',name:'Alternating swap',colors:'multi',min:2,spd:'Swap speed',fmt:v=>(10/v).toFixed(v>=10?1:0)+' s per swap',size:'Group size',hint:'Every other light (or group) in your colors, swapping on a beat.'},
+ {g:'Holiday',id:'sway',name:'Sway (stripes rocking)',colors:'multi',min:2,spd:'Speed',fmt:v=>(v/10).toFixed(1)+' lights/s',size:'Stripe width (and how far it swings)',dir:['Starts forward','Starts backward'],hint:'Stripes of your colors (e.g. 2 white, 2 red) glide one stripe over, blending light to light, then glide back. Pick 2–5 colors.'},
  {g:'Holiday',id:'colorcycle',name:'Color cycle',colors:'multi',min:2,fsec:'Seconds per color',hint:'All lights hold each color, then fade to the next.'},
  {g:'Holiday',id:'twinkle',name:'Twinkle',colors:'multi',min:1,spd:'Twinkle speed',fmt:v=>(v/10).toFixed(1)+'×',size:'Density',sizeFmt:v=>Math.min(v*3,90)+'%',bg:1,hint:'Lights gently twinkle in your colors over the background.'},
  {g:'Sparkle',id:'sparkle',name:'Sparkle',colors:'multi',min:1,colorNames:['Base','Sparkle'],spd:'Rate',fmt:v=>v,size:'Density',hint:'Quick flashes of color 2 (or white) over color 1.'},

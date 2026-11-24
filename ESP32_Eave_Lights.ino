@@ -53,7 +53,7 @@
 #define OTA_PASSWORD AP_PASSWORD
 #endif
 
-#define FW_VERSION "0.24.3"
+#define FW_VERSION "0.25.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
@@ -108,8 +108,9 @@ enum Mode : uint8_t {
   MODE_STROBE       = 20,  // on/off flashing in color 1
   MODE_CUSTOM       = 21,  // each light painted by hand: painting number `size` (1-30)
   MODE_ANIM         = 22,  // animation number `size` (1-30): steps that move / fade frames
+  MODE_SWAY         = 23,  // stripes of `size` lights glide one stripe over and back (speed)
 };
-#define MODE_COUNT 23
+#define MODE_COUNT 24
 
 // ---------- Custom patterns ----------
 // A color per physical light, painted on the page; a channel in MODE_CUSTOM shows
