@@ -199,7 +199,7 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <p class="hint" id="modeHint"></p>
 <div id="colorBox" style="margin-top:14px">
 <label id="colorLabel">Color</label>
-<div class="colorRow" id="colorRow"><input id="color" type="color"></div>
+<div class="colorRow" id="colorRow"><input id="color" type="color" list="savedColors"></div>
 <div class="row" id="colorCountRow" style="margin-top:8px">
 <button class="btn" id="colorLess">− color</button><button class="btn" id="colorMore">+ color</button><span class="hint" id="colorCountTxt" style="margin:0"></span>
 </div>
@@ -213,10 +213,10 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <div id="paintTools" class="sub" hidden>
 <label>Painting <b id="paintNum"></b>: tap or drag over the lights in the live view</label>
 <div class="row" style="align-items:center">
-<input type="color" id="brush" value="#ff0000" style="height:44px">
+<input type="color" id="brush" value="#ff0000" style="height:44px" list="savedColors">
 <div class="seg" id="paintTool" style="flex:2"><button data-tool="paint" class="sel">Paint</button><button data-tool="erase">Erase</button></div>
 </div>
-<label style="margin-top:10px">Brush colors <span id="swatchMode"></span></label>
+<label style="margin-top:10px">Saved colors <span id="swatchMode"></span></label>
 <div class="chips" id="swatches"></div>
 <div class="row" style="margin-top:8px"><button class="btn" id="swatchAdd">+ Save brush color</button><button class="btn" id="swatchDel">Remove…</button></div>
 <div class="row" style="margin-top:8px">
@@ -235,7 +235,7 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <div class="seg" id="dir"><button data-rev="0"></button><button data-rev="1"></button></div></div>
 <div id="bgBox"><label style="margin-top:14px">Background (lights between / behind the effect)</label>
 <div class="seg" id="bg"><button data-bg="0">Off</button><button data-bg="1">On</button></div>
-<input id="bgColor" type="color" style="margin-top:10px" hidden>
+<input id="bgColor" type="color" style="margin-top:10px" list="savedColors" hidden>
 <p class="hint" id="bgHint" hidden>Uses the same brightness. Lights every light, so it adds current.</p></div>
 </details>
 </div>
@@ -538,7 +538,7 @@ function renderLook(o){const m=modeById(o.mode);
  $('colorLabel').textContent=multi?(m.colorNames?m.colorNames.join(' / ')+' colors':'Colors (in order)'):'Color';
  const row=$('colorRow');
  while(row.children.length>list.length)row.removeChild(row.lastChild);
- while(row.children.length<list.length){const k=row.children.length,inp=document.createElement('input');inp.type='color';
+ while(row.children.length<list.length){const k=row.children.length,inp=document.createElement('input');inp.type='color';inp.setAttribute('list','savedColors');
   inp.oninput=e=>sendSoon({['color'+(k+1)]:e.target.value.slice(1)});row.appendChild(inp);}
  list.forEach((c,k)=>{if(document.activeElement!==row.children[k])row.children[k].value=c.toLowerCase();});
  $('colorCountRow').hidden=!multi;
@@ -845,7 +845,12 @@ $('paintFill').onclick=()=>paintAll(false);$('paintClear').onclick=()=>paintAll(
 let paintNames=['Painting 1','Painting 2','Painting 3','Painting 4','Painting 5','Painting 6','Painting 7','Painting 8'],swatchList=[],swatchDelMode=false;
 function showPaintMeta(j){if(!j||j.error)return;paintNames=j.names;swatchList=j.swatches;renderSwatches();if(st)renderLook(cur());}
 function loadPaintMeta(){return fetch('/api/paint-meta').then(r=>r.json()).then(showPaintMeta).catch(()=>{});}
-function renderSwatches(){const cur=$('brush').value.toLowerCase();
+// Saved colors also appear as suggestions inside every color picker on the page
+// (<datalist> on input type=color: Chrome/Edge show them in the picker popup).
+function updateSavedColorList(){let dl=$('savedColors');
+ if(!dl){dl=document.createElement('datalist');dl.id='savedColors';document.body.appendChild(dl);}
+ dl.innerHTML=swatchList.map(c=>'<option value="'+c.toLowerCase()+'">').join('');}
+function renderSwatches(){updateSavedColorList();const cur=$('brush').value.toLowerCase();
  $('swatches').innerHTML=swatchList.map((c,k)=>'<button class="swatch'+(swatchDelMode?' del':(c.toLowerCase()===cur&&paintTool==='paint'?' sel':''))+'" data-k="'+k+'" style="background:'+c+'" title="'+(swatchDelMode?'Remove ':'')+c+'"></button>').join('');
  $('swatchMode').textContent=swatchDelMode?'· tap a color to remove it':'· tap to paint with it';
  $('swatchDel').textContent=swatchDelMode?'Done removing':'Remove…';$('swatchAdd').disabled=swatchList.length>=12;
