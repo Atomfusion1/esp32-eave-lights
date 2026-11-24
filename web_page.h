@@ -118,7 +118,7 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <!-- ===== Live view (moved into Home or Lights) ===== -->
 <div class="card" id="liveCard">
 <div class="liveHead">
-<label>Live <span id="liveInfo"></span></label>
+<label>Live <span id="liveInfo"></span> <span class="pill on" id="pvBadge" hidden>PREVIEW · not applied yet</span></label>
 <div class="seg small" id="photoViews"></div>
 <div class="seg small" id="liveMode"><button data-lm="photo">House</button><button data-lm="strip">Strip</button></div>
 </div>
@@ -138,6 +138,31 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <div class="row" style="margin-top:12px"><button class="btn" id="saveScene">Save current scene…</button></div>
 <p class="err" id="sceneErr" hidden></p>
 </div>
+<div class="card">
+<h2>Playlists &amp; calendar</h2>
+<p class="onList" id="progNow">…</p>
+<div class="row" id="progNowBtns" style="margin-top:8px" hidden><button class="btn" id="progNext">Next scene ▶</button><button class="btn danger" id="progStop">Stop</button></div>
+<label style="display:flex;gap:8px;align-items:center;margin:14px 0 4px;color:var(--text);font-size:15px"><input type="checkbox" id="schedOn" style="width:20px;height:20px;accent-color:var(--accent)"> Follow the calendar</label>
+<p class="hint" id="clockTxt" style="margin:0 0 10px"></p>
+<div id="progList"></div>
+<p class="hint" id="noProgs">No playlists yet. A playlist rotates through scenes, e.g. Xmas classic 10 min → Snowfall 5 min, and can have dates so it runs by itself every year.</p>
+<button class="btn" id="progNew" style="margin-top:10px">+ New playlist</button>
+<div id="progForm" class="sub" hidden>
+<label id="progFormTitle">New playlist</label>
+<input id="progName" type="text" placeholder="Name, e.g. Xmas" maxlength="23">
+<label style="display:flex;gap:8px;align-items:center;margin:12px 0 6px;color:var(--text);font-size:14px"><input type="checkbox" id="progDates" style="width:18px;height:18px;accent-color:var(--accent)"> Only between these dates, every year</label>
+<div class="row" id="progDateRow" style="flex-wrap:wrap">
+<select id="fromM"></select><select id="fromD"></select><span style="flex:0 0 auto">to</span><select id="toM"></select><select id="toD"></select>
+</div>
+<div class="stepHead" id="progStepHead"><span>Scene (in order)</span><span style="width:84px">Minutes</span><span style="width:84px"></span></div>
+<div id="progSteps"></div>
+<p class="hint" id="progNeedsScenes" hidden>Save some scenes first (above).</p>
+<button class="btn" id="progAddStep" style="margin-top:8px">+ Add scene</button>
+<div class="row" style="margin-top:12px"><button class="btn primary" id="progSave">Save playlist</button><button class="btn" id="progCancel">Cancel</button></div>
+<p class="err" id="progErr" hidden></p>
+</div>
+</div>
+
 <div class="card">
 <h2>On right now</h2>
 <p class="onList" id="onList">…</p>
@@ -331,7 +356,7 @@ function renderPicker(s){const onOff=o=>o.on?'  ● on':'  ○ off';
  $('picker').innerHTML=h;$('picker').value=String(sel);}
 $('picker').onchange=async e=>{const next=+e.target.value;
  if(hasPending()){if(confirm('Apply your changes to '+pendingName+' first?\n\nOK = apply them, Cancel = throw them away.'))await applyPending();
-  else{pending={};pendingTarget=null;updateApplyBar();}}
+  else{pending={};pendingTarget=null;updateApplyBar();stopPreview();}}
  sel=next;store.set('eaveSel',sel);show(st);};
 
 function show(s){st=s;
@@ -399,10 +424,16 @@ function applyPendingTo(o,p){if(!o)return;
 function updateApplyBar(){$('applyBar').hidden=!hasPending();$('applyTxt').textContent='Not applied yet: '+pendingName;
  $('applyMode').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',b.dataset.am===applyMode));}
 async function applyPending(){if(!hasPending())return;const p=Object.assign({output:pendingTarget},pending);
- pending={};pendingTarget=null;updateApplyBar();
+ pending={};pendingTarget=null;updateApplyBar();stopPreview();
  try{const j=await post('/api/state',p);if(j.error)$('status').textContent=j.error;else show(j);}catch(e){$('status').textContent='Not connected';}}
-async function discardPending(){pending={};pendingTarget=null;updateApplyBar();
+async function discardPending(){pending={};pendingTarget=null;updateApplyBar();stopPreview();
  try{show(await (await fetch('/api/state')).json());}catch(e){}}
+// The board draws unapplied changes into a hidden preview frame; the live view shows it.
+let previewTimer=null;
+function sendPreview(){clearTimeout(previewTimer);previewTimer=setTimeout(()=>{if(!hasPending())return;
+ post('/api/preview',Object.assign({output:pendingTarget},pending)).catch(()=>{});},150);}
+function stopPreview(){clearTimeout(previewTimer);post('/api/preview',{stop:1}).catch(()=>{});}
+setInterval(()=>{if(hasPending())sendPreview();},60000);   // keep it alive (the board drops it after 3 min)
 $('applyBtn').onclick=applyPending;$('discardBtn').onclick=discardPending;
 $('applyMode').querySelectorAll('button').forEach(b=>b.onclick=async()=>{applyMode=b.dataset.am;store.set('eaveApplyMode',applyMode);
  if(applyMode==='instant')await applyPending();updateApplyBar();});
@@ -411,7 +442,7 @@ window.addEventListener('beforeunload',e=>{if(hasPending()){e.preventDefault();e
 async function send(p){if(!st)return;
  if(applyMode==='apply'&&Object.keys(p).every(k=>LOOK_KEYS.includes(k))){
   if(pendingTarget!==target()){pending={};pendingTarget=target();pendingName=curName();}
-  Object.assign(pending,p);applyPendingTo(cur(),p);renderLook(cur());updateApplyBar();return;}
+  Object.assign(pending,p);applyPendingTo(cur(),p);renderLook(cur());updateApplyBar();sendPreview();return;}
  p.output=target();
  try{const j=await post('/api/state',p);if(j.error){$('status').textContent=j.error;}else show(j);}
  catch(e){$('status').textContent='Not connected';}}
@@ -516,7 +547,7 @@ function showLooks(list){looks=list||[];
   const x=e.target.dataset.x;
   if(x!==undefined){const p=looks.find(l=>l.id===+x);if(!confirm('Delete saved look "'+p.name+'"?'))return;
    const j=await post('/api/presets',{action:'delete',id:x});if(j.error)showErr('lookErr',j.error);else{showErr('lookErr');showLooks(j.presets);}return;}
-  if(pendingTarget===target()){pending={};pendingTarget=null;}   // the look replaces unapplied changes
+  if(pendingTarget===target()){pending={};pendingTarget=null;stopPreview();}   // the look replaces unapplied changes
   const j=await post('/api/presets',{action:'apply',id:c.dataset.id,output:target()});
   if(j.error)showErr('lookErr',j.error);else{showErr('lookErr');show(j);}});}
 $('saveLook').onclick=async()=>{if(hasPending()&&!confirm('Saving uses the settings the lights have now. Your unapplied changes will be applied first. Continue?'))return;
@@ -530,11 +561,12 @@ function showScenes(list){sceneList=list||[];
   s.colors.map(c=>'<span class="dot" style="background:'+c+'"></span>').join('')+esc(s.name)+
   '<span class="x" data-x="'+s.id+'" title="Delete">×</span></span>').join('');
  $('scenesEmpty').hidden=sceneList.length>0;
+ if(typeof progData!=='undefined'&&progData)showPrograms(progData);   // playlists show scene names
  $('scenes').querySelectorAll('.chip').forEach(c=>c.onclick=async e=>{
   const x=e.target.dataset.x;
   if(x!==undefined){const s=sceneList.find(l=>l.id===+x);if(!confirm('Delete scene "'+s.name+'"?'))return;
    const j=await post('/api/scenes',{action:'delete',id:x});if(j.error)showErr('sceneErr',j.error);else{showErr('sceneErr');showScenes(j.scenes);}return;}
-  pending={};pendingTarget=null;   // a scene replaces any unapplied changes
+  if(hasPending())stopPreview();pending={};pendingTarget=null;   // a scene replaces any unapplied changes
   const j=await post('/api/scenes',{action:'apply',id:c.dataset.id});
   if(j.error)showErr('sceneErr',j.error);else{showErr('sceneErr');show(j);}});}
 $('saveScene').onclick=async()=>{if(hasPending()&&!confirm('Your unapplied changes to '+pendingName+' will be applied first so they are part of the scene. Continue?'))return;
@@ -542,6 +574,74 @@ $('saveScene').onclick=async()=>{if(hasPending()&&!confirm('Your unapplied chang
  if(!name)return;const j=await post('/api/scenes',{action:'save',name});
  if(j.error)showErr('sceneErr',j.error);else{showErr('sceneErr');showScenes(j.scenes);}};
 function loadLooksAndScenes(){return fetch('/api/presets').then(r=>r.json()).then(j=>{showLooks(j.presets);showScenes(j.scenes);}).catch(()=>{});}
+
+// ================= Playlists & calendar =================
+const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+let progData=null,editProg=-1,progSteps=[];   // progSteps: {scene, minutes} while editing
+const sceneName=id=>{const s=sceneList.find(x=>x.id===id);return s?s.name:'(deleted scene)';};
+const fmtDate=md=>{const [m,d]=md.split('-').map(Number);return MONTHS[m-1]+' '+d;};
+const fmtMins=s=>s%60?(s/60).toFixed(1).replace(/\.0$/,''):String(s/60);
+(function fillDateSelects(){const mo=MONTHS.map((n,i)=>'<option value="'+(i+1)+'">'+n+'</option>').join('');
+ const dy=Array.from({length:31},(_,i)=>'<option value="'+(i+1)+'">'+(i+1)+'</option>').join('');
+ ['fromM','toM'].forEach(id=>$(id).innerHTML=mo);['fromD','toD'].forEach(id=>$(id).innerHTML=dy);})();
+function showPrograms(j){progData=j;
+ $('schedOn').checked=j.scheduleOn;
+ $('clockTxt').textContent=j.clock?'Clock: '+j.clock+(j.stoppedToday?' · calendar paused until tomorrow (Stop was pressed)':''):
+  'Clock not set yet (needs internet). Playlists you start with ▶ still work.';
+ const a=j.active,ap=a&&j.programs.find(p=>p.id===a.id);
+ if(ap){const step=ap.steps[a.step],next=ap.steps[(a.step+1)%ap.steps.length];
+  $('progNow').textContent='▶ Playing '+ap.name+(a.manual?'':' (calendar)')+': '+sceneName(step.scene)+
+   (ap.steps.length>1?' · next '+sceneName(next.scene)+' in '+Math.ceil(a.nextIn/60)+' min':'');}
+ else $('progNow').textContent='No playlist playing.';
+ $('progNowBtns').hidden=!ap;$('progNext').hidden=!ap||ap.steps.length<2;
+ $('progList').innerHTML=j.programs.map(p=>'<div class="zoneRow"><div>'+(ap&&ap.id===p.id?'▶ ':'')+esc(p.name)+
+  '<small>'+(p.useDates?fmtDate(p.from)+' – '+fmtDate(p.to):'no dates (start with ▶)')+' · '+
+  p.steps.map(s=>esc(sceneName(s.scene))+' '+fmtMins(s.seconds)+' min').join(' → ')+'</small></div>'+
+  '<button class="btn" data-play="'+p.id+'" title="Play now">▶</button><button class="btn" data-pe="'+p.id+'">Edit</button><button class="btn danger" data-pd="'+p.id+'">×</button></div>').join('');
+ $('noProgs').hidden=j.programs.length>0;
+ $('progList').querySelectorAll('[data-play]').forEach(b=>b.onclick=()=>progAction({action:'play',id:b.dataset.play}));
+ $('progList').querySelectorAll('[data-pe]').forEach(b=>b.onclick=()=>startProgEdit(+b.dataset.pe));
+ $('progList').querySelectorAll('[data-pd]').forEach(b=>b.onclick=()=>{const p=j.programs.find(x=>x.id===+b.dataset.pd);
+  if(confirm('Delete playlist "'+p.name+'"?'))progAction({action:'delete',id:p.id});});}
+async function progAction(p){const j=await post('/api/programs',p);if(j.error){showErr('progErr',j.error);return null;}
+ showErr('progErr');showPrograms(j);try{show(await (await fetch('/api/state')).json());}catch(e){}return j;}
+function loadPrograms(){return fetch('/api/programs').then(r=>r.json()).then(showPrograms).catch(()=>{});}
+$('schedOn').onchange=e=>progAction({action:'calendar',on:e.target.checked?1:0});
+$('progNext').onclick=()=>progAction({action:'next'});
+$('progStop').onclick=()=>progAction({action:'stop'});
+function renderProgSteps(){$('progNeedsScenes').hidden=sceneList.length>0;$('progStepHead').hidden=!progSteps.length;
+ $('progDateRow').hidden=!$('progDates').checked;
+ $('progSteps').innerHTML=progSteps.map((s,i)=>'<div class="stepRow"><select data-ps="'+i+'">'+
+  sceneList.map(sc=>'<option value="'+sc.id+'"'+(sc.id===s.scene?' selected':'')+'>'+esc(sc.name)+'</option>').join('')+
+  (sceneList.some(sc=>sc.id===s.scene)?'':'<option selected value="-1">(deleted scene)</option>')+'</select>'+
+  '<input type="number" min="0.25" step="0.25" value="'+s.minutes+'" data-pm="'+i+'" style="width:84px;flex:0 0 84px" title="Minutes this scene shows">'+
+  '<button class="btn" data-pu="'+i+'" title="Move up"'+(i?'':' disabled')+'>↑</button>'+
+  '<button class="btn danger" data-px="'+i+'" title="Remove">×</button></div>').join('');
+ const q=a=>$('progSteps').querySelectorAll('['+a+']');
+ q('data-ps').forEach(e=>e.onchange=()=>{progSteps[+e.dataset.ps].scene=+e.value;});
+ q('data-pm').forEach(e=>e.onchange=()=>{progSteps[+e.dataset.pm].minutes=Math.max(0.25,parseFloat(e.value)||1);});
+ q('data-pu').forEach(e=>e.onclick=()=>{const i=+e.dataset.pu;[progSteps[i-1],progSteps[i]]=[progSteps[i],progSteps[i-1]];renderProgSteps();});
+ q('data-px').forEach(e=>e.onclick=()=>{progSteps.splice(+e.dataset.px,1);renderProgSteps();});}
+function setDateSel(prefix,md){const [m,d]=md.split('-').map(Number);$(prefix+'M').value=m;$(prefix+'D').value=d;}
+function openProgForm(title){$('progForm').hidden=false;$('progNew').hidden=true;$('progFormTitle').textContent=title;showErr('progErr');renderProgSteps();}
+function closeProgForm(){$('progForm').hidden=true;$('progNew').hidden=false;editProg=-1;progSteps=[];}
+$('progNew').onclick=()=>{editProg=-1;$('progName').value='';$('progDates').checked=false;setDateSel('from','12-01');setDateSel('to','12-31');
+ progSteps=sceneList.length?[{scene:sceneList[0].id,minutes:10}]:[];openProgForm('New playlist');};
+function startProgEdit(id){const p=progData.programs.find(x=>x.id===id);editProg=id;$('progName').value=p.name;$('progDates').checked=p.useDates;
+ setDateSel('from',p.from);setDateSel('to',p.to);progSteps=p.steps.map(s=>({scene:s.scene,minutes:+(s.seconds/60).toFixed(2)}));
+ openProgForm('Edit playlist: '+p.name);$('progName').focus();}
+$('progDates').onchange=renderProgSteps;
+$('progAddStep').onclick=()=>{if(!sceneList.length){showErr('progErr','Save some scenes first.');return;}
+ const used=progSteps.map(s=>s.scene),next=sceneList.find(s=>!used.includes(s.id))||sceneList[0];
+ progSteps.push({scene:next.id,minutes:10});renderProgSteps();};
+$('progCancel').onclick=closeProgForm;
+$('progSave').onclick=async()=>{const md=p=>String($(p+'M').value).padStart(2,'0')+'-'+String($(p+'D').value).padStart(2,'0');
+ const p={action:'save',name:$('progName').value,dates:$('progDates').checked?1:0,from:md('from'),to:md('to'),
+  steps:progSteps.map(s=>s.scene+':'+Math.round(s.minutes*60)).join(',')};
+ if(editProg>=0)p.id=editProg;if(await progAction(p))closeProgForm();};
+// While on Home, refresh what's playing (scenes change by themselves).
+setInterval(()=>{if(tab==='home'&&!document.hidden){loadPrograms();
+ fetch('/api/state').then(r=>r.json()).then(show).catch(()=>{});}},10000);
 
 // ================= Setup: strand lengths =================
 $('cntSave').onclick=async()=>{const j=await post('/api/strands',{a:$('cntA').value,b:$('cntB').value});
@@ -739,12 +839,14 @@ window.addEventListener('resize',()=>drawLive());
 
 async function pollFrame(){if(document.hidden||(tab!=='home'&&tab!=='lights')){setTimeout(pollFrame,500);return;}
  const t0=performance.now();
- try{const r=await fetch('/api/frame',{cache:'no-store'});frame=new Uint8Array(await r.arrayBuffer());frames++;drawLive();}catch(e){}
+ try{const r=await fetch('/api/frame'+(hasPending()?'?preview=1':''),{cache:'no-store'});
+  $('pvBadge').hidden=r.headers.get('X-Preview')!=='1';
+  frame=new Uint8Array(await r.arrayBuffer());frames++;drawLive();}catch(e){}
  const now=performance.now();if(now-fpsT>=2000){$('liveInfo').textContent='· '+(frames*1000/(now-fpsT)).toFixed(1)+' updates/s';frames=0;fpsT=now;}
  setTimeout(pollFrame,Math.max(0,100-(now-t0)));}
 
 // ================= Start =================
 fetch('/api/state').then(r=>r.json()).then(s=>{show(s);setTab(['home','lights','house','setup'].includes(tab)?tab:'home');})
  .catch(()=>{$('status').textContent='Not connected';setTab('home');});
-loadLooksAndScenes();loadLayout();pollFrame();
+loadLooksAndScenes().then(loadPrograms);loadLayout();pollFrame();
 </script></body></html>)rawhtml";

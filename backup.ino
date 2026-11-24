@@ -10,7 +10,7 @@
 //   4. POST /api/strands and /api/state for lengths and strand/house settings
 //
 // Only these paths can be restored: /zones.bin /paths.bin /presets.bin /scenes.bin
-// and /files/<photo>.jpg|.jpeg|.png or /files/layout.json.
+// /programs.bin and /files/<photo>.jpg|.jpeg|.png or /files/layout.json.
 
 const uint32_t RESTORE_TIMEOUT_MS = 10UL * 60 * 1000;  // saving resumes if a restore stalls
 
@@ -20,7 +20,8 @@ String restorePath;
 size_t restoreBytes = 0;
 
 bool restorePathAllowed(const String& p) {
-  if (p == "/zones.bin" || p == "/paths.bin" || p == "/presets.bin" || p == "/scenes.bin") return true;
+  if (p == "/zones.bin" || p == "/paths.bin" || p == "/presets.bin" || p == "/scenes.bin" ||
+      p == "/programs.bin") return true;
   if (p.startsWith("/files/")) {
     String n = p.substring(7);
     return n == "layout.json" || (n.length() > 0 && safePhotoName(n) == n);
@@ -111,6 +112,8 @@ void handleRestoreFinish() {
   loadZonePaths();
   loadPresets();
   loadScenes();
+  loadPrograms();
+  nudgeSchedule();
   savesBlocked = false;
   markStateChanged();
   Serial.println("Restore: finished");

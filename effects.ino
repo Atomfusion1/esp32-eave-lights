@@ -199,9 +199,16 @@ void renderFrame() {
   uint32_t dtMs = now - lastFrameMs;
   lastFrameMs = now;
 
-  // Layers, later ones cover earlier ones:
-  // strands, then Whole house while on, then zone paths that are on, then zones that
-  // are on (e.g. a steady porch stays steady while a comet passes behind it).
+  previewBeforeFrame();
+  drawLayers(dtMs);
+  showFrame();
+  previewAfterFrame(dtMs);   // draws the unapplied-changes preview, if one is active
+}
+
+// Draws every layer into frame[]. Layers, later ones cover earlier ones:
+// strands, then Whole house while on, then zone paths that are on, then zones that
+// are on (e.g. a steady porch stays steady while a comet passes behind it).
+void drawLayers(uint32_t dtMs) {
   for (int o = 0; o < NUM_OUTPUTS; o++) {
     drawChannel(o, dtMs);
   }
@@ -217,6 +224,4 @@ void renderFrame() {
 
   // Find a light: replaces everything with just the chosen lights.
   if (locateActive) drawLocate();
-
-  showFrame();
 }

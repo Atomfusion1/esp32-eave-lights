@@ -37,6 +37,7 @@
 //                         steps = zone slot : reverse 0|1 : gap lights after (0-30), in order
 //                       action=delete id=N. Returns the state.
 //   POST /api/scenes    action=save name=Xmas | action=apply id=N | action=delete id=N
+//   GET/POST /api/programs   playlists & calendar (see handlePrograms / schedule.ino)
 //   GET  /api/files, /fs/<path>, POST /api/restore-*   backup and restore (backup.ino)
 //   GET  /api/presets   {"presets":[{"id","name","mode","color","bgOn","bgColor"}],
 //                        "scenes":[{"id","name","on","colors"}]}
@@ -238,18 +239,17 @@ bool argIsTrue(const char* name) {
 
 // ---------- Handlers ----------
 
-void handleSetState() {
-  // ---- 1. Parse and validate everything first, so a bad value changes nothing ----
-  int target;
-  if (!parseTarget(target)) return sendError("output must be all, a, b, house or a zone");
-
+// Applies the look arguments of this request (everything except on/off) to s.
+// All values are checked first: on an error s is unchanged and the message is returned.
+// Used for real changes (/api/state) and for previews (/api/preview).
+const char* applyLookArgs(LightState& s, bool& changed) {
   bool hasColor = server.hasArg("color");
   CRGB newColor;
-  if (hasColor && !parseColorArg("color", newColor)) return sendError("color must be RRGGBB");
+  if (hasColor && !parseColorArg("color", newColor)) return "color must be RRGGBB";
 
   bool hasBgColor = server.hasArg("bgColor");
   CRGB newBgColor;
-  if (hasBgColor && !parseColorArg("bgColor", newBgColor)) return sendError("bgColor must be RRGGBB");
+  if (hasBgColor && !parseColorArg("bgColor", newBgColor)) return "bgColor must be RRGGBB";
 
   // color2..color5 = colors 2-5 of the color list
   bool hasExtra[MAX_COLORS - 1] = { false };
@@ -257,7 +257,7 @@ void handleSetState() {
   for (int k = 0; k < MAX_COLORS - 1; k++) {
     char name[8] = { 'c', 'o', 'l', 'o', 'r', (char)('2' + k), 0 };
     hasExtra[k] = server.hasArg(name);
-    if (hasExtra[k] && !parseColorArg(name, newExtra[k])) return sendError("colors must be RRGGBB");
+    if (hasExtra[k] && !parseColorArg(name, newExtra[k])) return "colors must be RRGGBB";
   }
 
   bool hasMode = server.hasArg("mode");
@@ -268,23 +268,11 @@ void handleSetState() {
     for (int i = 0; i < MODE_COUNT; i++) {
       if (v == MODE_NAMES[i]) found = i;
     }
-    if (found < 0) return sendError("unknown mode");
+    if (found < 0) return "unknown mode";
     newMode = (Mode)found;
   }
 
-  // ---- 2. Apply to the target channel(s) ----
-  bool changed = false;
-  for (int o = 0; o < NUM_CHANNELS; o++) {
-    if (target < 0 && o >= NUM_OUTPUTS) continue;   // "all" = the strands only
-    if (target >= 0 && o != target) continue;
-    LightState& s = states[o];
-
-    if (server.hasArg("on")) {
-      bool wasOn = s.on;
-      s.on = argIsTrue("on");
-      if (o >= CH_HOUSE && s.on && !wasOn) resetPhase(o);  // paths/zones start from the top
-      changed = true;
-    }
+  {
     if (hasColor) { s.color = newColor; changed = true; }
     if (server.hasArg("brightness")) {
       s.brightness = (uint8_t)constrain(server.arg("brightness").toInt(), 0, 255);
@@ -319,9 +307,37 @@ void handleSetState() {
       if (hasExtra[k]) { s.extra[k] = newExtra[k]; changed = true; }
     }
   }
+  return nullptr;
+}
+
+void handleSetState() {
+  int target;
+  if (!parseTarget(target)) return sendError("output must be all, a, b, house or a zone");
+
+  // Check the values once on a copy, so a bad value changes nothing.
+  {
+    LightState test = states[target < 0 ? 0 : target];
+    bool dummy = false;
+    const char* err = applyLookArgs(test, dummy);
+    if (err) return sendError(err);
+  }
+
+  bool changed = false;
+  for (int o = 0; o < NUM_CHANNELS; o++) {
+    if (target < 0 && o >= NUM_OUTPUTS) continue;   // "all" = the strands only
+    if (target >= 0 && o != target) continue;
+    LightState& s = states[o];
+    if (server.hasArg("on")) {
+      bool wasOn = s.on;
+      s.on = argIsTrue("on");
+      if (o >= CH_HOUSE && s.on && !wasOn) resetPhase(o);  // paths/zones start from the top
+      changed = true;
+    }
+    applyLookArgs(s, changed);
+  }
 
   // Changing both strands together: keep their fades and movement in step.
-  if (target < 0 && (hasMode || server.hasArg("on") || server.hasArg("fadeSeconds") ||
+  if (target < 0 && (server.hasArg("mode") || server.hasArg("on") || server.hasArg("fadeSeconds") ||
                      server.hasArg("speed") || server.hasArg("size") || server.hasArg("reverse"))) {
     syncPhases();
   }
@@ -334,8 +350,12 @@ void handleSetState() {
 //   [outputs] then per output [count low][count high], then R,G,B per light,
 //   all of A's lights first, then B's.
 // out[] holds plain RGB; the RBG reorder for the strand happens later inside FastLED.
+// ?preview=1 returns the preview of unapplied changes instead, while one is active
+// (header "X-Preview: 1" says which one was sent).
 void handleGetFrame() {
   static uint8_t buf[1 + NUM_OUTPUTS * 2 + MAX_TOTAL_LEDS * 3];
+  bool pv = previewActive && server.hasArg("preview");
+  CRGB (*src)[MAX_LEDS] = pv ? previewOut : out;
   size_t n = 0;
   buf[n++] = NUM_OUTPUTS;
   for (int o = 0; o < NUM_OUTPUTS; o++) {
@@ -344,12 +364,13 @@ void handleGetFrame() {
   }
   for (int o = 0; o < NUM_OUTPUTS; o++) {
     for (int i = 0; i < ledCount[o]; i++) {
-      buf[n++] = out[o][i].r;
-      buf[n++] = out[o][i].g;
-      buf[n++] = out[o][i].b;
+      buf[n++] = src[o][i].r;
+      buf[n++] = src[o][i].g;
+      buf[n++] = src[o][i].b;
     }
   }
   server.sendHeader("Cache-Control", "no-store");
+  server.sendHeader("X-Preview", pv ? "1" : "0");
   server.send_P(200, "application/octet-stream", (const char*)buf, n);
 }
 
@@ -482,7 +503,7 @@ void handleScenes() {
   if (action == "save")        err = saveScene(server.arg("name"));
   else if (action == "delete") err = deleteScene(id);
   else if (action == "apply") {
-    err = applyScene(id);
+    err = applyScene(id, true);
     if (err) return sendError(err);
     return sendState();
   } else {
@@ -490,6 +511,36 @@ void handleScenes() {
   }
   if (err) return sendError(err);
   handleGetPresets();
+}
+
+// Playlists & calendar:
+//   action=save [id] name steps=scene:seconds,... dates=0|1 from=MM-DD to=MM-DD
+//   action=delete id | action=play id | action=stop | action=next | action=calendar on=0|1
+// Every action returns the playlist JSON (same as GET).
+void handlePrograms() {
+  String action = server.arg("action");
+  int id = server.arg("id").length() ? server.arg("id").toInt() : -1;
+  const char* err = nullptr;
+  if (action == "save") {
+    err = saveProgram(id, server.arg("name"), server.arg("steps"), argIsTrue("dates"),
+                      server.arg("from"), server.arg("to"));
+  } else if (action == "delete") {
+    err = deleteProgram(id);
+  } else if (action == "play") {
+    if (id < 0 || id >= MAX_PROGRAMS || !programs[id].used) err = "playlist not found";
+    else playProgram(id);
+  } else if (action == "stop") {
+    stopProgram();
+  } else if (action == "next") {
+    nextProgramStep();
+  } else if (action == "calendar") {
+    setScheduleOn(argIsTrue("on"));
+  } else if (action.length()) {
+    err = "unknown action";
+  }
+  if (err) return sendError(err);
+  handleSchedule();   // apply Play/Stop/edits right away
+  server.send(200, "application/json", programsJson());
 }
 
 void handleRoot() {
@@ -513,6 +564,9 @@ void startWeb() {
   addFileRoutes();   // House view editor, photos, layout (files.ino)
   addBackupRoutes(); // backup / restore (backup.ino)
   server.on("/api/scenes", HTTP_POST, handleScenes);
+  server.on("/api/preview", HTTP_POST, handlePreview);
+  server.on("/api/programs", HTTP_GET, handlePrograms);
+  server.on("/api/programs", HTTP_POST, handlePrograms);
   server.onNotFound([]() { server.send(404, "text/plain", "Not found"); });
   server.begin();
   Serial.println("Web: server started on port 80");

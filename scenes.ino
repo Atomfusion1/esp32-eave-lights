@@ -43,7 +43,9 @@ const char* saveScene(const String& name) {
   return nullptr;
 }
 
-const char* applyScene(int id) {
+// save = false when a playlist switches scenes: no flash write on every swap (the
+// playlist decides what shows anyway).
+const char* applyScene(int id, bool save) {
   if (id < 0 || id >= MAX_SCENES || !scenes[id].used) return "scene not found";
   stopLocate();
   for (int ch = 0; ch < NUM_CHANNELS; ch++) {
@@ -51,7 +53,7 @@ const char* applyScene(int id) {
     states[ch] = scenes[id].states[ch];
     resetPhase(ch);
   }
-  markStateChanged();
+  if (save) markStateChanged();
   Serial.printf("Scene: %s\n", scenes[id].name);
   return nullptr;
 }

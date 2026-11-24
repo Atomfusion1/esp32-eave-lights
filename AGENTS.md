@@ -89,6 +89,10 @@ ESP32_Eave_Lights/              folder name must equal the main sketch name
                                 zones (steps: zone, reverse, gap) in /paths.bin
   presets.ino                   saved looks (name + LightState) in /presets.bin
   scenes.ino                    scenes: snapshot of every channel's LightState, /scenes.bin
+  schedule.ino                  playlists (scenes + seconds, looping), yearly date ranges,
+                                internet clock (TIMEZONE in main tab), /programs.bin
+  preview.ino                   unapplied-changes preview: second render into previewOut[]
+                                with the preview state swapped in (GET /api/frame?preview=1)
   backup.ino                    backup (/api/files, /fs/<path>) and restore (/api/restore-*)
   settings_store.ino            strand/house settings in Preferences, delayed save;
                                 mounts FFat storage

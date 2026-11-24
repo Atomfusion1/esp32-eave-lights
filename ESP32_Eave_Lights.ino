@@ -17,6 +17,7 @@
 //   paths.ino           Whole house path, and paths made from zones (/paths.bin)
 //   presets.ino         saved looks: named effect settings, stored in /presets.bin
 //   scenes.ino          scenes: whole-house snapshots of every channel, /scenes.bin
+//   schedule.ino        playlists of scenes with times, yearly date ranges, internet clock
 //   settings_store.ino  strand/house settings in Preferences; mounts the FAT storage
 //   test_pattern.ino    red/green/blue/white/off test cycle
 //   web_api.ino         JSON API on port 80
@@ -50,7 +51,7 @@
 #define OTA_PASSWORD AP_PASSWORD
 #endif
 
-#define FW_VERSION "0.16.0"
+#define FW_VERSION "0.17.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
@@ -262,6 +263,34 @@ struct Scene {
 
 Scene scenes[MAX_SCENES];
 
+// ---------- Playlists & calendar ----------
+// A playlist ("program") is a list of scenes, each shown for a number of seconds, looping.
+// It can have a yearly date range (e.g. Nov 20 - Nov 30); with the calendar on, the
+// playlist whose range includes today plays (shortest range wins if several match).
+// The date comes from the internet (NTP) in this time zone:
+#define TIMEZONE "EST5EDT,M3.2.0,M11.1.0"   // US Eastern (Ohio), with daylight saving
+#define MAX_PROGRAMS      12
+#define MAX_PROGRAM_STEPS 10
+
+struct ProgramStep {
+  uint8_t  scene;     // scene slot
+  uint32_t seconds;   // how long it shows before the next one
+};
+
+struct Program {
+  bool        used;
+  char        name[NAME_LEN];
+  uint8_t     stepCount;
+  ProgramStep steps[MAX_PROGRAM_STEPS];
+  bool        useDates;              // false = only plays when started by hand
+  uint8_t     fromMonth, fromDay;    // inclusive, every year
+  uint8_t     toMonth, toDay;        // inclusive; before "from" = wraps over New Year
+};
+
+Program programs[MAX_PROGRAMS];
+bool    scheduleOn    = false;   // follow the calendar (saved)
+int8_t  manualProgram = -1;      // playlist started with Play, or -1 (saved)
+
 // ---------- All off / All on ----------
 // Bit ch set = channel ch was on when "All lights off" was last pressed; "All lights on"
 // turns those back on. Saved with the other settings (survives power cuts).
@@ -332,6 +361,7 @@ void setup() {
   loadZonePaths();   // after zones: paths are built from them
   loadPresets();
   loadScenes();
+  loadPrograms();
   startWifi();
   startWeb();
   startOta();
@@ -342,6 +372,7 @@ void loop() {
   handleOta();
   handleWeb();
   handleLocateTimeout();
+  handleSchedule();
   renderFrame();
   handleStateSave();
 }
