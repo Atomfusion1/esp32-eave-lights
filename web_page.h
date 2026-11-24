@@ -51,6 +51,8 @@ select.picker{font-size:17px;font-weight:600;padding:12px}
 .seg button{flex:1;padding:11px;border-radius:10px;border:1px solid var(--line);background:none;color:var(--text);cursor:pointer;font-size:15px}
 .seg button.sel{border-color:var(--accent);background:var(--accent);color:#fff}
 .seg.small button{flex:0 0 auto;padding:5px 10px;font-size:13px;border-radius:8px}
+.applyBar{position:sticky;bottom:12px;z-index:4;display:flex;align-items:center;gap:8px;background:var(--card);border:2px solid var(--accent);border-radius:14px;padding:10px 12px;margin:14px 0;box-shadow:0 4px 18px rgba(0,0,0,.25)}
+.applyBar span{flex:1;font-size:14px;font-weight:600}
 .colorRow{display:flex;gap:8px}
 .colorRow input[type=color]{flex:1;min-width:0;height:44px}
 .btn{padding:10px 14px;border-radius:10px;border:1px solid var(--line);background:none;color:var(--text);cursor:pointer;font-size:15px}
@@ -146,7 +148,11 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <!-- ===== Lights ===== -->
 <section data-tab="lights">
 <div class="card">
-<label>Controlling</label>
+<div class="row" style="margin-bottom:10px;align-items:center;flex-wrap:wrap">
+<label style="margin:0;flex:1">Controlling</label>
+<span class="hint" style="margin:0;flex:0 0 auto">Changes go live:</span>
+<div class="seg small" id="applyMode" style="flex:0 0 auto"><button data-am="apply">on Apply</button><button data-am="instant">instantly</button></div>
+</div>
 <select class="picker" id="picker"></select>
 <p class="hint" id="tabHint" hidden></p>
 <button id="power" class="power" style="margin-top:12px">…</button>
@@ -185,6 +191,10 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <input id="bgColor" type="color" style="margin-top:10px" hidden>
 <p class="hint" id="bgHint" hidden>Uses the same brightness. Lights every light, so it adds current.</p></div>
 </details>
+</div>
+<div class="applyBar" id="applyBar" hidden>
+<span id="applyTxt">Not applied yet</span>
+<button class="btn" id="discardBtn">Discard</button><button class="btn primary" id="applyBtn">Apply</button>
 </div>
 </section>
 
@@ -319,13 +329,18 @@ function renderPicker(s){const onOff=o=>o.on?'  ● on':'  ○ off';
  if(s.paths.length)h+='<optgroup label="Paths">'+s.paths.map(p=>'<option value="'+(PATH+p.slot)+'">'+esc(p.name)+onOff(p)+'</option>').join('')+'</optgroup>';
  if(s.zones.length)h+='<optgroup label="Zones">'+s.zones.map(z=>'<option value="'+(ZONE+z.slot)+'">'+esc(z.name)+onOff(z)+'</option>').join('')+'</optgroup>';
  $('picker').innerHTML=h;$('picker').value=String(sel);}
-$('picker').onchange=e=>{sel=+e.target.value;store.set('eaveSel',sel);show(st);};
+$('picker').onchange=async e=>{const next=+e.target.value;
+ if(hasPending()){if(confirm('Apply your changes to '+pendingName+' first?\n\nOK = apply them, Cancel = throw them away.'))await applyPending();
+  else{pending={};pendingTarget=null;updateApplyBar();}}
+ sel=next;store.set('eaveSel',sel);show(st);};
 
 function show(s){st=s;
  if((zoneSel()&&!zoneBySlot(sel-ZONE))||(pathSel()&&!pathBySlot(sel-PATH))||(sel>=0&&sel<ZONE&&sel>=s.outputs.length)||(sel<HOUSE))sel=0;
  const names=onNames(s);
  $('onPill').textContent=names.length?names.length+' on':'all off';$('onPill').classList.toggle('on',names.length>0);
- $('onList').textContent=names.length?names.join(' · '):'Everything is off.';$('allOff').disabled=!names.length;
+ $('onList').textContent=names.length?names.join(' · '):'Everything is off.';
+ $('allOff').textContent=names.length?'All lights off':s.canAllOn?'All lights on (as before)':'Everything is off';
+ $('allOff').disabled=!names.length&&!s.canAllOn;$('allOff').classList.toggle('on',!names.length&&s.canAllOn);
  renderPicker(s);
  const h=s.house,zonesOn=s.zones.filter(z=>z.on),pathsOn=s.paths.filter(p=>p.on);
  const coverStrands=(h.on?['Whole house']:[]).concat(pathsOn.map(p=>p.name),zonesOn.map(z=>z.name));
@@ -340,7 +355,8 @@ function show(s){st=s;
  const isOn=both()?anyStrandOn():o.on;
  $('power').textContent=curName()+' — '+(isOn?'ON':'OFF');$('power').classList.toggle('on',isOn);
  $('lookTarget').textContent='· tap to apply to '+curName();
- renderLook(o);
+ if(hasPending()&&pendingTarget===target())applyPendingTo(o,pending);   // keep showing unapplied changes
+ renderLook(o);updateApplyBar();
  // setup
  $('strandSum').textContent='A '+s.outputs[0].count+(s.outputs[1]?' · B '+s.outputs[1].count:'');
  $('zoneSum').textContent=s.zones.length+' of 12';$('pathSum').textContent=s.paths.length+' of 8';$('fwSum').textContent='v'+s.version;
@@ -367,13 +383,44 @@ function show(s){st=s;
  $('status').textContent='Connected · v'+s.version;}
 
 async function post(url,p){const r=await fetch(url,{method:'POST',body:new URLSearchParams(p)});return r.json();}
-async function send(p){if(!st)return;p.output=target();
+
+// ---- Apply mode: look changes wait on the page until Apply (on/off stays instant) ----
+let applyMode=store.get('eaveApplyMode','apply'),pending={},pendingTarget=null,pendingName='';
+const LOOK_KEYS=['color','brightness','mode','fadeSeconds','fadeMin','speed','size','reverse','bgOn','bgColor','colorCount','color2','color3','color4','color5'];
+const hasPending=()=>Object.keys(pending).length>0;
+// Shows pending values on the page's copy of the settings (the lights don't change yet).
+function applyPendingTo(o,p){if(!o)return;
+ for(const [k,v] of Object.entries(p)){
+  if(k==='color'||k==='bgColor')o[k]='#'+String(v).toUpperCase();
+  else if(k==='mode')o.mode=v;
+  else if(k==='reverse'||k==='bgOn')o[k]=(v==1||v===true||v==='true');
+  else if(/^color[2-5]$/.test(k)){o.colors=o.colors||[];o.colors[+k.slice(5)-2]='#'+String(v).toUpperCase();}
+  else o[k]=+v;}}
+function updateApplyBar(){$('applyBar').hidden=!hasPending();$('applyTxt').textContent='Not applied yet: '+pendingName;
+ $('applyMode').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',b.dataset.am===applyMode));}
+async function applyPending(){if(!hasPending())return;const p=Object.assign({output:pendingTarget},pending);
+ pending={};pendingTarget=null;updateApplyBar();
+ try{const j=await post('/api/state',p);if(j.error)$('status').textContent=j.error;else show(j);}catch(e){$('status').textContent='Not connected';}}
+async function discardPending(){pending={};pendingTarget=null;updateApplyBar();
+ try{show(await (await fetch('/api/state')).json());}catch(e){}}
+$('applyBtn').onclick=applyPending;$('discardBtn').onclick=discardPending;
+$('applyMode').querySelectorAll('button').forEach(b=>b.onclick=async()=>{applyMode=b.dataset.am;store.set('eaveApplyMode',applyMode);
+ if(applyMode==='instant')await applyPending();updateApplyBar();});
+window.addEventListener('beforeunload',e=>{if(hasPending()){e.preventDefault();e.returnValue='';}});
+
+async function send(p){if(!st)return;
+ if(applyMode==='apply'&&Object.keys(p).every(k=>LOOK_KEYS.includes(k))){
+  if(pendingTarget!==target()){pending={};pendingTarget=target();pendingName=curName();}
+  Object.assign(pending,p);applyPendingTo(cur(),p);renderLook(cur());updateApplyBar();return;}
+ p.output=target();
  try{const j=await post('/api/state',p);if(j.error){$('status').textContent=j.error;}else show(j);}
  catch(e){$('status').textContent='Not connected';}}
 function sendSoon(p){clearTimeout(timer);timer=setTimeout(()=>send(p),120);}
 // Both: if any strand is on, turn both off; otherwise turn both on.
 $('power').onclick=()=>send({on:(both()?anyStrandOn():cur().on)?0:1});
-$('allOff').onclick=async()=>{const j=await post('/api/all-off',{});if(!j.error)show(j);};
+// All lights off, or (when everything is off) back on as it was before.
+$('allOff').onclick=async()=>{const on=onNames(st).length>0;
+ const j=await post(on?'/api/all-off':'/api/all-on',{});if(j.error)$('status').textContent=j.error;else show(j);};
 $('color').oninput=e=>sendSoon({color:e.target.value.slice(1)});
 $('bri').oninput=e=>{$('briVal').textContent=pct(e.target.value);sendSoon({brightness:e.target.value});};
 $('modeSel').onchange=e=>send({mode:e.target.value});
@@ -469,9 +516,11 @@ function showLooks(list){looks=list||[];
   const x=e.target.dataset.x;
   if(x!==undefined){const p=looks.find(l=>l.id===+x);if(!confirm('Delete saved look "'+p.name+'"?'))return;
    const j=await post('/api/presets',{action:'delete',id:x});if(j.error)showErr('lookErr',j.error);else{showErr('lookErr');showLooks(j.presets);}return;}
+  if(pendingTarget===target()){pending={};pendingTarget=null;}   // the look replaces unapplied changes
   const j=await post('/api/presets',{action:'apply',id:c.dataset.id,output:target()});
   if(j.error)showErr('lookErr',j.error);else{showErr('lookErr');show(j);}});}
-$('saveLook').onclick=async()=>{const name=prompt('Name for this look (e.g. Xmas, Valentines). Saves the current settings of '+curName()+'. Same name replaces it.');
+$('saveLook').onclick=async()=>{if(hasPending()&&!confirm('Saving uses the settings the lights have now. Your unapplied changes will be applied first. Continue?'))return;
+ await applyPending();const name=prompt('Name for this look (e.g. Xmas, Valentines). Saves the current settings of '+curName()+'. Same name replaces it.');
  if(!name)return;const j=await post('/api/presets',{action:'save',name,output:target()});
  if(j.error)showErr('lookErr',j.error);else{showErr('lookErr');showLooks(j.presets);}};
 
@@ -485,9 +534,11 @@ function showScenes(list){sceneList=list||[];
   const x=e.target.dataset.x;
   if(x!==undefined){const s=sceneList.find(l=>l.id===+x);if(!confirm('Delete scene "'+s.name+'"?'))return;
    const j=await post('/api/scenes',{action:'delete',id:x});if(j.error)showErr('sceneErr',j.error);else{showErr('sceneErr');showScenes(j.scenes);}return;}
+  pending={};pendingTarget=null;   // a scene replaces any unapplied changes
   const j=await post('/api/scenes',{action:'apply',id:c.dataset.id});
   if(j.error)showErr('sceneErr',j.error);else{showErr('sceneErr');show(j);}});}
-$('saveScene').onclick=async()=>{const name=prompt('Name for this scene (e.g. Xmas, Halloween, Normal). Saves what every strand, zone and path is doing right now. Same name replaces it.');
+$('saveScene').onclick=async()=>{if(hasPending()&&!confirm('Your unapplied changes to '+pendingName+' will be applied first so they are part of the scene. Continue?'))return;
+ await applyPending();const name=prompt('Name for this scene (e.g. Xmas, Halloween, Normal). Saves what every strand, zone and path is doing right now. Same name replaces it.');
  if(!name)return;const j=await post('/api/scenes',{action:'save',name});
  if(j.error)showErr('sceneErr',j.error);else{showErr('sceneErr');showScenes(j.scenes);}};
 function loadLooksAndScenes(){return fetch('/api/presets').then(r=>r.json()).then(j=>{showLooks(j.presets);showScenes(j.scenes);}).catch(()=>{});}

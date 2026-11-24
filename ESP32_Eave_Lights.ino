@@ -50,7 +50,7 @@
 #define OTA_PASSWORD AP_PASSWORD
 #endif
 
-#define FW_VERSION "0.15.0"
+#define FW_VERSION "0.16.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
@@ -261,6 +261,11 @@ struct Scene {
 };
 
 Scene scenes[MAX_SCENES];
+
+// ---------- All off / All on ----------
+// Bit ch set = channel ch was on when "All lights off" was last pressed; "All lights on"
+// turns those back on. Saved with the other settings (survives power cuts).
+uint32_t allOnMask = 0;
 
 // ---------- Restore ----------
 // While a backup is being restored, nothing is saved, so the files being uploaded

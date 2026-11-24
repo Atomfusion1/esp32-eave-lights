@@ -24,7 +24,9 @@
 //                       [outputs], per output [count low][count high], then R,G,B per
 //                       light, A's lights first.
 //   POST /api/strands   a=67 b=65   strand lengths (1-300), saved. Returns the state.
-//   POST /api/all-off   turns off every strand, Whole house, zone and path. Returns the state.
+//   POST /api/all-off   turns off every strand, Whole house, zone and path, remembering
+//                       what was on. Returns the state.
+//   POST /api/all-on    turns back on what was on before the last all-off ("canAllOn").
 //   POST /api/firmware  multipart .bin + password field: wireless firmware update (ota.ino)
 //   POST /api/locate    ranges=A23 | A1-12,B30-65   light only those (auto-off after 5 min)
 //                       [seconds=1-300] shorter auto-off, [white=1] all white (no green first)
@@ -85,6 +87,8 @@ String channelFieldsJson(int ch) {
 String stateJson() {
   String json = "{\"version\":\"" FW_VERSION "\",\"storage\":";
   json += storageOk ? "true" : "false";
+  json += ",\"canAllOn\":";
+  json += allOnMask ? "true" : "false";
   json += ",\"outputs\":[";
   for (int o = 0; o < NUM_OUTPUTS; o++) {
     char buf[80];
@@ -349,10 +353,29 @@ void handleGetFrame() {
   server.send_P(200, "application/octet-stream", (const char*)buf, n);
 }
 
-// Turns off everything: strands, Whole house, every zone and path (and Find a light).
+// Turns off everything: strands, Whole house, every zone and path (and Find a light),
+// remembering what was on so "All lights on" can bring it back.
 void handleAllOff() {
   stopLocate();
-  for (int ch = 0; ch < NUM_CHANNELS; ch++) states[ch].on = false;
+  uint32_t mask = 0;
+  for (int ch = 0; ch < NUM_CHANNELS; ch++) {
+    if (states[ch].on && channelInUse(ch)) mask |= (1UL << ch);
+    states[ch].on = false;
+  }
+  if (mask) allOnMask = mask;   // pressing it again with everything off keeps the old list
+  markStateChanged();
+  sendState();
+}
+
+// Turns back on whatever was on before the last "All lights off".
+void handleAllOn() {
+  if (!allOnMask) return sendError("nothing to turn back on yet");
+  for (int ch = 0; ch < NUM_CHANNELS; ch++) {
+    if ((allOnMask & (1UL << ch)) && channelInUse(ch)) {
+      states[ch].on = true;
+      resetPhase(ch);
+    }
+  }
   markStateChanged();
   sendState();
 }
@@ -481,6 +504,7 @@ void startWeb() {
   server.on("/api/locate", HTTP_POST, handleLocate);
   server.on("/api/strands", HTTP_POST, handleStrands);
   server.on("/api/all-off", HTTP_POST, handleAllOff);
+  server.on("/api/all-on", HTTP_POST, handleAllOn);
   server.on("/api/firmware", HTTP_POST, handleFirmwareDone, handleFirmwareData);
   server.on("/api/zones", HTTP_POST, handleZones);
   server.on("/api/paths", HTTP_POST, handlePaths);

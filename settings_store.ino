@@ -111,6 +111,7 @@ void loadState() {
   for (int o = 0; o < NUM_OUTPUTS; o++) {
     ledCount[o] = constrain(prefs.getUShort(outputKey(o, "cnt"), ledCount[o]), 1, MAX_LEDS);
   }
+  allOnMask = prefs.getUInt("allon", 0);   // what "All lights on" brings back
   prefs.end();
 
   Serial.println("State loaded:");
@@ -157,6 +158,7 @@ void handleStateSave() {
     }
   }
   for (int o = 0; o < NUM_OUTPUTS; o++) prefs.putUShort(outputKey(o, "cnt"), ledCount[o]);
+  prefs.putUInt("allon", allOnMask);
   prefs.end();
 
   // Zone and path settings (on/off, color, ...) live in their files, so write them too.
