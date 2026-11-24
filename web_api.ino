@@ -378,8 +378,8 @@ void handleGetFrame() {
 }
 
 // Turns off everything: strands, Whole house, every zone and path (and Find a light),
-// remembering what was on so "All lights on" can bring it back.
-void handleAllOff() {
+// remembering what was on so "All lights on" can bring it back. Also used by the timer.
+void allLightsOff() {
   stopLocate();
   uint32_t mask = 0;
   for (int ch = 0; ch < NUM_CHANNELS; ch++) {
@@ -388,12 +388,11 @@ void handleAllOff() {
   }
   if (mask) allOnMask = mask;   // pressing it again with everything off keeps the old list
   markStateChanged();
-  sendState();
 }
 
-// Turns back on whatever was on before the last "All lights off".
-void handleAllOn() {
-  if (!allOnMask) return sendError("nothing to turn back on yet");
+// Turns back on whatever was on before the last "All lights off". False if nothing to.
+bool allLightsOn() {
+  if (!allOnMask) return false;
   for (int ch = 0; ch < NUM_CHANNELS; ch++) {
     if ((allOnMask & (1UL << ch)) && channelInUse(ch)) {
       states[ch].on = true;
@@ -401,6 +400,16 @@ void handleAllOn() {
     }
   }
   markStateChanged();
+  return true;
+}
+
+void handleAllOff() {
+  allLightsOff();
+  sendState();
+}
+
+void handleAllOn() {
+  if (!allLightsOn()) return sendError("nothing to turn back on yet");
   sendState();
 }
 
@@ -519,6 +528,7 @@ void handleScenes() {
 // Playlists & calendar:
 //   action=save [id] name steps=scene:seconds,... dates=0|1 from=MM-DD to=MM-DD
 //   action=delete id | action=play id | action=stop | action=next | action=calendar on=0|1
+//   action=timer enabled onMode onClock onOffset offMode offClock offOffset lat lon (schedule.ino)
 // Every action returns the playlist JSON (same as GET).
 void handlePrograms() {
   String action = server.arg("action");
@@ -538,6 +548,8 @@ void handlePrograms() {
     nextProgramStep();
   } else if (action == "calendar") {
     setScheduleOn(argIsTrue("on"));
+  } else if (action == "timer") {
+    setTimerFromArgs();
   } else if (action.length()) {
     err = "unknown action";
   }

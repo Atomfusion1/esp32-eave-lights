@@ -52,7 +52,7 @@
 #define OTA_PASSWORD AP_PASSWORD
 #endif
 
-#define FW_VERSION "0.20.1"
+#define FW_VERSION "0.21.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
@@ -296,6 +296,21 @@ struct Program {
 };
 
 Program programs[MAX_PROGRAMS];
+
+// On/off timer: "All lights on" at the on time, "All lights off" at the off time.
+// Times are sunset/sunrise (+ offset minutes, from the location below) or a clock time.
+enum TimerMode : uint8_t { TIMER_SUN = 0, TIMER_CLOCK = 1, TIMER_NEVER = 2 };
+struct LightTimer {
+  bool      enabled;
+  TimerMode onMode;      // TIMER_SUN = sunset, TIMER_CLOCK = onClock
+  int16_t   onClock;     // minutes after midnight
+  int16_t   onOffset;    // minutes added to sunset (-120..120)
+  TimerMode offMode;     // TIMER_SUN = sunrise, TIMER_CLOCK = offClock, TIMER_NEVER
+  int16_t   offClock;
+  int16_t   offOffset;   // minutes added to sunrise
+  float     lat, lon;    // for sunset/sunrise; default central Ohio
+};
+LightTimer lightTimer = { false, TIMER_SUN, 17 * 60, 0, TIMER_SUN, 7 * 60, 0, 40.0f, -82.9f };
 bool    scheduleOn    = false;   // follow the calendar (saved)
 int8_t  manualProgram = -1;      // playlist started with Play, or -1 (saved)
 

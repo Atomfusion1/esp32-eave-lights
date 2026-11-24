@@ -171,6 +171,26 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <p class="onList" id="onList">…</p>
 <button class="power" id="allOff" style="margin-top:12px">All lights off</button>
 </div>
+
+<div class="card">
+<h2>On / off timer</h2>
+<label style="display:flex;gap:8px;align-items:center;margin:0 0 10px;color:var(--text);font-size:15px"><input type="checkbox" id="tmOn" style="width:20px;height:20px;accent-color:var(--accent)"> Turn the lights on and off by themselves</label>
+<div id="tmBox">
+<label>Turn on at</label>
+<div class="row" style="flex-wrap:wrap"><select id="tmOnMode"><option value="0">Sunset</option><option value="1">A set time</option></select>
+<input type="time" id="tmOnClock"><span class="hint" style="margin:0;flex:0 0 auto" id="tmOnOffLbl">+</span><input type="number" id="tmOnOffset" min="-180" max="180" step="5" title="Minutes after sunset (negative = before)" style="max-width:90px"><span class="hint" style="margin:0;flex:0 0 auto" id="tmOnMinLbl">min</span></div>
+<label style="margin-top:10px">Turn off at</label>
+<div class="row" style="flex-wrap:wrap"><select id="tmOffMode"><option value="0">Sunrise</option><option value="1">A set time</option><option value="2">Never (only by hand)</option></select>
+<input type="time" id="tmOffClock"><span class="hint" style="margin:0;flex:0 0 auto" id="tmOffOffLbl">+</span><input type="number" id="tmOffOffset" min="-180" max="180" step="5" title="Minutes after sunrise (negative = before)" style="max-width:90px"><span class="hint" style="margin:0;flex:0 0 auto" id="tmOffMinLbl">min</span></div>
+<details class="inner"><summary>Location for sunset and sunrise</summary>
+<div class="row" style="margin-top:8px"><div><label>Latitude</label><input type="number" id="tmLat" step="0.01"></div><div><label>Longitude</label><input type="number" id="tmLon" step="0.01"></div></div>
+<p class="hint">Starts at central Ohio (40.0, -82.9), within a few minutes anywhere in Ohio.</p>
+</details>
+<div class="row" style="margin-top:12px"><button class="btn primary" id="tmSave">Save timer</button></div>
+</div>
+<p class="hint" id="tmToday"></p>
+<p class="hint">It turns on what was on before "All lights off" (and your calendar playlist, if on). In between you can still switch lights by hand. With the photocell still fitted, the lights only have power at night anyway.</p>
+</div>
 </section>
 
 <!-- ===== Lights ===== -->
@@ -622,7 +642,7 @@ const fmtMins=s=>s%60?(s/60).toFixed(1).replace(/\.0$/,''):String(s/60);
 (function fillDateSelects(){const mo=MONTHS.map((n,i)=>'<option value="'+(i+1)+'">'+n+'</option>').join('');
  const dy=Array.from({length:31},(_,i)=>'<option value="'+(i+1)+'">'+(i+1)+'</option>').join('');
  ['fromM','toM'].forEach(id=>$(id).innerHTML=mo);['fromD','toD'].forEach(id=>$(id).innerHTML=dy);})();
-function showPrograms(j){progData=j;
+function showPrograms(j){progData=j;renderTimer(j.timer);
  $('schedOn').checked=j.scheduleOn;
  $('clockTxt').textContent=j.clock?'Clock: '+j.clock+(j.stoppedToday?' · calendar paused until tomorrow (Stop was pressed)':''):
   'Clock not set yet (needs internet). Playlists you start with ▶ still work.';
@@ -641,6 +661,27 @@ function showPrograms(j){progData=j;
  $('progList').querySelectorAll('[data-pe]').forEach(b=>b.onclick=()=>startProgEdit(+b.dataset.pe));
  $('progList').querySelectorAll('[data-pd]').forEach(b=>b.onclick=()=>{const p=j.programs.find(x=>x.id===+b.dataset.pd);
   if(confirm('Delete playlist "'+p.name+'"?'))progAction({action:'delete',id:p.id});});}
+// ---- On / off timer ----
+const hhmm=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
+const clock12=m=>{if(m<0)return 'never';const h=Math.floor(m/60),mm=String(m%60).padStart(2,'0');return ((h+11)%12+1)+':'+mm+(h<12?' AM':' PM');};
+const fromHHMM=v=>{const [h,m]=String(v||'0:0').split(':').map(Number);return (h||0)*60+(m||0);};
+let tmEditing=false;   // don't overwrite the form while the user is changing it
+function renderTimer(t){if(!t)return;
+ if(!tmEditing){$('tmOn').checked=t.enabled;$('tmOnMode').value=t.onMode;$('tmOnClock').value=hhmm(t.onClock);$('tmOnOffset').value=t.onOffset;
+  $('tmOffMode').value=t.offMode;$('tmOffClock').value=hhmm(t.offClock);$('tmOffOffset').value=t.offOffset;$('tmLat').value=t.lat;$('tmLon').value=t.lon;}
+ tmFormVisibility();
+ $('tmToday').textContent=t.todayOn===undefined?'Clock not set yet (needs internet).':
+  'Today: sunset '+clock12(t.sunset)+', sunrise '+clock12(t.sunrise)+(t.enabled?' · lights on '+clock12(t.todayOn)+', off '+clock12(t.todayOff)+(t.holdsOff?' · off by the timer now':''):'');}
+function tmFormVisibility(){const onSun=$('tmOnMode').value==='0',offM=$('tmOffMode').value;
+ $('tmOnClock').hidden=onSun;['tmOnOffset','tmOnOffLbl','tmOnMinLbl'].forEach(id=>$(id).hidden=!onSun);
+ $('tmOffClock').hidden=offM!=='1';['tmOffOffset','tmOffOffLbl','tmOffMinLbl'].forEach(id=>$(id).hidden=offM!=='0');}
+['tmOnMode','tmOffMode'].forEach(id=>$(id).addEventListener('change',()=>{tmEditing=true;tmFormVisibility();}));
+['tmOnClock','tmOnOffset','tmOffClock','tmOffOffset','tmLat','tmLon'].forEach(id=>$(id).addEventListener('input',()=>tmEditing=true));
+function timerFields(){return {enabled:$('tmOn').checked?1:0,onMode:$('tmOnMode').value,onClock:fromHHMM($('tmOnClock').value),onOffset:$('tmOnOffset').value||0,
+ offMode:$('tmOffMode').value,offClock:fromHHMM($('tmOffClock').value),offOffset:$('tmOffOffset').value||0,lat:$('tmLat').value,lon:$('tmLon').value};}
+$('tmSave').onclick=async()=>{tmEditing=false;await progAction(Object.assign({action:'timer'},timerFields()));};
+$('tmOn').onchange=async()=>{tmEditing=false;await progAction(Object.assign({action:'timer'},timerFields()));};
+
 async function progAction(p){const j=await post('/api/programs',p);if(j.error){showErr('progErr',j.error);return null;}
  showErr('progErr');showPrograms(j);try{show(await (await fetch('/api/state')).json());}catch(e){}return j;}
 function loadPrograms(){return fetch('/api/programs').then(r=>r.json()).then(showPrograms).catch(()=>{});}
@@ -762,7 +803,9 @@ $('backupBtn').onclick=async()=>{const say=t=>$('backupStatus').textContent=t;
    files.push({path:f.path,data:toB64(new Uint8Array(await r.arrayBuffer()))});}
   const backup={format:'eave-lights-backup',version:1,created:new Date().toISOString(),firmware:s.version,
    strands:s.outputs.map(o=>({id:o.id,count:o.count})),
-   channels:Object.assign({house:chanFields(s.house)},...s.outputs.map(o=>({[o.id.toLowerCase()]:chanFields(o)}))),files};
+   channels:Object.assign({house:chanFields(s.house)},...s.outputs.map(o=>({[o.id.toLowerCase()]:chanFields(o)}))),
+   timer:progData&&progData.timer?(({enabled,onMode,onClock,onOffset,offMode,offClock,offOffset,lat,lon})=>({enabled:enabled?1:0,onMode,onClock,onOffset,offMode,offClock,offOffset,lat,lon}))(progData.timer):null,
+   calendar:progData?(progData.scheduleOn?1:0):null,files};
   const blob=new Blob([JSON.stringify(backup)],{type:'application/json'}),a=document.createElement('a');
   a.href=URL.createObjectURL(blob);a.download='eave-lights-backup-'+new Date().toISOString().slice(0,10)+'.json';a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),5000);say('Backup downloaded ('+files.length+' files, '+Math.round(blob.size/1024)+' KB).');}
@@ -782,6 +825,9 @@ $('restoreFile').onchange=async e=>{const f=e.target.files[0];e.target.value='';
   const cnt={};(b.strands||[]).forEach(s=>cnt[s.id.toLowerCase()]=s.count);
   if(cnt.a||cnt.b)await post('/api/strands',cnt);
   for(const [id,fields] of Object.entries(b.channels||{}))await post('/api/state',Object.assign({output:id},fields));
+  if(b.timer)await post('/api/programs',Object.assign({action:'timer'},b.timer));
+  if(b.calendar!==null&&b.calendar!==undefined)await post('/api/programs',{action:'calendar',on:b.calendar});
+  await loadPrograms();
   await loadLooksAndScenes();show(await (await fetch('/api/state')).json());layout=null;loadLayout();
   if(editorFrame.src)editorFrame.src='/editor?embed=1';
   say(failed?'Restored, but these had problems: '+failed:'Restore complete.');}

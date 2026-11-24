@@ -113,6 +113,10 @@ void loadState() {
   }
   allOnMask = prefs.getUInt("allon", 0);   // what "All lights on" brings back
   scheduleOn = prefs.getBool("sched", false);
+  {
+    LightTimer t;
+    if (prefs.getBytesLength("timer") == sizeof(t) && prefs.getBytes("timer", &t, sizeof(t)) == sizeof(t)) lightTimer = t;
+  }
   manualProgram = prefs.getChar("mprog", -1);
   prefs.end();
 
@@ -162,6 +166,7 @@ void handleStateSave() {
   for (int o = 0; o < NUM_OUTPUTS; o++) prefs.putUShort(outputKey(o, "cnt"), ledCount[o]);
   prefs.putUInt("allon", allOnMask);
   prefs.putBool("sched", scheduleOn);
+  prefs.putBytes("timer", &lightTimer, sizeof(lightTimer));
   prefs.putChar("mprog", manualProgram);
   prefs.end();
 

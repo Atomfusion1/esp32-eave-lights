@@ -1,8 +1,31 @@
 # ESP32-S3 House Eave Lighting — Project Handoff
 
-**Date:** 2026-11-23  
-**Status:** One 65-puck strand verified under direct microcontroller control. Software project not yet created.  
-**Purpose:** Give a new VS Code/Codex coding session the hardware facts, target architecture, safety constraints, and first implementation plan without requiring the conversation history.
+**Date:** 2026-11-23 (updated end of day)  
+**Status:** Firmware **v0.21.0** written and compiling. The board is installed outside on strand A (67 lights, GPIO 8) and updated over Wi-Fi. Strand B (GPIO 9) not yet connected. See **§0** for what works, what's untested and what's next.  
+**Purpose:** Give a new VS Code/Codex coding session the hardware facts, target architecture, safety constraints and current state without requiring the conversation history. How to build, upload and lay out code: [AGENTS.md](../AGENTS.md).
+
+## 0. Current state & next steps (end of 2026-11-23)
+
+**Running on the board and confirmed by the user** (up to about v0.14):
+Wi-Fi control page at `http://eavelights.local` (192.168.1.25), saved settings, live view (~9.4 updates/s), strand A/B/Both, Whole house path, solid/fade/chase/comet with background, zones (7 mapped right→left: Right Side B65-40, Front House B41-19, Porch B18-1, Porch 2 A1-5, Front Garage A6-12, Street Garage A13-23, Left Side A24-67), paths with jumps, Find a light, saved looks, strand lengths, wireless updates (IDE network port), house-photo editor with 3 photos, 4-tab page, click-a-zone-to-show.
+
+**Written and compiling, not yet confirmed on hardware/browser** (v0.15–v0.21):
+- v0.15: 21 effects (+ rainbow, gradient, stripes, twinkle, fire, lightning, strobe…), 1–5 color list; saved-file converters.
+- v0.16: Apply/Discard for look changes; All lights off → All lights on (as before).
+- v0.17: playlists of scenes with minutes, yearly date ranges, Follow the calendar (NTP clock, US Eastern); live preview of unapplied changes.
+- v0.18–v0.19: Custom effect: hand-painted "paintings" (8, named), saved colors (swatches) also offered in every color picker, painting limited to the controlled lights.
+- v0.19: editor bends (drag the line), remove bend (double-click), hidden parts (behind the garage).
+- v0.20: house view draws lights as downlight scallops like the real pucks (Throw/Spread), per-section look (Points only for side eaves going up the roof line).
+- v0.21: on/off timer (sunset/sunrise ± minutes or set times, location default central Ohio); timer + calendar included in backups.
+
+**Next steps:**
+1. Test v0.15–v0.21 on the house (effects, Apply/preview, a 2-scene playlist, the calendar after a power cycle, painting one zone, the timer).
+2. **Download a backup** (Setup → Backup & restore) and keep it on the PC.
+3. **Change the default passwords** in `secrets.h` (`AP_PASSWORD` is still `change-me-123`; add `OTA_PASSWORD`). Upload once using the old password.
+4. Hardware before long-term outdoor use: 74AHCT125 buffer + ~330 Ω per data line, connect and test strand B (count, colors), measure current with both strands at the brightest scene, fuses per branch, weatherproof enclosure, don't reuse the damaged Y-splitter.
+5. Optional: keep a copy of the repo off this PC (private GitHub or another drive). Never push without asking.
+
+**Known limits:** the page's JavaScript can't be test-run here (no Node.js). The house view preview needs the board (no offline simulation). Strand B's length is assumed to be 65.
 
 ## 1. Project goal
 
@@ -42,6 +65,8 @@ The system should be extensible: initially 2 physical outputs × 65 LEDs, but av
 | Paths from zones | v0.10.0: up to 8 paths, each an ordered list of up to 12 zones with per-zone reverse and a 0–30 light invisible gap after it (the "jump"). Leaving a zone out skips it. Drawn above Whole house, below zones. First real zone map made by the user 2026-11-23 (7 zones, B65→B1 then A1→A65, right to left). **Verified on hardware 2026-11-23**: a zone path with a gap jumping the porch works. |
 | House view editor | v0.11.0 at `/editor`. User took 3 photos (front left, center front, front right). Photos are shrunk to ≤1920 px JPEG in the browser and stored in `/files` on FFat. A section = a zone (or part of one, From/To) or a whole strand, drawn as a polyline on one photo; its lights are spaced evenly along it, first and last light on the end points. Live mode darkens the photo and draws glow + wall wash in the real colors from `/api/frame`. Tapping a dot can flash that light on the house. Layout in `/files/layout.json` (schema at the top of `editor_page.h`). |
 | Strand lengths | User, 2026-11-23: **strand A has 67 lights** (corrects the earlier "65 inferred"); B assumed 65. Since v0.12.0 lengths are settings on the page (1–300 each), not constants. Zones file converted from 8-bit to 16-bit light numbers automatically. |
+| On/off timer | v0.21.0: optional. On at sunset ± minutes or a set time; off at sunrise ± minutes, a set time, or never. Uses All lights on/off at the crossing times only (manual changes in between are kept); catches up after a power cut; pauses playlists while off. Location default 40.0, -82.9 (central Ohio). The photocell still cuts 24 V by day, so today the timer mostly matters for an earlier off time. |
+| House view look | v0.20: "Downlight" scallops like the real pucks (Throw/Spread multiples of light spacing), "Glow", and per-section "Points only" for side eaves seen up the roof line. |
 | Bends, hidden parts, swatches | v0.19.0: House editor lines take bends anywhere (drag the line; double-click a bend to remove) and parts can be hidden (lights behind e.g. the garage still count for spacing, not drawn; layout `hidden`). Paintings have names; brush swatches (up to 12) saved in `/paintmeta.bin`. |
 | Custom painted patterns | v0.18.0: effect "Custom" shows one of 8 patterns (a color per physical light, so shared by strands/zones/paths). Painted on the page by tapping/dragging over the live view (photo or strip); saved immediately to `/patterns.bin`, no Apply. |
 | Playlists & calendar | v0.17.0: up to 12 playlists of up to 10 scenes with minutes each, looping; optional yearly date range (wraps over New Year); "Follow the calendar" plays the playlist covering today, shortest range wins. Clock via NTP, US Eastern. Stop pauses the calendar until tomorrow. Scene swaps by a playlist are not written to flash. |

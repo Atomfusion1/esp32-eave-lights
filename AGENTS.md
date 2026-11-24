@@ -1,7 +1,12 @@
 # AGENTS.md — ESP32 Eave Lights
 
 Instructions for coding agents (Claude Code, Codex, etc.) working in this repo.
-Project background, hardware facts and decisions: [Docs/ESP32_House_Eave_Lights_Handoff.md](Docs/ESP32_House_Eave_Lights_Handoff.md). Read it before changing firmware.
+Project background, hardware facts, decisions and **current state / next steps**: [Docs/ESP32_House_Eave_Lights_Handoff.md](Docs/ESP32_House_Eave_Lights_Handoff.md). Read it before changing firmware.
+
+**Working with this user:**
+- Compile to check, commit, then tell the user it's ready. **The user uploads** (over Wi-Fi from their IDE). Don't upload unless asked in that session.
+- Ask before big UI changes: offer options and let the user pick.
+- Node.js isn't installed, so the JavaScript in `web_page.h` / `editor_page.h` can't be syntax-checked here. Re-read new JS carefully, especially closing brackets. If the user reports a broken page, ask for the browser Console (F12) error.
 
 ## Toolchain
 
@@ -80,19 +85,23 @@ ESP32_Eave_Lights/              folder name must equal the main sketch name
   effects_more.ino              the 16 extra effects (rainbow, gradient, stripes, twinkle,
                                 fire, lightning…); what speed/size mean per effect is
                                 listed at the top. Must match the MODES table in web_page.h
-  effects.ino                   draws each channel (solid/fade/test/chase/comet) at 50 fps,
-                                layers strands → Whole house → zones, then Find-a-light overlay
+  effects.ino                   draws each channel (solid/fade/test/chase/comet) at 50 fps;
+                                drawLayers(): strands → Whole house → paths → zones → Find-a-light;
+                                renderFrame() also runs the preview pass (preview.ino)
   led_output.ino                strand setup, power caps, showFrame()
   locate.ino                    Find a light: show only chosen ranges, 5-min auto-off
   ota.ino                       wireless updates: ArduinoOTA (IDE network port) + web .bin upload
-  patterns.ino                  custom painted patterns (8 × a color per physical light),
-                                MODE_CUSTOM shows pattern `size`; /api/custom; /patterns.bin
+  patterns.ino                  custom "paintings" (8 × a color per physical light),
+                                MODE_CUSTOM shows painting `size`; /api/custom; /patterns.bin;
+                                names + saved colors (swatches): /api/paint-meta, /paintmeta.bin
   paths.ino                     Whole house path (B65→B1, A1→A65) and paths made from
                                 zones (steps: zone, reverse, gap) in /paths.bin
   presets.ino                   saved looks (name + LightState) in /presets.bin
   scenes.ino                    scenes: snapshot of every channel's LightState, /scenes.bin
   schedule.ino                  playlists (scenes + seconds, looping), yearly date ranges,
-                                internet clock (TIMEZONE in main tab), /programs.bin
+                                internet clock (TIMEZONE in main tab), /programs.bin;
+                                on/off timer (sunset/sunrise ± offset or clock times,
+                                lightTimer in Preferences "timer"), sunrise/sunset maths
   preview.ino                   unapplied-changes preview: second render into previewOut[]
                                 with the preview state swapped in (GET /api/frame?preview=1)
   backup.ino                    backup (/api/files, /fs/<path>) and restore (/api/restore-*)
@@ -102,12 +111,18 @@ ESP32_Eave_Lights/              folder name must equal the main sketch name
   web_api.ino                   JSON API: /api/state, /api/frame, /api/locate, /api/zones,
                                 /api/presets (endpoint list at the top of the file)
   web_page.h                    the control page HTML/CSS/JS (see exception below), 4 tabs:
-                                Home (live photo/strip, scenes, what's on, All off),
-                                Lights (grouped picker, look + mode fold-outs, saved looks),
+                                Home (live photo/strip, scenes, playlists & calendar, what's on,
+                                All off/on, on/off timer),
+                                Lights (grouped picker, Apply/Discard + live preview, effect
+                                drop-down from the MODES table, color list, settings fold-out,
+                                saved looks, Custom painting tools),
                                 House (editor in an iframe, /editor?embed=1),
-                                Setup (fold-outs: strands, find, zones, paths, backup, firmware)
+                                Setup (fold-outs: strands, saved colors, find, zones, paths,
+                                backup, firmware)
   editor_page.h                 House view editor at /editor: photos, sections drawn along the
-                                eave with evenly spaced lights, Live night-glow view
+                                eave with evenly spaced lights, bends, hidden parts, per-section
+                                look; Live view with downlight scallops (drawLight() is
+                                duplicated in web_page.h: keep both the same)
   files.ino                     photo upload, layout.json save, /files static serving
   wifi.ino                      home Wi-Fi, hotspot fallback, mDNS eavelights.local
   zones.ino                     zones (name + light ranges + settings) in /zones.bin,
@@ -128,7 +143,7 @@ How the IDE handles tabs:
 - **Exception: web page text goes in `.h` files** (`web_page.h`, `editor_page.h`). The IDE scans `.ino` tabs to generate prototypes and mistakes JavaScript `function name(){` lines inside a raw string for C++, which breaks the build with "'function' does not name a type".
 - Save `.ino` files as UTF-8 **without** a byte-order mark. PowerShell 5.1 `Set-Content -Encoding utf8` adds one and the compiler rejects it.
 - **Adding an effect:** add it to the end of `enum Mode` (never renumber, the numbers are saved), to `MODE_NAMES` in `web_api.ino`, the `drawChannel()` switch, and the `MODES` table in `web_page.h` (which colors and settings it uses, and their labels). Use `hash32()` instead of `random()` so effects stay repeatable.
-- `.bin` storage files have a `FileHeader` with the record size. Changing `LightState`, `ZoneDef`, `PathDef`/`PathStep`, `Preset`, `Scene`, or `MAX_ZONES`/`MAX_PATHS` (which change `Scene`'s size) makes old files unreadable, and zones/saved looks start empty. Warn the user before changing those structs, and suggest Setup → Download backup first. Better still, write a converter for the old version, as `zones.ino` does for `zones.bin` v1. While a restore runs, `savesBlocked` stops all saving so uploaded files aren't overwritten from memory.
+- `.bin` storage files have a `FileHeader` with the record size. Changing `LightState`, `ZoneDef`, `PathDef`/`PathStep`, `Preset`, `Scene`, `Program`, `PaintMeta`, the pattern array, or `MAX_ZONES`/`MAX_PATHS` (which change `Scene`'s size) makes old files unreadable, and that data starts empty. `LightTimer` is stored raw in Preferences, so changing it resets the timer. Converters exist for `LightStateV1` (pre-0.15: zones v2, paths v1, presets v1, scenes v1) and `ZoneDefV1`. Warn the user before changing those structs, and suggest Setup → Download backup first. Better still, write a converter for the old version, as `zones.ino` does for `zones.bin` v1. While a restore runs, `savesBlocked` stops all saving so uploaded files aren't overwritten from memory.
 
 Standalone throwaway test sketches go in their own folder under `tests/<name>/<name>.ino`, so they never get compiled into the main sketch.
 
@@ -139,7 +154,7 @@ Strand lengths are **not fixed in code**: `ledCount[]` is set on the page (Setup
 ## Firmware rules (from the handoff)
 
 - LED color order is **`RBG`**, chipset `WS2811`. Never change it to `GRB`.
-- Output A = GPIO 8 (tested). Output B = GPIO 9 (`ENABLE_OUTPUT_B 1`; pin verified with strand A in v0.3.0, the installed strand B not yet connected). Each **channel** has its own `LightState` in `states[]`: 0 = strand A, 1 = strand B, `CH_HOUSE` = Whole house path (v0.7+). Effects draw on a channel's "line" through `lineLength()`/`lineLight()`, so they work the same on strands and paths. Drawing order while on: strands → Whole house → zone paths (`CH_PATH0 + slot`, up to 8) → zones (`CH_ZONE0 + slot`, up to 12). Zone-path gap positions use `VIRTUAL_OUTPUT` and draw to a hidden `gapSink`. Paths are rebuilt whenever a zone changes. Zones and saved looks are stored on the FFat partition, so the **16M Flash (3MB APP/9.9MB FATFS)** partition scheme is required. The API's `output=all` changes both strands (not paths) and lines up their phases.
+- Output A = GPIO 8 (tested). Output B = GPIO 9 (`ENABLE_OUTPUT_B 1`; pin verified with strand A in v0.3.0, the installed strand B not yet connected). Each **channel** has its own `LightState` in `states[]`: 0 = strand A, 1 = strand B, `CH_HOUSE` = Whole house path, `CH_ZONE0 + slot`, `CH_PATH0 + slot` (23 channels; `allOnMask` is a 32-bit mask over them). Effects draw on a channel's "line" through `lineLength()`/`lineLight()`, so they work the same on strands and paths. Drawing order while on: strands → Whole house → zone paths (`CH_PATH0 + slot`, up to 8) → zones (`CH_ZONE0 + slot`, up to 12). Zone-path gap positions use `VIRTUAL_OUTPUT` and draw to a hidden `gapSink`. Paths are rebuilt whenever a zone changes. Zones and saved looks are stored on the FFat partition, so the **16M Flash (3MB APP/9.9MB FATFS)** partition scheme is required. The API's `output=all` changes both strands (not paths) and lines up their phases.
 - Every frame goes through `showFrame()` so the power caps are always applied. Never call `FastLED.show()` on raw colors.
 - `initOutputs()` stays the first line of `setup()` (sends OFF).
 - No blocking `delay()` in `loop()`. Use `millis()` timing.
