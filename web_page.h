@@ -949,13 +949,13 @@ function drawPhoto(fi){const v=layout.views[photoView];let im=imgs[v.image];
  if(set.night>0){pctx.fillStyle='rgba(0,0,0,'+set.night+')';pctx.fillRect(0,0,w,h);}
  const R=w*0.012*set.glow;pctx.globalCompositeOperation='lighter';
  (v.placements||[]).forEach(p=>{const all=itemLights(p.item),ls=all.slice(Math.max(0,p.from-1),Math.min(all.length,p.to)),pos=positions(v,p.points||[],ls.length);
-  const hid=p.hidden||[],sp=spacingPx(pos,w,h);
+  const hid=p.hidden||[],sp=spacingPx(pos,w,h),pset=p.look?Object.assign({},set,{style:p.look}):set;
   pos.forEach((q,i)=>{if(hid.includes(q.seg))return;   // behind something on this photo
    const c=lightRGB(fi,ls[i][0],ls[i][1]),x=q.x*w,y=q.y*h;
    dots.push({box:'photo',o:ls[i][0],i:ls[i][1],x,y,r:Math.max(Math.min(sp*0.5,R),7)});
    if(!c){if(painting){pctx.globalCompositeOperation='source-over';pctx.strokeStyle='rgba(255,255,255,0.35)';pctx.lineWidth=1;
      pctx.beginPath();pctx.arc(x,y,Math.max(2.5,sp*0.08),0,7);pctx.stroke();pctx.globalCompositeOperation='lighter';}return;}
-   drawLight(pctx,x,y,c,sp,R,set);});});
+   drawLight(pctx,x,y,c,sp,R,pset);});});
  pctx.globalCompositeOperation='source-over';}
 
 // ---- How a light looks on the photo (same code in the House editor) ----
@@ -967,6 +967,11 @@ function spacingPx(pos,w,h){if(pos.length<2)return w*0.04;let d=0;
 // light fanning down the wall below it and a faint wash. Glow: a round glow (older look).
 // Draw with globalCompositeOperation 'lighter'. c = [r,g,b] already gamma-lifted.
 function drawLight(g,x,y,c,sp,R,set){const rgb=c.join(','),core='rgba('+c.map(z=>Math.round(z+(255-z)*0.7)).join(',')+',0.95)';
+ // Points only: the puck with a small halo (eaves seen side-on, e.g. up the roof line)
+ if(set.style==='point'){const r=Math.max(3,sp*0.3);
+  const gr=g.createRadialGradient(x,y,0,x,y,r);gr.addColorStop(0,'rgba('+rgb+',0.8)');gr.addColorStop(1,'rgba('+rgb+',0)');
+  g.fillStyle=gr;g.beginPath();g.arc(x,y,r,0,7);g.fill();
+  g.fillStyle=core;g.beginPath();g.arc(x,y,Math.max(1.2,sp*0.07),0,7);g.fill();return;}
  if(set.style==='glow'){
   let gr=g.createRadialGradient(x,y,0,x,y,R*4);gr.addColorStop(0,'rgba('+rgb+',0.22)');gr.addColorStop(1,'rgba('+rgb+',0)');
   g.fillStyle=gr;g.beginPath();g.arc(x,y,R*4,0,7);g.fill();

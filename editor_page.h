@@ -16,6 +16,7 @@
 //                             "points":[[x,y],...]}]}]     x, y = 0-1 across the photo
 // }
 // item: "z<slot>" = zone, "A"/"B" = whole strand. from/to: 1-based within the item's lights.
+// Optional "look": "down" | "glow" | "point" overrides settings.style for this section.
 // Optional "hidden":[part numbers]: parts of the line (0 = first point to second) whose
 // lights are behind something on this photo: still spaced, not drawn.
 // Lights go from the first point to the last, first and last light on the end points.
@@ -110,6 +111,9 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 <div class="row" style="margin-top:8px">
 <button class="btn" id="revBtn">Flip direction</button><button class="btn" id="hideBtn">Hide part…</button>
 </div>
+<label style="margin-top:10px">Light look for this section</label>
+<div class="seg" id="pLook"><button data-look="">Default</button><button data-look="down">Downlight</button><button data-look="glow">Glow</button><button data-look="point">Points only</button></div>
+<p class="hint" style="margin-top:4px">Points only suits eaves seen from the side (e.g. going up the roof line), where the scallop would land on the roof.</p>
 <div class="row" style="margin-top:8px">
 <button class="btn danger" id="delP">Delete section</button>
 </div>
@@ -207,6 +211,8 @@ function removeBend(p,j){if(p.points.length<=2||j<=0||j>=p.points.length-1)retur
 
 // ---- How a light looks on the photo (same code as the main page's house view) ----
 function lookSettings(s){return Object.assign({night:0.6,glow:1,style:'down',throw:1,spread:1},s||{});}
+// A section can override the style ("look": down | glow | point).
+function sectionLook(s,p){const set=lookSettings(s);if(p&&p.look)set.style=p.look;return set;}
 // Average distance between neighbouring lights of a section, in canvas px.
 function spacingPx(pos,w,h){if(pos.length<2)return w*0.04;let d=0;
  for(let k=1;k<pos.length;k++)d+=Math.hypot((pos[k].x-pos[k-1].x)*w,(pos[k].y-pos[k-1].y)*h);return Math.max(4,d/(pos.length-1));}
@@ -214,6 +220,10 @@ function spacingPx(pos,w,h){if(pos.length<2)return w*0.04;let d=0;
 // light fanning down the wall below it and a faint wash. Glow: a round glow (older look).
 // Draw with globalCompositeOperation 'lighter'. c = [r,g,b] already gamma-lifted.
 function drawLight(g,x,y,c,sp,R,set){const rgb=c.join(','),core='rgba('+c.map(z=>Math.round(z+(255-z)*0.7)).join(',')+',0.95)';
+ if(set.style==='point'){const r=Math.max(3,sp*0.3);
+  const gr=g.createRadialGradient(x,y,0,x,y,r);gr.addColorStop(0,'rgba('+rgb+',0.8)');gr.addColorStop(1,'rgba('+rgb+',0)');
+  g.fillStyle=gr;g.beginPath();g.arc(x,y,r,0,7);g.fill();
+  g.fillStyle=core;g.beginPath();g.arc(x,y,Math.max(1.2,sp*0.07),0,7);g.fill();return;}
  if(set.style==='glow'){
   let gr=g.createRadialGradient(x,y,0,x,y,R*4);gr.addColorStop(0,'rgba('+rgb+',0.22)');gr.addColorStop(1,'rgba('+rgb+',0)');
   g.fillStyle=gr;g.beginPath();g.arc(x,y,R*4,0,7);g.fill();
@@ -247,7 +257,7 @@ function draw(){const v=view();$('empty').hidden=!!v;cv.hidden=!v;if(!v)return;
  if(live&&night>0){ctx.fillStyle='rgba(0,0,0,'+night+')';ctx.fillRect(0,0,w,h);}
  const R=w*0.012*glowK;
  v.placements.forEach((p,pi)=>{const ls=placementLights(p),pos=positions(p,ls.length);
-  if(live){ctx.globalCompositeOperation='lighter';const set=lookSettings(layout.settings),sp=spacingPx(pos,w,h);
+  if(live){ctx.globalCompositeOperation='lighter';const set=sectionLook(layout.settings,p),sp=spacingPx(pos,w,h);
    pos.forEach((q,i)=>{const c=lightColor(ls[i]);if(!c||isHidden(p,q.seg))return;drawLight(ctx,q.x*w,q.y*h,c,sp,R,set);});
    ctx.globalCompositeOperation='source-over';return;}
   // edit mode
@@ -288,6 +298,7 @@ function renderPlist(){const v=view();$('editCard').hidden=$('addCard').hidden=!
  const p=v.placements[selP];$('selTools').hidden=!p;
  if(p){$('drawBtn').textContent=drawing?'Finish line':(p.points.length?'Redraw line':'Draw line');$('drawBtn').classList.toggle('primary',drawing);
   $('selFrom').value=p.from;$('selTo').value=p.to;
+  $('pLook').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',b.dataset.look===(p.look||'')));
   $('hideBtn').textContent=hideMode?'Done hiding':'Hide part…';$('hideBtn').classList.toggle('primary',hideMode);
   $('selInfo').textContent=drawing?'Click on the photo to add points ('+p.points.length+' so far).':
    hideMode?'Click a part of the line to hide its lights (e.g. behind the garage); click again to show them. Hidden parts are dashed.':
@@ -341,6 +352,8 @@ $('revBtn').onclick=()=>{const p=view().placements[selP];p.points.reverse();
  const last=p.points.length-2;p.hidden=(p.hidden||[]).map(s=>last-s);   // parts are numbered from the other end now
  save();renderAll();};
 let hideMode=false;
+$('pLook').querySelectorAll('button').forEach(b=>b.onclick=()=>{const p=view().placements[selP];if(!p)return;
+ if(b.dataset.look)p.look=b.dataset.look;else delete p.look;save();renderAll();});
 $('hideBtn').onclick=()=>{hideMode=!hideMode;drawing=false;renderAll();};
 $('delP').onclick=()=>{const v=view();if(!confirm('Delete this section?'))return;v.placements.splice(selP,1);selP=-1;drawing=false;save();renderAll();};
 function setRange(){const p=view().placements[selP],it=itemById(p.item),n=it?it.lights.length:p.to;
