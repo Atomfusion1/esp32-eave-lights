@@ -1,7 +1,7 @@
 # ESP32-S3 House Eave Lighting — Project Handoff
 
 **Date:** 2026-11-23 (updated end of day)  
-**Status:** Firmware **v0.25.0** written and compiling. The board is installed outside on strand A (67 lights, GPIO 8) and updated over Wi-Fi. Strand B (GPIO 9) not yet connected. See **§0** for what works, what's untested and what's next.  
+**Status:** Firmware **v0.25.1** written and compiling. The board is installed outside on strand A (67 lights, GPIO 8) and updated over Wi-Fi. Strand B (GPIO 9) not yet connected. See **§0** for what works, what's untested and what's next.  
 **Purpose:** Give a new VS Code/Codex coding session the hardware facts, target architecture, safety constraints and current state without requiring the conversation history. How to build, upload and lay out code: [AGENTS.md](../AGENTS.md).
 
 ## 0. Current state & next steps (end of 2026-11-23)

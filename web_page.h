@@ -1159,7 +1159,9 @@ function openAnimEditor(n){const a=animById(n);if(!a)return;
 function closeAnimEditor(){animEditing=null;$('animTools').hidden=true;$('animEditBtn').textContent='✎ Edit steps';}
 function updateAnimLoop(){const a=animEditing;if(!a)return;
  const total=a.steps.reduce((t,s)=>t+s.ms,0),net=a.steps.reduce((t,s)=>t+(s.k==='m'?s.n:0),0);
- $('animLoopTxt').textContent=secs(total)+(net?', ends '+(net>0?'+':'')+net+' lights along each time round':', ends where it started');
+ const frames=a.steps.some(s=>s.k==='f'||s.k==='c');
+ $('animLoopTxt').textContent=secs(total)+(frames?', starts again from the beginning each time (paintings and colors fade in where they were painted)'
+  :net?', ends '+(net>0?'+':'')+net+' lights along each time round (keeps marching)':', ends where it started');
  $('animBandBox').hidden=!(a.start===0||a.steps.some(s=>(s.k==='f'||s.k==='c')&&s.n===0));
  $('animAdd').disabled=$('animDance').disabled=a.steps.length>=16;}
 function renderAnimEditor(){const a=animEditing;if(!a)return;

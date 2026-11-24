@@ -9,10 +9,11 @@
 //                        leave one end come back in at the other. Smooth glide: colors
 //                        blend between neighboring lights. Eased (slow start and stop)
 //                        unless the step is "steady".
-//   fade  to F over N s  cross-fade to frame F
-//   cut   to F, hold N s switch to frame F at once
-// Each loop starts again from the start frame; moves add up, so a loop that moves +3
-// and -1 drifts 2 lights further every time round.
+//   fade  to F over N s  cross-fade to frame F, which appears where it was painted
+//   cut   to F, hold N s switch to frame F at once (where it was painted)
+// Each loop starts again from the start frame. With fades/switches it also starts back
+// at its own position; a loop of moves only keeps going (a loop that moves +3 and -1
+// drifts 2 lights further every time round, e.g. for a marching pattern).
 // Brightness, direction (reverse) and background (shown for black / unpainted lights)
 // come from the channel's settings, like any other effect.
 // Everything is calculated from the channel's elapsed time, so it is repeatable.
@@ -276,19 +277,24 @@ void drawAnim(int ch) {
   }
 
   // Where in the loop are we?
+  // A fade/switch shows the new frame where it was painted (position 0); moves after it
+  // move it from there. A loop with fades/switches starts every time at position 0; a
+  // loop of moves only keeps going (moves add up, e.g. a marching pattern).
   uint32_t loopMs = 0;
   int32_t  loopMove = 0;
+  bool     hasFrames = false;
   for (int k = 0; k < a.stepCount; k++) {
     loopMs += a.steps[k].ms;
     if (a.steps[k].kind == ANIM_MOVE) loopMove += a.steps[k].lights;
+    if (a.steps[k].kind == ANIM_FADE || a.steps[k].kind == ANIM_CUT) hasFrames = true;
   }
   uint8_t fromFrame = a.startFrame, toFrame = a.startFrame, mix = 0;
-  int64_t offset = 0;   // in 1/256 lights
+  int64_t offset = 0;   // position of fromFrame, in 1/256 lights (toFrame fades in at 0)
   if (loopMs > 0) {
     uint32_t t = effectMs[ch];
     uint32_t loops = t / loopMs;
     uint32_t tc = t % loopMs;
-    offset = (int64_t)loops * loopMove * 256;
+    if (!hasFrames) offset = (int64_t)loops * loopMove * 256;
     for (int k = 0; k < a.stepCount; k++) {
       const AnimStep& st = a.steps[k];
       bool done = tc >= st.ms;
@@ -298,11 +304,12 @@ void drawAnim(int ch) {
         offset += ((int64_t)st.lights * 256 * e) >> 16;
       } else if (st.kind == ANIM_CUT) {
         fromFrame = toFrame = st.frame;
+        offset = 0;
       } else if (st.kind == ANIM_FADE) {
         if (done) {
           fromFrame = toFrame = st.frame;
+          offset = 0;
         } else {
-          fromFrame = toFrame;
           toFrame = st.frame;
           mix = p >> 8;
         }
@@ -315,18 +322,19 @@ void drawAnim(int ch) {
   int32_t off = (int32_t)(((offset % span) + span) % span);
 
   for (int i = 0; i < len; i++) {
-    // the frame light that has moved to position i (wrapping around the line)
-    int32_t p = i * 256 - off;
-    if (p < 0) p += span;
-    int j = p >> 8, j2 = (j + 1) % len;
-    uint8_t frac = p & 0xFF;
-    CRGB c1 = animFrameColor(ch, a, fromFrame, j);
-    CRGB c2 = animFrameColor(ch, a, fromFrame, j2);
-    if (mix) {
-      c1 = blend(c1, animFrameColor(ch, a, toFrame, j), mix);
-      c2 = blend(c2, animFrameColor(ch, a, toFrame, j2), mix);
-    }
-    CRGB c = frac ? blend(c1, c2, frac) : c1;
+    CRGB c = animSample(ch, a, fromFrame, i, off, len);
+    if (mix) c = blend(c, animSample(ch, a, toFrame, i, 0, len), mix);
     putLight(ch, i, (c.r | c.g | c.b) ? litColor(c, s, 255) : CRGB(0, 0, 0));
   }
+}
+
+// Color of frame f that has moved to line position i, moved by off (1/256 lights,
+// 0..len*256), wrapping around the line, blended between neighbouring lights.
+CRGB animSample(int ch, const AnimDef& a, uint8_t f, int i, int32_t off, int len) {
+  int32_t p = i * 256 - off;
+  if (p < 0) p += len * 256;
+  int j = p >> 8, j2 = (j + 1) % len;
+  uint8_t frac = p & 0xFF;
+  CRGB c = animFrameColor(ch, a, f, j);
+  return frac ? blend(c, animFrameColor(ch, a, f, j2), frac) : c;
 }
