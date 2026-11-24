@@ -14,6 +14,8 @@
 //                             "points":[[x,y],...]}]}]     x, y = 0-1 across the photo
 // }
 // item: "z<slot>" = zone, "A"/"B" = whole strand. from/to: 1-based within the item's lights.
+// Optional "hidden":[part numbers]: parts of the line (0 = first point to second) whose
+// lights are behind something on this photo: still spaced, not drawn.
 // Lights go from the first point to the last, first and last light on the end points.
 //
 // A .h on purpose: the Arduino IDE misreads JavaScript inside .ino tabs (see AGENTS.md).
@@ -98,7 +100,10 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 <button class="btn" id="drawBtn">Draw line</button><button class="btn" id="undoPt">Undo point</button>
 </div>
 <div class="row" style="margin-top:8px">
-<button class="btn" id="revBtn">Flip direction</button><button class="btn danger" id="delP">Delete section</button>
+<button class="btn" id="revBtn">Flip direction</button><button class="btn" id="hideBtn">Hide part…</button>
+</div>
+<div class="row" style="margin-top:8px">
+<button class="btn danger" id="delP">Delete section</button>
 </div>
 <div class="row" style="margin-top:8px">
 <div><label>From light</label><input type="number" id="selFrom" min="1"></div>
@@ -167,17 +172,30 @@ function placementLights(p){const it=itemById(p.item);if(!it)return [];
 function lightLabel(l){return (l[0]===0?'A':'B')+(l[1]+1);}
 
 // ---- Even spacing along the line (in photo pixels, so it isn't stretched) ----
+// seg = which part of the line the light is on (parts can be hidden, e.g. behind the garage)
 function positions(p,n){const v=view(),W=v.width,H=v.height,pts=p.points;
  if(!pts.length||!n)return [];
- if(pts.length===1||n===1){return Array(n).fill(0).map(()=>({x:pts[0][0],y:pts[0][1]}));}
+ if(pts.length===1||n===1){return Array(n).fill(0).map(()=>({x:pts[0][0],y:pts[0][1],seg:0}));}
  const seg=[];let total=0;
  for(let i=1;i<pts.length;i++){const dx=(pts[i][0]-pts[i-1][0])*W,dy=(pts[i][1]-pts[i-1][1])*H,d=Math.hypot(dx,dy);seg.push(d);total+=d;}
  const out=[];
  for(let k=0;k<n;k++){let t=total*k/(n-1),i=0;
   while(i<seg.length-1&&t>seg[i]){t-=seg[i];i++;}
   const f=seg[i]?Math.min(1,t/seg[i]):0,a=pts[i],b=pts[i+1];
-  out.push({x:a[0]+(b[0]-a[0])*f,y:a[1]+(b[1]-a[1])*f});}
+  out.push({x:a[0]+(b[0]-a[0])*f,y:a[1]+(b[1]-a[1])*f,seg:i});}
  return out;}
+const isHidden=(p,seg)=>(p.hidden||[]).includes(seg);
+// Distance (px) from m to part i of p's line, and where along it (0-1).
+function segHit(p,i,m){const a=p.points[i],b=p.points[i+1],ax=a[0]*m.w,ay=a[1]*m.h,bx=b[0]*m.w,by=b[1]*m.h,px=m.x*m.w,py=m.y*m.h;
+ const dx=bx-ax,dy=by-ay,L=dx*dx+dy*dy,t=L?Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/L)):0;
+ return {d:Math.hypot(px-(ax+dx*t),py-(ay+dy*t)),t};}
+// Adds a bend at part i (keeps hidden parts hidden), returns the new point's index.
+function insertBend(p,i,x,y){p.points.splice(i+1,0,[x,y]);
+ p.hidden=(p.hidden||[]).flatMap(s=>s<i?[s]:s===i?[i,i+1]:[s+1]);return i+1;}
+// Removes bend j (its two parts merge; hidden if either was).
+function removeBend(p,j){if(p.points.length<=2||j<=0||j>=p.points.length-1)return false;
+ p.points.splice(j,1);
+ const h=new Set();(p.hidden||[]).forEach(s=>h.add(s<j?s:s-1));p.hidden=[...h].filter(s=>s>=0&&s<p.points.length-1);return true;}
 
 // ---- Drawing ----
 function size(){const v=view();if(!v)return;const w=$('stage').clientWidth,h=Math.round(w*v.height/v.width),dpr=window.devicePixelRatio||1;
@@ -197,7 +215,7 @@ function draw(){const v=view();$('empty').hidden=!!v;cv.hidden=!v;if(!v)return;
  const R=w*0.012*glowK;
  v.placements.forEach((p,pi)=>{const ls=placementLights(p),pos=positions(p,ls.length);
   if(live){ctx.globalCompositeOperation='lighter';
-   pos.forEach((q,i)=>{const c=lightColor(ls[i]);if(!c)return;const x=q.x*w,y=q.y*h,rgb=c.join(',');
+   pos.forEach((q,i)=>{const c=lightColor(ls[i]);if(!c||isHidden(p,q.seg))return;const x=q.x*w,y=q.y*h,rgb=c.join(',');
     // soft wash on the wall around the light
     let g=ctx.createRadialGradient(x,y,0,x,y,R*4);g.addColorStop(0,'rgba('+rgb+',0.22)');g.addColorStop(1,'rgba('+rgb+',0)');
     ctx.fillStyle=g;ctx.beginPath();ctx.arc(x,y,R*4,0,7);ctx.fill();
@@ -209,10 +227,15 @@ function draw(){const v=view();$('empty').hidden=!!v;cv.hidden=!v;if(!v)return;
    ctx.globalCompositeOperation='source-over';return;}
   // edit mode
   const sel=pi===selP;
-  if(p.points.length>1){ctx.strokeStyle=sel?'#ffb347':'rgba(255,255,255,0.55)';ctx.lineWidth=sel?2.5:1.5;ctx.beginPath();
-   p.points.forEach((q,i)=>i?ctx.lineTo(q[0]*w,q[1]*h):ctx.moveTo(q[0]*w,q[1]*h));ctx.stroke();}
+  // the line, part by part; hidden parts dashed
+  ctx.strokeStyle=sel?'#ffb347':'rgba(255,255,255,0.55)';ctx.lineWidth=sel?2.5:1.5;
+  for(let s=0;s+1<p.points.length;s++){const a=p.points[s],b=p.points[s+1];
+   ctx.setLineDash(isHidden(p,s)?[6,5]:[]);ctx.globalAlpha=isHidden(p,s)?0.6:1;
+   ctx.beginPath();ctx.moveTo(a[0]*w,a[1]*h);ctx.lineTo(b[0]*w,b[1]*h);ctx.stroke();}
+  ctx.setLineDash([]);ctx.globalAlpha=1;
   const dot=Math.max(2.5,Math.min(6,w*0.004));
   pos.forEach((q,i)=>{const c=lightColor(ls[i]),x=q.x*w,y=q.y*h;
+   if(isHidden(p,q.seg)){ctx.strokeStyle='rgba(255,255,255,0.4)';ctx.lineWidth=1;ctx.beginPath();ctx.arc(x,y,dot*0.7,0,7);ctx.stroke();return;}
    ctx.fillStyle=c?'rgb('+c.join(',')+')':'rgba(20,20,20,0.85)';ctx.beginPath();ctx.arc(x,y,dot,0,7);ctx.fill();
    ctx.lineWidth=i===0?2.5:1;ctx.strokeStyle=i===0?'#3ddc84':'rgba(255,255,255,0.8)';ctx.stroke();});
   if(sel)p.points.forEach(q=>{ctx.fillStyle='#ffb347';ctx.fillRect(q[0]*w-5,q[1]*h-5,10,10);});
@@ -240,7 +263,10 @@ function renderPlist(){const v=view();$('editCard').hidden=$('addCard').hidden=!
  const p=v.placements[selP];$('selTools').hidden=!p;
  if(p){$('drawBtn').textContent=drawing?'Finish line':(p.points.length?'Redraw line':'Draw line');$('drawBtn').classList.toggle('primary',drawing);
   $('selFrom').value=p.from;$('selTo').value=p.to;
-  $('selInfo').textContent=drawing?'Click on the photo to add points ('+p.points.length+' so far).':'Drag the orange squares to adjust the line.';}
+  $('hideBtn').textContent=hideMode?'Done hiding':'Hide part…';$('hideBtn').classList.toggle('primary',hideMode);
+  $('selInfo').textContent=drawing?'Click on the photo to add points ('+p.points.length+' so far).':
+   hideMode?'Click a part of the line to hide its lights (e.g. behind the garage); click again to show them. Hidden parts are dashed.':
+   'Drag a square to move a bend. Drag anywhere on the line to add a bend. Double-click a square to remove it.';}
  // count placed lights on all photos
  const placed=new Set();layout.views.forEach(vw=>vw.placements.forEach(p=>placementLights(p).forEach(l=>placed.add(l[0]+':'+l[1]))));
  $('placedInfo').textContent='Placed '+placed.size+' of '+totalLights()+' lights across all photos.';
@@ -281,7 +307,11 @@ $('addP').onclick=()=>{const v=view(),it=itemById($('item').value);if(!v||!it)re
  v.placements.push({item:it.id,itemName:it.name,from:a,to:b,points:[]});selP=v.placements.length-1;drawing=true;save();renderAll();};
 $('drawBtn').onclick=()=>{const p=view().placements[selP];if(!drawing){p.points=[];drawing=true;}else drawing=false;save();renderAll();};
 $('undoPt').onclick=()=>{const p=view().placements[selP];p.points.pop();save();renderAll();};
-$('revBtn').onclick=()=>{const p=view().placements[selP];p.points.reverse();save();renderAll();};
+$('revBtn').onclick=()=>{const p=view().placements[selP];p.points.reverse();
+ const last=p.points.length-2;p.hidden=(p.hidden||[]).map(s=>last-s);   // parts are numbered from the other end now
+ save();renderAll();};
+let hideMode=false;
+$('hideBtn').onclick=()=>{hideMode=!hideMode;drawing=false;renderAll();};
 $('delP').onclick=()=>{const v=view();if(!confirm('Delete this section?'))return;v.placements.splice(selP,1);selP=-1;drawing=false;save();renderAll();};
 function setRange(){const p=view().placements[selP],it=itemById(p.item),n=it?it.lights.length:p.to;
  p.from=Math.min(n,Math.max(1,+$('selFrom').value||1));p.to=Math.min(n,Math.max(p.from,+$('selTo').value||n));save();renderAll();}
@@ -292,15 +322,32 @@ let findLabel='';
 function evPos(e){const r=cv.getBoundingClientRect();return {x:(e.clientX-r.left)/r.width,y:(e.clientY-r.top)/r.height,w:r.width,h:r.height};}
 cv.addEventListener('pointerdown',e=>{const v=view();if(!v||mode!=='edit')return;const m=evPos(e),p=v.placements[selP];
  if(drawing&&p){p.points.push([m.x,m.y]);save();renderAll();return;}
- if(p){const i=p.points.findIndex(q=>Math.hypot((q[0]-m.x)*m.w,(q[1]-m.y)*m.h)<10);if(i>=0){drag={p,i};cv.setPointerCapture(e.pointerId);return;}}
- // nearest light dot
- let best=null,bd=12;
+ if(p&&!hideMode){const i=p.points.findIndex(q=>Math.hypot((q[0]-m.x)*m.w,(q[1]-m.y)*m.h)<10);if(i>=0){drag={p,i};cv.setPointerCapture(e.pointerId);return;}}
+ // on the selected line: hide/show that part, or pull out a new bend
+ if(p&&p.points.length>1){let best=-1,bd=8,bt=0;
+  for(let s=0;s+1<p.points.length;s++){const hit=segHit(p,s,m);if(hit.d<bd){bd=hit.d;best=s;bt=hit.t;}}
+  if(best>=0){
+   if(hideMode){const h=new Set(p.hidden||[]);h.has(best)?h.delete(best):h.add(best);p.hidden=[...h];save();renderAll();return;}
+   // a bend is only added once the pointer actually moves (a plain tap still selects/finds a light)
+   pendingBend={p,seg:best,t:bt,x0:e.clientX,y0:e.clientY};cv.setPointerCapture(e.pointerId);return;}}
+ tapLight(m);});
+let pendingBend=null;
+// Selects the section of the nearest light dot, and flashes that light if "tap to find" is on.
+function tapLight(m){const v=view();let best=null,bd=12;
  v.placements.forEach((pl,pi)=>{const ls=placementLights(pl);positions(pl,ls.length).forEach((q,k)=>{const d=Math.hypot((q.x-m.x)*m.w,(q.y-m.y)*m.h);if(d<bd){bd=d;best={pi,l:ls[k]};}});});
  if(best){selP=best.pi;if($('tapFind').checked){findLabel=lightLabel(best.l);
    fetch('/api/locate',{method:'POST',body:new URLSearchParams({ranges:findLabel})}).catch(()=>{});}
-  renderAll();}});
-cv.addEventListener('pointermove',e=>{if(!drag)return;const m=evPos(e);drag.p.points[drag.i]=[Math.min(1,Math.max(0,m.x)),Math.min(1,Math.max(0,m.y))];draw();});
-cv.addEventListener('pointerup',()=>{if(drag){drag=null;save();renderAll();}});
+  renderAll();}}
+cv.addEventListener('pointermove',e=>{
+ if(pendingBend&&Math.hypot(e.clientX-pendingBend.x0,e.clientY-pendingBend.y0)>5){const b=pendingBend,a0=b.p.points[b.seg],a1=b.p.points[b.seg+1];
+  drag={p:b.p,i:insertBend(b.p,b.seg,a0[0]+(a1[0]-a0[0])*b.t,a0[1]+(a1[1]-a0[1])*b.t)};pendingBend=null;}
+ if(!drag)return;const m=evPos(e);drag.p.points[drag.i]=[Math.min(1,Math.max(0,m.x)),Math.min(1,Math.max(0,m.y))];draw();});
+cv.addEventListener('pointerup',e=>{if(pendingBend){pendingBend=null;tapLight(evPos(e));return;}
+ if(drag){drag=null;save();renderAll();}});
+// double-click (double-tap) a bend's square to remove it
+cv.addEventListener('dblclick',e=>{const v=view();if(!v||mode!=='edit'||drawing)return;const p=v.placements[selP];if(!p)return;
+ const m=evPos(e),i=p.points.findIndex(q=>Math.hypot((q[0]-m.x)*m.w,(q[1]-m.y)*m.h)<10);
+ if(i>=0&&removeBend(p,i)){save();renderAll();}});
 $('stopFind').onclick=()=>{findLabel='';fetch('/api/locate',{method:'POST',body:new URLSearchParams({stop:1})}).catch(()=>{});draw();};
 
 // ---- Mode and night look ----

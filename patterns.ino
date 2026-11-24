@@ -17,8 +17,108 @@ const uint32_t PATTERNS_MAGIC   = 0x4E545450;  // "PTTN"
 const uint16_t PATTERNS_VERSION = 1;
 const uint32_t PATTERN_SAVE_MS  = 2000;
 
+// Painting names and saved brush colors (swatches), in /paintmeta.bin.
+//   GET  /api/paint-meta                               {"names":[8],"swatches":["#RRGGBB",...]}
+//   POST /api/paint-meta action=rename pattern=N name=Flag
+//   POST /api/paint-meta action=swatches list=RRGGBB,RRGGBB,...   (replaces the list)
+#define MAX_SWATCHES 12
+const char*    PAINTMETA_FILE    = "/paintmeta.bin";
+const uint32_t PAINTMETA_MAGIC   = 0x4154454D;  // "META"
+const uint16_t PAINTMETA_VERSION = 1;
+
+struct PaintMeta {
+  char    names[MAX_PATTERNS][NAME_LEN];
+  uint8_t swatchCount;
+  CRGB    swatches[MAX_SWATCHES];
+};
+PaintMeta paintMeta;
+
 bool     patternsDirty   = false;
 uint32_t patternsDirtyMs = 0;
+
+void defaultPaintMeta() {
+  for (int p = 0; p < MAX_PATTERNS; p++) snprintf(paintMeta.names[p], NAME_LEN, "Painting %d", p + 1);
+  const CRGB defaults[] = { CRGB(255, 0, 0), CRGB(0, 255, 16), CRGB(255, 255, 255), CRGB(255, 140, 60),
+                            CRGB(0, 48, 255), CRGB(255, 74, 0), CRGB(128, 0, 255), CRGB(255, 154, 0) };
+  paintMeta.swatchCount = sizeof(defaults) / sizeof(defaults[0]);
+  for (int k = 0; k < paintMeta.swatchCount; k++) paintMeta.swatches[k] = defaults[k];
+}
+
+void loadPaintMeta() {
+  defaultPaintMeta();
+  if (!storageOk || !FFat.exists(PAINTMETA_FILE)) return;
+  File f = FFat.open(PAINTMETA_FILE, "r");
+  if (!f) return;
+  FileHeader h;
+  PaintMeta m;
+  if (f.read((uint8_t*)&h, sizeof(h)) == sizeof(h) && h.magic == PAINTMETA_MAGIC &&
+      h.version == PAINTMETA_VERSION && h.recordSize == sizeof(PaintMeta) &&
+      f.read((uint8_t*)&m, sizeof(m)) == sizeof(m)) {
+    paintMeta = m;
+    for (int p = 0; p < MAX_PATTERNS; p++) paintMeta.names[p][NAME_LEN - 1] = 0;
+    paintMeta.swatchCount = min((int)paintMeta.swatchCount, MAX_SWATCHES);
+  }
+  f.close();
+}
+
+void savePaintMeta() {
+  if (!storageOk || savesBlocked) return;
+  File f = FFat.open(PAINTMETA_FILE, "w");
+  if (!f) return;
+  FileHeader h = { PAINTMETA_MAGIC, PAINTMETA_VERSION, (uint16_t)sizeof(PaintMeta), 1 };
+  f.write((const uint8_t*)&h, sizeof(h));
+  f.write((const uint8_t*)&paintMeta, sizeof(paintMeta));
+  f.close();
+}
+
+String paintMetaJson() {
+  String j = "{\"names\":[";
+  for (int p = 0; p < MAX_PATTERNS; p++) {
+    j += p ? ",\"" : "\"";
+    j += paintMeta.names[p];
+    j += "\"";
+  }
+  j += "],\"swatches\":[";
+  for (int k = 0; k < paintMeta.swatchCount; k++) {
+    char c[12];
+    snprintf(c, sizeof(c), "%s\"#%02X%02X%02X\"", k ? "," : "",
+             paintMeta.swatches[k].r, paintMeta.swatches[k].g, paintMeta.swatches[k].b);
+    j += c;
+  }
+  j += "]}";
+  return j;
+}
+
+void handlePaintMeta() {
+  String action = server.arg("action");
+  if (action == "rename") {
+    int p = server.arg("pattern").toInt();
+    if (p < 1 || p > MAX_PATTERNS) return sendError("painting must be 1 to 8");
+    char clean[NAME_LEN];
+    if (!copyName(server.arg("name"), clean)) return sendError("enter a name");
+    strcpy(paintMeta.names[p - 1], clean);
+    savePaintMeta();
+  } else if (action == "swatches") {
+    String list = server.arg("list");
+    uint8_t n = 0;
+    int pos = 0;
+    while (pos < (int)list.length() && n < MAX_SWATCHES) {
+      int comma = list.indexOf(',', pos);
+      if (comma < 0) comma = list.length();
+      String hex = list.substring(pos, comma);
+      hex.trim();
+      if (hex.startsWith("#")) hex = hex.substring(1);
+      pos = comma + 1;
+      if (hex.length() != 6) continue;
+      paintMeta.swatches[n++] = CRGB((uint32_t)strtoul(hex.c_str(), nullptr, 16));
+    }
+    paintMeta.swatchCount = n;
+    savePaintMeta();
+  } else if (action.length()) {
+    return sendError("action must be rename or swatches");
+  }
+  server.send(200, "application/json", paintMetaJson());
+}
 
 void drawCustom(int ch) {
   const LightState& s = states[ch];
@@ -111,6 +211,7 @@ void handlePatternSave() {
 }
 
 void loadPatterns() {
+  loadPaintMeta();
   memset(patterns, 0, sizeof(patterns));
   if (!storageOk || !FFat.exists(PATTERNS_FILE)) return;
   File f = FFat.open(PATTERNS_FILE, "r");

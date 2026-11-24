@@ -53,6 +53,9 @@ select.picker{font-size:17px;font-weight:600;padding:12px}
 .seg.small button{flex:0 0 auto;padding:5px 10px;font-size:13px;border-radius:8px}
 .applyBar{position:sticky;bottom:12px;z-index:4;display:flex;align-items:center;gap:8px;background:var(--card);border:2px solid var(--accent);border-radius:14px;padding:10px 12px;margin:14px 0;box-shadow:0 4px 18px rgba(0,0,0,.25)}
 .applyBar span{flex:1;font-size:14px;font-weight:600}
+.swatch{width:34px;height:34px;border-radius:50%;border:2px solid var(--line);cursor:pointer;padding:0}
+.swatch.sel{border-color:var(--text);box-shadow:0 0 0 2px var(--accent)}
+.swatch.del{border-style:dashed;opacity:.8}
 .colorRow{display:flex;gap:8px}
 .colorRow input[type=color]{flex:1;min-width:0;height:44px}
 .btn{padding:10px 14px;border-radius:10px;border:1px solid var(--line);background:none;color:var(--text);cursor:pointer;font-size:15px}
@@ -203,16 +206,19 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 </div>
 <p class="hint" id="noColorHint" hidden>This effect makes its own colors.</p>
 <div id="patBox" hidden style="margin-top:14px">
-<label>Pattern</label>
-<div class="seg small" id="patSeg"></div>
-<button class="btn primary" id="paintBtn" style="margin-top:10px;width:100%">✎ Paint pattern</button>
+<label>Painting to show (a painting = every light colored by you; keep up to 8)</label>
+<div class="row"><select id="patSel"></select><button class="btn" id="patRename">Rename</button></div>
+<button class="btn primary" id="paintBtn" style="margin-top:10px;width:100%">✎ Paint it</button>
 </div>
 <div id="paintTools" class="sub" hidden>
-<label>Painting pattern <b id="paintNum"></b>: tap or drag over the lights in the live view</label>
+<label>Painting <b id="paintNum"></b>: tap or drag over the lights in the live view</label>
 <div class="row" style="align-items:center">
 <input type="color" id="brush" value="#ff0000" style="height:44px">
 <div class="seg" id="paintTool" style="flex:2"><button data-tool="paint" class="sel">Paint</button><button data-tool="erase">Erase</button></div>
 </div>
+<label style="margin-top:10px">Brush colors <span id="swatchMode"></span></label>
+<div class="chips" id="swatches"></div>
+<div class="row" style="margin-top:8px"><button class="btn" id="swatchAdd">+ Save brush color</button><button class="btn" id="swatchDel">Remove…</button></div>
 <div class="row" style="margin-top:8px">
 <button class="btn" id="paintFill">Fill all with brush</button><button class="btn danger" id="paintClear">Clear all</button><button class="btn primary" id="paintDone">Done</button>
 </div>
@@ -509,7 +515,7 @@ const MODES=[
  {g:'Sparkle',id:'fire',name:'Fire / candle',colors:1,spd:'Flicker speed',fmt:v=>v,hint:'Warm candle-like flicker. Orange or amber works best.'},
  {g:'Sparkle',id:'lightning',name:'Lightning',colors:1,spd:'How often',fmt:v=>'about every '+Math.round(60/v)+' s',bg:1,hint:'Occasional flashes and flickers; dark (or background) in between.'},
  {g:'Sparkle',id:'strobe',name:'Strobe / flash',colors:1,spd:'Flash rate',fmt:v=>(v/10).toFixed(1)+' per second',bg:1,hint:'Fast on/off flashing. Use sparingly: it can bother neighbors and drivers.'},
- {g:'Custom',id:'custom',name:'Custom (paint each light)',colors:0,pattern:1,bg:1,noColorText:'Colors come from the painted pattern.',hint:'Shows one of 8 patterns you paint light by light. Press ✎ Paint pattern to edit it.'},
+ {g:'Custom',id:'custom',name:'Custom (paint each light)',colors:0,pattern:1,bg:1,noColorText:'Colors come from the painting.',hint:'Shows a painting: every light colored by hand. Keep up to 8 (Flag, Xmas…); press ✎ Paint to color the lights.'},
 ];
 const modeById=id=>MODES.find(m=>m.id===id)||MODES[0];
 (function buildModeSelect(){const groups=[...new Set(MODES.map(m=>m.g))];
@@ -522,12 +528,11 @@ function renderLook(o){const m=modeById(o.mode);
  // colors
  $('colorBox').hidden=!m.colors;$('noColorHint').hidden=!!m.colors;
  $('noColorHint').textContent=m.noColorText||'This effect makes its own colors.';
- // custom: pattern number lives in `size` (1-8)
+ // custom: the painting number lives in `size` (1-8)
  $('patBox').hidden=!m.pattern;
  if(m.pattern){const n=Math.min(8,Math.max(1,o.size));
-  $('patSeg').innerHTML=[1,2,3,4,5,6,7,8].map(k=>'<button data-pat="'+k+'" class="'+(k===n?'sel':'')+'">'+k+'</button>').join('');
-  $('patSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{send({size:+b.dataset.pat});if(painting)startPainting(+b.dataset.pat);});
-  $('paintBtn').textContent=painting?'Painting pattern '+paintPattern+'…':'✎ Paint pattern '+n;}
+  $('patSel').innerHTML=paintNames.map((nm,k)=>'<option value="'+(k+1)+'">'+esc(nm)+'</option>').join('');$('patSel').value=String(n);
+  $('paintBtn').textContent=painting?'Painting "'+paintNames[paintPattern-1]+'"…':'✎ Paint "'+paintNames[n-1]+'"';}
  else if(painting)stopPainting();
  const multi=m.colors==='multi',list=multi?colorsOf(o):[o.color];
  $('colorLabel').textContent=multi?(m.colorNames?m.colorNames.join(' / ')+' colors':'Colors (in order)'):'Color';
@@ -803,7 +808,7 @@ let painting=false,paintPattern=1,patternFrame=null,paintTool='paint',paintDown=
 async function startPainting(n){paintPattern=n;
  try{patternFrame=new Uint8Array(await (await fetch('/api/custom?pattern='+n,{cache:'no-store'})).arrayBuffer());}
  catch(e){$('status').textContent='Could not load the pattern';return;}
- painting=true;$('paintTools').hidden=false;$('paintNum').textContent=n;
+ painting=true;$('paintTools').hidden=false;$('paintNum').textContent='"'+paintNames[n-1]+'"';
  $('photoCv').style.touchAction='none';$('stripBox').style.touchAction='none';
  if(st)renderLook(cur());drawLive();}
 function stopPainting(){flushStroke();painting=false;patternFrame=null;$('paintTools').hidden=true;
@@ -835,6 +840,26 @@ async function paintAll(clear){if(!confirm(clear?'Clear every light in pattern '
  flushStroke();await post('/api/custom',clear?{pattern:paintPattern,action:'clear'}:{pattern:paintPattern,action:'fill',color:$('brush').value.slice(1)});
  startPainting(paintPattern);}
 $('paintFill').onclick=()=>paintAll(false);$('paintClear').onclick=()=>paintAll(true);
+
+// ---- Painting names and brush swatches (saved on the board) ----
+let paintNames=['Painting 1','Painting 2','Painting 3','Painting 4','Painting 5','Painting 6','Painting 7','Painting 8'],swatchList=[],swatchDelMode=false;
+function showPaintMeta(j){if(!j||j.error)return;paintNames=j.names;swatchList=j.swatches;renderSwatches();if(st)renderLook(cur());}
+function loadPaintMeta(){return fetch('/api/paint-meta').then(r=>r.json()).then(showPaintMeta).catch(()=>{});}
+function renderSwatches(){const cur=$('brush').value.toLowerCase();
+ $('swatches').innerHTML=swatchList.map((c,k)=>'<button class="swatch'+(swatchDelMode?' del':(c.toLowerCase()===cur&&paintTool==='paint'?' sel':''))+'" data-k="'+k+'" style="background:'+c+'" title="'+(swatchDelMode?'Remove ':'')+c+'"></button>').join('');
+ $('swatchMode').textContent=swatchDelMode?'· tap a color to remove it':'· tap to paint with it';
+ $('swatchDel').textContent=swatchDelMode?'Done removing':'Remove…';$('swatchAdd').disabled=swatchList.length>=12;
+ $('swatches').querySelectorAll('.swatch').forEach(b=>b.onclick=()=>{const k=+b.dataset.k;
+  if(swatchDelMode){saveSwatches(swatchList.filter((_,i)=>i!==k));return;}
+  flushStroke();$('brush').value=swatchList[k].toLowerCase();paintTool='paint';
+  $('paintTool').querySelectorAll('button').forEach(x=>x.classList.toggle('sel',x.dataset.tool==='paint'));renderSwatches();});}
+async function saveSwatches(list){showPaintMeta(await post('/api/paint-meta',{action:'swatches',list:list.map(c=>c.replace('#','')).join(',')}));}
+$('swatchAdd').onclick=()=>{const c=$('brush').value.toUpperCase();if(swatchList.map(x=>x.toUpperCase()).includes(c))return;saveSwatches(swatchList.concat([c]));};
+$('swatchDel').onclick=()=>{swatchDelMode=!swatchDelMode;renderSwatches();};
+$('patSel').onchange=e=>{const n=+e.target.value;send({size:n});if(painting)startPainting(n);};
+$('patRename').onclick=async()=>{const n=+$('patSel').value,name=prompt('Name for painting '+n+':',paintNames[n-1]);
+ if(name)showPaintMeta(await post('/api/paint-meta',{action:'rename',pattern:n,name}));};
+$('brush').addEventListener('input',renderSwatches);
 let liveMode=store.get('eaveLiveMode','photo'),photoView=store.get('eavePhotoView',0),frames=0,fpsT=performance.now();
 $('liveMode').querySelectorAll('button').forEach(b=>b.onclick=()=>{liveMode=b.dataset.lm;store.set('eaveLiveMode',liveMode);drawLive();});
 
@@ -868,13 +893,14 @@ function parseRanges(t){const out=[];
 function itemLights(id){if(!st)return [];
  if(id[0]==='z'){const z=zoneBySlot(+id.slice(1));return z?parseRanges(z.ranges):[];}
  const o=st.outputs.find(x=>x.id===id);return o?parseRanges(o.id+'1-'+o.count):[];}
+// Evenly spaced light positions along a line; seg = which part of the line (for hidden parts).
 function positions(v,pts,n){const W=v.width,H=v.height;if(!pts.length||!n)return [];
- if(pts.length===1||n===1)return Array(n).fill(0).map(()=>({x:pts[0][0],y:pts[0][1]}));
+ if(pts.length===1||n===1)return Array(n).fill(0).map(()=>({x:pts[0][0],y:pts[0][1],seg:0}));
  const seg=[];let total=0;
  for(let i=1;i<pts.length;i++){const d=Math.hypot((pts[i][0]-pts[i-1][0])*W,(pts[i][1]-pts[i-1][1])*H);seg.push(d);total+=d;}
  const out=[];
  for(let k=0;k<n;k++){let t=total*k/(n-1),i=0;while(i<seg.length-1&&t>seg[i]){t-=seg[i];i++;}
-  const f=seg[i]?Math.min(1,t/seg[i]):0,a=pts[i],b=pts[i+1];out.push({x:a[0]+(b[0]-a[0])*f,y:a[1]+(b[1]-a[1])*f});}
+  const f=seg[i]?Math.min(1,t/seg[i]):0,a=pts[i],b=pts[i+1];out.push({x:a[0]+(b[0]-a[0])*f,y:a[1]+(b[1]-a[1])*f,seg:i});}
  return out;}
 const photoCv=$('photoCv'),pctx=photoCv.getContext('2d');
 function drawPhoto(fi){const v=layout.views[photoView];let im=imgs[v.image];
@@ -887,7 +913,9 @@ function drawPhoto(fi){const v=layout.views[photoView];let im=imgs[v.image];
  if(set.night>0){pctx.fillStyle='rgba(0,0,0,'+set.night+')';pctx.fillRect(0,0,w,h);}
  const R=w*0.012*set.glow;pctx.globalCompositeOperation='lighter';
  (v.placements||[]).forEach(p=>{const all=itemLights(p.item),ls=all.slice(Math.max(0,p.from-1),Math.min(all.length,p.to)),pos=positions(v,p.points||[],ls.length);
-  pos.forEach((q,i)=>{const c=lightRGB(fi,ls[i][0],ls[i][1]),x=q.x*w,y=q.y*h;
+  const hid=p.hidden||[];
+  pos.forEach((q,i)=>{if(hid.includes(q.seg))return;   // behind something on this photo
+   const c=lightRGB(fi,ls[i][0],ls[i][1]),x=q.x*w,y=q.y*h;
    dots.push({box:'photo',o:ls[i][0],i:ls[i][1],x,y,r:Math.max(R*0.7,7)});
    if(!c){if(painting){pctx.globalCompositeOperation='source-over';pctx.strokeStyle='rgba(255,255,255,0.35)';pctx.lineWidth=1;
      pctx.beginPath();pctx.arc(x,y,Math.max(2.5,R*0.25),0,7);pctx.stroke();pctx.globalCompositeOperation='lighter';}return;}
@@ -922,5 +950,5 @@ async function pollFrame(){if(document.hidden||(tab!=='home'&&tab!=='lights')){s
 // ================= Start =================
 fetch('/api/state').then(r=>r.json()).then(s=>{show(s);setTab(['home','lights','house','setup'].includes(tab)?tab:'home');})
  .catch(()=>{$('status').textContent='Not connected';setTab('home');});
-loadLooksAndScenes().then(loadPrograms);loadLayout();pollFrame();
+loadLooksAndScenes().then(loadPrograms);loadPaintMeta();loadLayout();pollFrame();
 </script></body></html>)rawhtml";

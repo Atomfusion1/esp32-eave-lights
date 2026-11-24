@@ -570,6 +570,8 @@ void startWeb() {
   server.on("/api/preview", HTTP_POST, handlePreview);
   server.on("/api/custom", HTTP_GET, handleGetCustom);
   server.on("/api/custom", HTTP_POST, handlePostCustom);
+  server.on("/api/paint-meta", HTTP_GET, handlePaintMeta);
+  server.on("/api/paint-meta", HTTP_POST, handlePaintMeta);
   server.on("/api/programs", HTTP_GET, handlePrograms);
   server.on("/api/programs", HTTP_POST, handlePrograms);
   server.onNotFound([]() { server.send(404, "text/plain", "Not found"); });
