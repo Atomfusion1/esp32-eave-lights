@@ -79,7 +79,8 @@ select.picker{font-size:17px;font-weight:600;padding:12px}
 .liveRow{display:flex;align-items:center}
 .liveRow canvas{flex:1;height:26px;min-width:0}
 .liveLabels{display:flex;justify-content:space-between;color:#8a8a84;font-size:10px;padding:2px 2px 0}
-.photo{background:#000;border-radius:10px;overflow:hidden}
+.photo{background:#000;border-radius:10px;overflow:hidden;position:relative}
+.zoomReset{position:absolute;top:8px;right:8px;padding:6px 10px;border-radius:8px;border:none;background:rgba(0,0,0,.6);color:#fff;font-size:13px;cursor:pointer}
 .photo canvas{display:block;width:100%}
 .status{color:var(--muted);font-size:13px;text-align:center;margin-top:14px}
 .hint{color:var(--muted);font-size:12px;margin:8px 0 0}
@@ -126,7 +127,7 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <div class="seg small" id="photoViews"></div>
 <div class="seg small" id="liveMode"><button data-lm="photo">House</button><button data-lm="strip">Strip</button></div>
 </div>
-<div class="photo" id="photoBox"><canvas id="photoCv"></canvas></div>
+<div class="photo" id="photoBox"><canvas id="photoCv"></canvas><button class="zoomReset" id="zoomReset" hidden title="Scroll the mouse wheel over the photo to zoom">Reset zoom</button></div>
 <div class="live" id="stripBox"></div>
 <p class="hint" id="liveHint"></p>
 <p class="err" id="locateBanner" hidden></p>
@@ -279,7 +280,7 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <div class="row" style="margin-top:8px">
 <button class="btn" id="paintFill">Fill with brush</button><button class="btn danger" id="paintClear">Clear</button><button class="btn primary" id="paintDone">Done</button>
 </div>
-<p class="hint">Only the lights you're controlling can be painted; the rest of the house stays as it is. Shift or Ctrl + click a light (or use Pick) to take its color. With "on Apply", paint shows in the preview and reaches the lights on Apply; Discard throws it away. Black = off, or the background if it's on.</p>
+<p class="hint">Only the lights you're controlling can be painted; the rest of the house stays as it is. Mouse wheel over the photo zooms in where you point; right-drag moves around (phone: pinch). Shift or Ctrl + click a light (or use Pick) to take its color. With "on Apply", paint shows in the preview and reaches the lights on Apply; Discard throws it away. Black = off, or the background if it's on.</p>
 </div>
 <label style="margin-top:14px">Brightness <span id="briVal"></span></label><input id="bri" type="range" min="0" max="255">
 <details class="inner" id="setFold"><summary id="setSum"></summary>
@@ -1250,12 +1251,46 @@ function positions(v,pts,n){const W=v.width,H=v.height;if(!pts.length||!n)return
   const f=seg[i]?Math.min(1,t/seg[i]):0,a=pts[i],b=pts[i+1];out.push({x:a[0]+(b[0]-a[0])*f,y:a[1]+(b[1]-a[1])*f,seg:i});}
  return out;}
 const photoCv=$('photoCv'),pctx=photoCv.getContext('2d');
+// ---- Zoom & pan on the house photo ----
+// Mouse wheel zooms at the pointer (1-8x). Drag to move while zoomed: right or middle
+// button (any time), or left button when not painting. Phone: pinch while painting.
+// Double-click (not painting) or "Reset zoom" goes back. screen = photo * z + (x, y).
+let pz={z:1,x:0,y:0},pzView=-1;
+function clampZoom(){const w=photoCv.clientWidth,h=photoCv.clientHeight;pz.z=Math.min(8,Math.max(1,pz.z));
+ pz.x=Math.min(0,Math.max(w-w*pz.z,pz.x));pz.y=Math.min(0,Math.max(h-h*pz.z,pz.y));$('zoomReset').hidden=pz.z<=1.001;}
+function zoomAt(mx,my,f){const nz=Math.min(8,Math.max(1,pz.z*f));
+ pz.x=mx-(mx-pz.x)*nz/pz.z;pz.y=my-(my-pz.y)*nz/pz.z;pz.z=nz;clampZoom();drawLive();}
+function resetZoom(){pz={z:1,x:0,y:0};clampZoom();drawLive();}
+photoCv.addEventListener('wheel',e=>{if(!layout)return;
+ if(pz.z<=1.001&&e.deltaY>0)return;   // not zoomed: scrolling down still scrolls the page
+ e.preventDefault();const rc=photoCv.getBoundingClientRect();
+ zoomAt(e.clientX-rc.left,e.clientY-rc.top,Math.exp(-e.deltaY*(e.deltaMode===1?0.05:0.0015)));},{passive:false});
+photoCv.addEventListener('dblclick',()=>{if(!painting)resetZoom();});
+photoCv.addEventListener('contextmenu',e=>{if(pz.z>1.001)e.preventDefault();});
+$('zoomReset').addEventListener('pointerdown',e=>e.stopPropagation());   // not a paint stroke
+$('zoomReset').onclick=resetZoom;
+const pzPtrs=new Map();let pzPan=null,pzPinch=null;
+// These run before the painting handlers (those are on the photo's box), and stop them for pan/pinch.
+photoCv.addEventListener('pointerdown',e=>{pzPtrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+ if(pzPtrs.size===2){if(paintDown){paintDown=false;flushStroke();}   // second finger: pinch, not paint
+  const [a,b]=[...pzPtrs.values()];pzPinch={d:Math.hypot(a.x-b.x,a.y-b.y)||1,mx:(a.x+b.x)/2,my:(a.y+b.y)/2};pzPan=null;e.stopPropagation();return;}
+ const pan=e.button===1||e.button===2||(!painting&&e.button===0&&pz.z>1.001&&e.pointerType==='mouse');
+ if(pan){pzPan={x:e.clientX,y:e.clientY};photoCv.setPointerCapture(e.pointerId);e.preventDefault();e.stopPropagation();}});
+photoCv.addEventListener('pointermove',e=>{if(!pzPtrs.has(e.pointerId))return;pzPtrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+ if(pzPinch&&pzPtrs.size>=2){const rc=photoCv.getBoundingClientRect(),[a,b]=[...pzPtrs.values()],d=Math.hypot(a.x-b.x,a.y-b.y)||1,mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
+  pz.x+=mx-pzPinch.mx;pz.y+=my-pzPinch.my;zoomAt(mx-rc.left,my-rc.top,d/pzPinch.d);
+  pzPinch={d,mx,my};e.stopPropagation();return;}
+ if(pzPan){pz.x+=e.clientX-pzPan.x;pz.y+=e.clientY-pzPan.y;pzPan={x:e.clientX,y:e.clientY};clampZoom();drawLive();e.stopPropagation();}});
+['pointerup','pointercancel'].forEach(t=>photoCv.addEventListener(t,e=>{pzPtrs.delete(e.pointerId);
+ if(pzPtrs.size<2)pzPinch=null;if(pzPan){pzPan=null;e.stopPropagation();}}));
 function drawPhoto(fi){const v=layout.views[photoView];let im=imgs[v.image];
  if(!im){im=imgs[v.image]=new Image();im.onload=()=>drawLive();im.src=v.image;}
  if(!im.complete||!im.naturalWidth)return;
  const w=$('photoBox').clientWidth,h=Math.round(w*v.height/v.width),dpr=window.devicePixelRatio||1;if(!w)return;
- if(photoCv.width!==Math.round(w*dpr)||photoCv.height!==Math.round(h*dpr)){photoCv.width=Math.round(w*dpr);photoCv.height=Math.round(h*dpr);photoCv.style.height=h+'px';}
- pctx.setTransform(dpr,0,0,dpr,0,0);pctx.globalCompositeOperation='source-over';pctx.drawImage(im,0,0,w,h);
+ if(photoCv.width!==Math.round(w*dpr)||photoCv.height!==Math.round(h*dpr)){photoCv.width=Math.round(w*dpr);photoCv.height=Math.round(h*dpr);photoCv.style.height=h+'px';clampZoom();}
+ if(pzView!==photoView){pzView=photoView;pz={z:1,x:0,y:0};clampZoom();}   // another photo: start unzoomed
+ const Z=pz.z;   // zoom: drawn in photo coordinates, dots[] keep screen positions for tapping
+ pctx.setTransform(dpr*Z,0,0,dpr*Z,dpr*pz.x,dpr*pz.y);pctx.globalCompositeOperation='source-over';pctx.fillStyle='#000';pctx.fillRect(0,0,w,h);pctx.drawImage(im,0,0,w,h);
  const set=lookSettings(layout.settings);
  if(set.night>0){pctx.fillStyle='rgba(0,0,0,'+set.night+')';pctx.fillRect(0,0,w,h);}
  const R=w*0.012*set.glow;pctx.globalCompositeOperation='lighter';
@@ -1263,9 +1298,9 @@ function drawPhoto(fi){const v=layout.views[photoView];let im=imgs[v.image];
   const hid=p.hidden||[],sp=spacingPx(pos,w,h),pset=p.look?Object.assign({},set,{style:p.look}):set;
   pos.forEach((q,i)=>{if(hid.includes(q.seg))return;   // behind something on this photo
    const c=lightRGB(fi,ls[i][0],ls[i][1]),x=q.x*w,y=q.y*h;
-   dots.push({box:'photo',o:ls[i][0],i:ls[i][1],x,y,r:Math.max(Math.min(sp*0.5,R),7)});
+   dots.push({box:'photo',o:ls[i][0],i:ls[i][1],x:x*Z+pz.x,y:y*Z+pz.y,r:Math.max(Math.min(sp*0.5,R)*Z,7)});
    // off: a faint ring, so the layout still shows with everything off (brighter while painting)
-   if(!c){pctx.globalCompositeOperation='source-over';pctx.strokeStyle=painting?'rgba(255,255,255,0.35)':'rgba(255,255,255,0.18)';pctx.lineWidth=1;
+   if(!c){pctx.globalCompositeOperation='source-over';pctx.strokeStyle=painting?'rgba(255,255,255,0.35)':'rgba(255,255,255,0.18)';pctx.lineWidth=1/Z;
      pctx.beginPath();pctx.arc(x,y,Math.max(2.5,sp*0.08),0,7);pctx.stroke();pctx.globalCompositeOperation='lighter';return;}
    drawLight(pctx,x,y,c,sp,R,pset);});});
  pctx.globalCompositeOperation='source-over';}
