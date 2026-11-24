@@ -220,9 +220,9 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <div class="chips" id="swatches"></div>
 <div class="row" style="margin-top:8px"><button class="btn" id="swatchAdd">+ Save brush color</button><button class="btn" id="swatchDel">Remove…</button></div>
 <div class="row" style="margin-top:8px">
-<button class="btn" id="paintFill">Fill all with brush</button><button class="btn danger" id="paintClear">Clear all</button><button class="btn primary" id="paintDone">Done</button>
+<button class="btn" id="paintFill">Fill with brush</button><button class="btn danger" id="paintClear">Clear</button><button class="btn primary" id="paintDone">Done</button>
 </div>
-<p class="hint">Paint is saved right away (no Apply needed). Lights showing this pattern change as you paint. Black = off, or the background if it's on.</p>
+<p class="hint">Only the lights you're controlling can be painted; the rest of the house stays as it is. Paint is saved right away (no Apply needed). Black = off, or the background if it's on.</p>
 </div>
 <label style="margin-top:14px">Brightness <span id="briVal"></span></label><input id="bri" type="range" min="0" max="255">
 <details class="inner" id="setFold"><summary id="setSum"></summary>
@@ -813,6 +813,21 @@ function lightRGB(fi,o,i){if(o>=fi.outs||i>=fi.cnt[o])return null;const k=fi.sta
 
 // ---- Painting custom patterns ----
 let painting=false,paintPattern=1,patternFrame=null,paintTool='paint',paintDown=false,strokeLights=new Set(),strokeTimer=null;
+// The lights of what's being controlled, as range text ("A1-67", a zone's ranges, a path's zones).
+function targetRangesText(){if(!st)return '';
+ const all=()=>st.outputs.map(o=>o.id+'1-'+o.count).join(',');
+ if(both()||house())return all();
+ if(zoneSel()){const z=cur();return z?z.ranges:'';}
+ if(pathSel()){const p=cur();return p?p.steps.map(s=>{const z=zoneBySlot(s.zone);return z?z.ranges:'';}).filter(Boolean).join(','):'';}
+ const o=st.outputs[sel];return o?o.id+'1-'+o.count:'';}
+// "o:i" keys of those lights: only these can be painted.
+function paintTargetSet(){return new Set(parseRanges(targetRangesText()).map(l=>l[0]+':'+l[1]));}
+// The live (or preview) frame with the painting shown on the controlled lights only.
+function paintComposite(){const base=frame||patternFrame,out=new Uint8Array(base),fb=frameInfo(base),fp=frameInfo(patternFrame);
+ paintTargetSet().forEach(key=>{const [o,i]=key.split(':').map(Number);
+  if(o>=fb.outs||o>=fp.outs||i>=fb.cnt[o]||i>=fp.cnt[o])return;
+  const a=fb.start[o]+i*3,b=fp.start[o]+i*3;out[a]=patternFrame[b];out[a+1]=patternFrame[b+1];out[a+2]=patternFrame[b+2];});
+ return out;}
 async function startPainting(n){paintPattern=n;
  try{patternFrame=new Uint8Array(await (await fetch('/api/custom?pattern='+n,{cache:'no-store'})).arrayBuffer());}
  catch(e){$('status').textContent='Could not load the pattern';return;}
@@ -829,7 +844,7 @@ function flushStroke(){clearTimeout(strokeTimer);if(!strokeLights.size)return;
 function paintAt(box,e){if(!painting||!patternFrame)return;
  const el=box==='photo'?$('photoCv'):stripCv;if(!el)return;const rc=el.getBoundingClientRect(),x=e.clientX-rc.left,y=e.clientY-rc.top;
  let best=null,bd=1e9;dots.forEach(d=>{if(d.box!==box)return;const dd=Math.hypot(d.x-x,d.y-y);if(dd<=d.r*1.6&&dd<bd){bd=dd;best=d;}});
- if(!best)return;
+ if(!best||!paintTargetSet().has(best.o+':'+best.i))return;   // only the controlled lights
  const fi=frameInfo(patternFrame),k=fi.start[best.o]+best.i*3,hex=brushHex();
  patternFrame[k]=parseInt(hex.slice(0,2),16);patternFrame[k+1]=parseInt(hex.slice(2,4),16);patternFrame[k+2]=parseInt(hex.slice(4,6),16);
  strokeLights.add((best.o===0?'A':'B')+(best.i+1));drawLive();
@@ -844,8 +859,10 @@ $('paintDone').onclick=stopPainting;
 $('paintTool').querySelectorAll('button').forEach(b=>b.onclick=()=>{flushStroke();paintTool=b.dataset.tool;
  $('paintTool').querySelectorAll('button').forEach(x=>x.classList.toggle('sel',x===b));});
 $('brush').oninput=()=>{flushStroke();if(paintTool==='erase'){paintTool='paint';$('paintTool').querySelectorAll('button').forEach(x=>x.classList.toggle('sel',x.dataset.tool==='paint'));}};
-async function paintAll(clear){if(!confirm(clear?'Clear every light in pattern '+paintPattern+'?':'Fill every light in pattern '+paintPattern+' with the brush color?'))return;
- flushStroke();await post('/api/custom',clear?{pattern:paintPattern,action:'clear'}:{pattern:paintPattern,action:'fill',color:$('brush').value.slice(1)});
+// Fill / Clear: only the lights of what's being controlled.
+async function paintAll(clear){const lights=targetRangesText();if(!lights)return;
+ if(!confirm((clear?'Clear the lights of ':'Fill the lights of ')+curName()+(clear?'':' with the brush color')+' in "'+paintNames[paintPattern-1]+'"?'))return;
+ flushStroke();await post('/api/custom',{pattern:paintPattern,lights,color:clear?'000000':$('brush').value.slice(1)});
  startPainting(paintPattern);}
 $('paintFill').onclick=()=>paintAll(false);$('paintClear').onclick=()=>paintAll(true);
 
@@ -951,8 +968,8 @@ function drawLive(){const hasPhoto=!!(layout&&layout.views&&layout.views.length)
  $('photoBox').hidden=!usePhoto;$('stripBox').hidden=usePhoto;$('photoViews').hidden=!usePhoto;
  $('liveHint').textContent=liveMode==='photo'&&!hasPhoto?'No house photos yet: add them in the House tab. Showing the strip for now.':
   usePhoto?'':'As seen from the street. Screen brightness is approximate.';
- // while painting, the live view shows the pattern being painted instead of the lights
- const src=painting&&patternFrame?patternFrame:frame;
+ // while painting: the controlled lights show the painting, everything else stays live
+ const src=painting&&patternFrame?paintComposite():frame;
  $('paintBadge').hidden=!painting;$('paintBadge').textContent='PAINTING PATTERN '+paintPattern;
  if(!src)return;curBuf=src;dots=[];const fi=frameInfo(src);
  if(usePhoto)drawPhoto(fi);else drawStrip(fi);}
