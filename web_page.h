@@ -263,6 +263,12 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <p class="err" id="cntErr" hidden></p>
 </div></details>
 
+<details class="fold" data-fold="colors"><summary>Saved colors <small id="savedSum"></small></summary><div class="body">
+<p class="hint" style="margin:0 0 10px">These show up as suggestions in every color picker (Chrome/Edge) and as swatches when painting. Up to 12.</p>
+<div class="chips" id="savedChips"></div>
+<div class="row" style="margin-top:10px;align-items:center"><input type="color" id="savedNew" value="#ff8c3c" style="height:44px"><button class="btn primary" id="savedAdd">Add color</button></div>
+</div></details>
+
 <details class="fold" data-fold="find"><summary>Find a light</summary><div class="body">
 <p class="hint" style="margin:0 0 10px">Lights only the chosen light (green) so you can see where it is. Turns itself off after 5 minutes.</p>
 <div class="seg" id="findStrand"><button data-s="A">Strand A (left)</button><button data-s="B">Strand B (right)</button></div>
@@ -474,7 +480,9 @@ $('power').onclick=()=>send({on:(both()?anyStrandOn():cur().on)?0:1});
 // All lights off, or (when everything is off) back on as it was before.
 $('allOff').onclick=async()=>{const on=onNames(st).length>0;
  const j=await post(on?'/api/all-off':'/api/all-on',{});if(j.error)$('status').textContent=j.error;else show(j);};
-$('color').oninput=e=>sendSoon({color:e.target.value.slice(1)});
+// oninput while dragging; onchange too, because some browsers only report a picked
+// suggestion swatch when the picker closes
+$('color').oninput=$('color').onchange=e=>sendSoon({color:e.target.value.slice(1)});
 $('bri').oninput=e=>{$('briVal').textContent=pct(e.target.value);sendSoon({brightness:e.target.value});};
 $('modeSel').onchange=e=>send({mode:e.target.value});
 $('fsec').oninput=e=>{$('fsecVal').textContent=e.target.value+' s';sendSoon({fadeSeconds:e.target.value});};
@@ -483,7 +491,7 @@ $('spd').oninput=e=>{const m=modeById(cur().mode),v=+e.target.value;$('spdVal').
 $('size').oninput=e=>{const m=modeById(cur().mode),v=+e.target.value;$('sizeVal').textContent=m.sizeFmt?m.sizeFmt(v):v+(v===1?' light':' lights');sendSoon({size:v});};
 $('dir').querySelectorAll('button').forEach(b=>b.onclick=()=>send({reverse:b.dataset.rev}));
 $('bg').querySelectorAll('button').forEach(b=>b.onclick=()=>send({bgOn:b.dataset.bg}));
-$('bgColor').oninput=e=>sendSoon({bgColor:e.target.value.slice(1)});
+$('bgColor').oninput=$('bgColor').onchange=e=>sendSoon({bgColor:e.target.value.slice(1)});
 // remember whether the mode fold-outs are open
 // remember whether the effect settings fold-out is open
 $('setFold').open=store.get('eaveSetFold',false);$('setFold').addEventListener('toggle',()=>store.set('eaveSetFold',$('setFold').open));
@@ -539,7 +547,7 @@ function renderLook(o){const m=modeById(o.mode);
  const row=$('colorRow');
  while(row.children.length>list.length)row.removeChild(row.lastChild);
  while(row.children.length<list.length){const k=row.children.length,inp=document.createElement('input');inp.type='color';inp.setAttribute('list','savedColors');
-  inp.oninput=e=>sendSoon({['color'+(k+1)]:e.target.value.slice(1)});row.appendChild(inp);}
+  inp.oninput=inp.onchange=e=>sendSoon({['color'+(k+1)]:e.target.value.slice(1)});row.appendChild(inp);}
  list.forEach((c,k)=>{if(document.activeElement!==row.children[k])row.children[k].value=c.toLowerCase();});
  $('colorCountRow').hidden=!multi;
  $('colorLess').disabled=list.length<=(m.min||1);$('colorMore').disabled=list.length>=5;
@@ -850,7 +858,13 @@ function loadPaintMeta(){return fetch('/api/paint-meta').then(r=>r.json()).then(
 function updateSavedColorList(){let dl=$('savedColors');
  if(!dl){dl=document.createElement('datalist');dl.id='savedColors';document.body.appendChild(dl);}
  dl.innerHTML=swatchList.map(c=>'<option value="'+c.toLowerCase()+'">').join('');}
-function renderSwatches(){updateSavedColorList();const cur=$('brush').value.toLowerCase();
+// Setup > Saved colors: the same list, with × to remove and a picker to add.
+function renderSavedSetup(){$('savedSum').textContent=swatchList.length+' of 12';$('savedAdd').disabled=swatchList.length>=12;
+ $('savedChips').innerHTML=swatchList.map((c,k)=>'<span class="chip"><span class="dot" style="background:'+c+';width:18px;height:18px"></span>'+c+
+  '<span class="x" data-sx="'+k+'" title="Remove">×</span></span>').join('');
+ $('savedChips').querySelectorAll('[data-sx]').forEach(x=>x.onclick=()=>saveSwatches(swatchList.filter((_,i)=>i!==+x.dataset.sx)));}
+$('savedAdd').onclick=()=>{const c=$('savedNew').value.toUpperCase();if(swatchList.map(x=>x.toUpperCase()).includes(c))return;saveSwatches(swatchList.concat([c]));};
+function renderSwatches(){updateSavedColorList();renderSavedSetup();const cur=$('brush').value.toLowerCase();
  $('swatches').innerHTML=swatchList.map((c,k)=>'<button class="swatch'+(swatchDelMode?' del':(c.toLowerCase()===cur&&paintTool==='paint'?' sel':''))+'" data-k="'+k+'" style="background:'+c+'" title="'+(swatchDelMode?'Remove ':'')+c+'"></button>').join('');
  $('swatchMode').textContent=swatchDelMode?'· tap a color to remove it':'· tap to paint with it';
  $('swatchDel').textContent=swatchDelMode?'Done removing':'Remove…';$('swatchAdd').disabled=swatchList.length>=12;
@@ -864,7 +878,7 @@ $('swatchDel').onclick=()=>{swatchDelMode=!swatchDelMode;renderSwatches();};
 $('patSel').onchange=e=>{const n=+e.target.value;send({size:n});if(painting)startPainting(n);};
 $('patRename').onclick=async()=>{const n=+$('patSel').value,name=prompt('Name for painting '+n+':',paintNames[n-1]);
  if(name)showPaintMeta(await post('/api/paint-meta',{action:'rename',pattern:n,name}));};
-$('brush').addEventListener('input',renderSwatches);
+$('brush').addEventListener('input',renderSwatches);$('brush').addEventListener('change',renderSwatches);
 let liveMode=store.get('eaveLiveMode','photo'),photoView=store.get('eavePhotoView',0),frames=0,fpsT=performance.now();
 $('liveMode').querySelectorAll('button').forEach(b=>b.onclick=()=>{liveMode=b.dataset.lm;store.set('eaveLiveMode',liveMode);drawLive();});
 
