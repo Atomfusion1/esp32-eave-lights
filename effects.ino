@@ -48,6 +48,18 @@ int lineLength(int ch) {
 // Where gap positions of a path draw to: a light that is never shown.
 CRGB gapSink;
 
+// Which physical light is at position i of channel ch's line.
+// Returns false for a path gap (no real light there).
+bool linePoint(int ch, int i, int& output, int& index) {
+  if (ch < NUM_OUTPUTS) { output = ch; index = i; return true; }
+  const PathPoint& p = (ch == CH_HOUSE) ? housePath[i]
+                     : (ch < CH_PATH0)  ? zonePoints[ch - CH_ZONE0][i]
+                                        : pathPoints[ch - CH_PATH0][i];
+  if (p.output == VIRTUAL_OUTPUT) return false;
+  output = p.output; index = p.index;
+  return true;
+}
+
 // The physical light at position i of channel ch's line.
 CRGB& lineLight(int ch, int i) {
   if (ch < NUM_OUTPUTS) return frame[ch][i];
@@ -189,6 +201,7 @@ void drawChannel(int ch, uint32_t dtMs) {
     case MODE_FIRE:         drawFire(ch);               break;
     case MODE_LIGHTNING:    drawLightning(ch);          break;
     case MODE_STROBE:       drawStrobe(ch);             break;
+    case MODE_CUSTOM:       drawCustom(ch);             break;   // patterns.ino
   }
 }
 

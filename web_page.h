@@ -118,7 +118,7 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <!-- ===== Live view (moved into Home or Lights) ===== -->
 <div class="card" id="liveCard">
 <div class="liveHead">
-<label>Live <span id="liveInfo"></span> <span class="pill on" id="pvBadge" hidden>PREVIEW · not applied yet</span></label>
+<label>Live <span id="liveInfo"></span> <span class="pill on" id="pvBadge" hidden>PREVIEW · not applied yet</span><span class="pill on" id="paintBadge" hidden></span></label>
 <div class="seg small" id="photoViews"></div>
 <div class="seg small" id="liveMode"><button data-lm="photo">House</button><button data-lm="strip">Strip</button></div>
 </div>
@@ -202,6 +202,22 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 </div>
 </div>
 <p class="hint" id="noColorHint" hidden>This effect makes its own colors.</p>
+<div id="patBox" hidden style="margin-top:14px">
+<label>Pattern</label>
+<div class="seg small" id="patSeg"></div>
+<button class="btn primary" id="paintBtn" style="margin-top:10px;width:100%">✎ Paint pattern</button>
+</div>
+<div id="paintTools" class="sub" hidden>
+<label>Painting pattern <b id="paintNum"></b>: tap or drag over the lights in the live view</label>
+<div class="row" style="align-items:center">
+<input type="color" id="brush" value="#ff0000" style="height:44px">
+<div class="seg" id="paintTool" style="flex:2"><button data-tool="paint" class="sel">Paint</button><button data-tool="erase">Erase</button></div>
+</div>
+<div class="row" style="margin-top:8px">
+<button class="btn" id="paintFill">Fill all with brush</button><button class="btn danger" id="paintClear">Clear all</button><button class="btn primary" id="paintDone">Done</button>
+</div>
+<p class="hint">Paint is saved right away (no Apply needed). Lights showing this pattern change as you paint. Black = off, or the background if it's on.</p>
+</div>
 <label style="margin-top:14px">Brightness <span id="briVal"></span></label><input id="bri" type="range" min="0" max="255">
 <details class="inner" id="setFold"><summary id="setSum"></summary>
 <div id="spdBox"><label style="margin-top:10px"><span id="spdName"></span>: <span id="spdVal"></span></label><input id="spd" type="range" min="1" max="100"></div>
@@ -493,6 +509,7 @@ const MODES=[
  {g:'Sparkle',id:'fire',name:'Fire / candle',colors:1,spd:'Flicker speed',fmt:v=>v,hint:'Warm candle-like flicker. Orange or amber works best.'},
  {g:'Sparkle',id:'lightning',name:'Lightning',colors:1,spd:'How often',fmt:v=>'about every '+Math.round(60/v)+' s',bg:1,hint:'Occasional flashes and flickers; dark (or background) in between.'},
  {g:'Sparkle',id:'strobe',name:'Strobe / flash',colors:1,spd:'Flash rate',fmt:v=>(v/10).toFixed(1)+' per second',bg:1,hint:'Fast on/off flashing. Use sparingly: it can bother neighbors and drivers.'},
+ {g:'Custom',id:'custom',name:'Custom (paint each light)',colors:0,pattern:1,bg:1,noColorText:'Colors come from the painted pattern.',hint:'Shows one of 8 patterns you paint light by light. Press ✎ Paint pattern to edit it.'},
 ];
 const modeById=id=>MODES.find(m=>m.id===id)||MODES[0];
 (function buildModeSelect(){const groups=[...new Set(MODES.map(m=>m.g))];
@@ -504,6 +521,14 @@ function renderLook(o){const m=modeById(o.mode);
  $('modeSel').value=m.id;$('modeHint').textContent=m.hint||'';
  // colors
  $('colorBox').hidden=!m.colors;$('noColorHint').hidden=!!m.colors;
+ $('noColorHint').textContent=m.noColorText||'This effect makes its own colors.';
+ // custom: pattern number lives in `size` (1-8)
+ $('patBox').hidden=!m.pattern;
+ if(m.pattern){const n=Math.min(8,Math.max(1,o.size));
+  $('patSeg').innerHTML=[1,2,3,4,5,6,7,8].map(k=>'<button data-pat="'+k+'" class="'+(k===n?'sel':'')+'">'+k+'</button>').join('');
+  $('patSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{send({size:+b.dataset.pat});if(painting)startPainting(+b.dataset.pat);});
+  $('paintBtn').textContent=painting?'Painting pattern '+paintPattern+'…':'✎ Paint pattern '+n;}
+ else if(painting)stopPainting();
  const multi=m.colors==='multi',list=multi?colorsOf(o):[o.color];
  $('colorLabel').textContent=multi?(m.colorNames?m.colorNames.join(' / ')+' colors':'Colors (in order)'):'Color';
  const row=$('colorRow');
@@ -767,8 +792,49 @@ $('fwGo').onclick=()=>{const f=$('fwFile').files[0];if(!f){$('fwStatus').textCon
 const GAM=new Uint8Array(256).map((_,v)=>Math.round(255*Math.pow(v/255,1/2.2)));
 function frameInfo(b){const outs=b[0],cnt=[],start=[];let off=1+outs*2;
  for(let o=0;o<outs;o++){cnt.push(b[1+o*2]|(b[2+o*2]<<8));start.push(off);off+=cnt[o]*3;}return {outs,cnt,start};}
-function lightRGB(fi,o,i){if(o>=fi.outs||i>=fi.cnt[o])return null;const k=fi.start[o]+i*3,r=frame[k],g=frame[k+1],b=frame[k+2];
+// curBuf = the frame being drawn (live lights, or the pattern while painting).
+// dots = where each light was drawn this time, for tapping/painting on the live view.
+let curBuf=null,dots=[];
+function lightRGB(fi,o,i){if(o>=fi.outs||i>=fi.cnt[o])return null;const k=fi.start[o]+i*3,r=curBuf[k],g=curBuf[k+1],b=curBuf[k+2];
  return (r|g|b)?[GAM[r],GAM[g],GAM[b]]:null;}
+
+// ---- Painting custom patterns ----
+let painting=false,paintPattern=1,patternFrame=null,paintTool='paint',paintDown=false,strokeLights=new Set(),strokeTimer=null;
+async function startPainting(n){paintPattern=n;
+ try{patternFrame=new Uint8Array(await (await fetch('/api/custom?pattern='+n,{cache:'no-store'})).arrayBuffer());}
+ catch(e){$('status').textContent='Could not load the pattern';return;}
+ painting=true;$('paintTools').hidden=false;$('paintNum').textContent=n;
+ $('photoCv').style.touchAction='none';$('stripBox').style.touchAction='none';
+ if(st)renderLook(cur());drawLive();}
+function stopPainting(){flushStroke();painting=false;patternFrame=null;$('paintTools').hidden=true;
+ $('photoCv').style.touchAction='';$('stripBox').style.touchAction='';if(st)renderLook(cur());drawLive();}
+const brushHex=()=>paintTool==='erase'?'000000':$('brush').value.slice(1);
+// Sends the lights painted since the last send (batched while dragging).
+function flushStroke(){clearTimeout(strokeTimer);if(!strokeLights.size)return;
+ const lights=[...strokeLights].join(',');strokeLights.clear();
+ post('/api/custom',{pattern:paintPattern,lights,color:brushHex()}).catch(()=>{$('status').textContent='Paint not saved (not connected)';});}
+function paintAt(box,e){if(!painting||!patternFrame)return;
+ const el=box==='photo'?$('photoCv'):stripCv;if(!el)return;const rc=el.getBoundingClientRect(),x=e.clientX-rc.left,y=e.clientY-rc.top;
+ let best=null,bd=1e9;dots.forEach(d=>{if(d.box!==box)return;const dd=Math.hypot(d.x-x,d.y-y);if(dd<=d.r*1.6&&dd<bd){bd=dd;best=d;}});
+ if(!best)return;
+ const fi=frameInfo(patternFrame),k=fi.start[best.o]+best.i*3,hex=brushHex();
+ patternFrame[k]=parseInt(hex.slice(0,2),16);patternFrame[k+1]=parseInt(hex.slice(2,4),16);patternFrame[k+2]=parseInt(hex.slice(4,6),16);
+ strokeLights.add((best.o===0?'A':'B')+(best.i+1));drawLive();
+ clearTimeout(strokeTimer);strokeTimer=setTimeout(flushStroke,150);}
+[['photo',$('photoBox')],['strip',$('stripBox')]].forEach(([box,el])=>{
+ el.addEventListener('pointerdown',e=>{if(!painting)return;paintDown=true;el.setPointerCapture(e.pointerId);paintAt(box,e);e.preventDefault();});
+ el.addEventListener('pointermove',e=>{if(painting&&paintDown)paintAt(box,e);});
+ el.addEventListener('pointerup',()=>{if(paintDown){paintDown=false;flushStroke();}});
+ el.addEventListener('pointercancel',()=>{paintDown=false;flushStroke();});});
+$('paintBtn').onclick=()=>{if(painting)stopPainting();else startPainting(Math.min(8,Math.max(1,cur().size)));};
+$('paintDone').onclick=stopPainting;
+$('paintTool').querySelectorAll('button').forEach(b=>b.onclick=()=>{flushStroke();paintTool=b.dataset.tool;
+ $('paintTool').querySelectorAll('button').forEach(x=>x.classList.toggle('sel',x===b));});
+$('brush').oninput=()=>{flushStroke();if(paintTool==='erase'){paintTool='paint';$('paintTool').querySelectorAll('button').forEach(x=>x.classList.toggle('sel',x.dataset.tool==='paint'));}};
+async function paintAll(clear){if(!confirm(clear?'Clear every light in pattern '+paintPattern+'?':'Fill every light in pattern '+paintPattern+' with the brush color?'))return;
+ flushStroke();await post('/api/custom',clear?{pattern:paintPattern,action:'clear'}:{pattern:paintPattern,action:'fill',color:$('brush').value.slice(1)});
+ startPainting(paintPattern);}
+$('paintFill').onclick=()=>paintAll(false);$('paintClear').onclick=()=>paintAll(true);
 let liveMode=store.get('eaveLiveMode','photo'),photoView=store.get('eavePhotoView',0),frames=0,fpsT=performance.now();
 $('liveMode').querySelectorAll('button').forEach(b=>b.onclick=()=>{liveMode=b.dataset.lm;store.set('eaveLiveMode',liveMode);drawLive();});
 
@@ -785,7 +851,8 @@ function drawStrip(fi){const cA=fi.cnt[0],cB=fi.outs>1?fi.cnt[1]:0,key=cA+'/'+cB
  g.shadowBlur=0;g.fillStyle='#55554f';g.fillRect(step*(cA+GAP/2)-1,h*0.2,2,h*0.6);
  for(let o=0;o<Math.min(fi.outs,2);o++)for(let i=0;i<fi.cnt[o];i++){const c=lightRGB(fi,o,i);
   g.fillStyle=c?'rgb('+c.join(',')+')':'#2a2a27';g.shadowBlur=c?r*3:0;g.shadowColor=g.fillStyle;
-  const slot=o===0?cA-1-i:cA+GAP+i;g.beginPath();g.arc(step*(slot+0.5),h/2,r,0,Math.PI*2);g.fill();}}
+  const slot=o===0?cA-1-i:cA+GAP+i,x=step*(slot+0.5);g.beginPath();g.arc(x,h/2,r,0,Math.PI*2);g.fill();
+  dots.push({box:'strip',o,i,x,y:h/2,r:Math.max(step*0.6,4)});}}
 
 // --- house photo: same placement maths as the House editor ---
 const imgs={};
@@ -820,7 +887,11 @@ function drawPhoto(fi){const v=layout.views[photoView];let im=imgs[v.image];
  if(set.night>0){pctx.fillStyle='rgba(0,0,0,'+set.night+')';pctx.fillRect(0,0,w,h);}
  const R=w*0.012*set.glow;pctx.globalCompositeOperation='lighter';
  (v.placements||[]).forEach(p=>{const all=itemLights(p.item),ls=all.slice(Math.max(0,p.from-1),Math.min(all.length,p.to)),pos=positions(v,p.points||[],ls.length);
-  pos.forEach((q,i)=>{const c=lightRGB(fi,ls[i][0],ls[i][1]);if(!c)return;const x=q.x*w,y=q.y*h,rgb=c.join(',');
+  pos.forEach((q,i)=>{const c=lightRGB(fi,ls[i][0],ls[i][1]),x=q.x*w,y=q.y*h;
+   dots.push({box:'photo',o:ls[i][0],i:ls[i][1],x,y,r:Math.max(R*0.7,7)});
+   if(!c){if(painting){pctx.globalCompositeOperation='source-over';pctx.strokeStyle='rgba(255,255,255,0.35)';pctx.lineWidth=1;
+     pctx.beginPath();pctx.arc(x,y,Math.max(2.5,R*0.25),0,7);pctx.stroke();pctx.globalCompositeOperation='lighter';}return;}
+   const rgb=c.join(',');
    let g=pctx.createRadialGradient(x,y,0,x,y,R*4);g.addColorStop(0,'rgba('+rgb+',0.22)');g.addColorStop(1,'rgba('+rgb+',0)');
    pctx.fillStyle=g;pctx.beginPath();pctx.arc(x,y,R*4,0,7);pctx.fill();
    g=pctx.createRadialGradient(x,y,0,x,y,R);g.addColorStop(0,'rgba('+rgb+',0.95)');g.addColorStop(0.35,'rgba('+rgb+',0.45)');g.addColorStop(1,'rgba('+rgb+',0)');
@@ -833,7 +904,10 @@ function drawLive(){const hasPhoto=!!(layout&&layout.views&&layout.views.length)
  $('photoBox').hidden=!usePhoto;$('stripBox').hidden=usePhoto;$('photoViews').hidden=!usePhoto;
  $('liveHint').textContent=liveMode==='photo'&&!hasPhoto?'No house photos yet: add them in the House tab. Showing the strip for now.':
   usePhoto?'':'As seen from the street. Screen brightness is approximate.';
- if(!frame)return;const fi=frameInfo(frame);
+ // while painting, the live view shows the pattern being painted instead of the lights
+ const src=painting&&patternFrame?patternFrame:frame;
+ $('paintBadge').hidden=!painting;$('paintBadge').textContent='PAINTING PATTERN '+paintPattern;
+ if(!src)return;curBuf=src;dots=[];const fi=frameInfo(src);
  if(usePhoto)drawPhoto(fi);else drawStrip(fi);}
 window.addEventListener('resize',()=>drawLive());
 

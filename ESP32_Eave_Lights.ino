@@ -15,6 +15,7 @@
 //   locate.ino          "Find a light": lights chosen lights only, auto-off
 //   ota.ino             wireless firmware updates (Arduino IDE network port + web upload)
 //   paths.ino           Whole house path, and paths made from zones (/paths.bin)
+//   patterns.ino        custom painted patterns (a color per light), /patterns.bin
 //   presets.ino         saved looks: named effect settings, stored in /presets.bin
 //   scenes.ino          scenes: whole-house snapshots of every channel, /scenes.bin
 //   schedule.ino        playlists of scenes with times, yearly date ranges, internet clock
@@ -51,7 +52,7 @@
 #define OTA_PASSWORD AP_PASSWORD
 #endif
 
-#define FW_VERSION "0.17.0"
+#define FW_VERSION "0.18.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
@@ -104,8 +105,15 @@ enum Mode : uint8_t {
   MODE_FIRE         = 18,  // candle-like flicker in color 1
   MODE_LIGHTNING    = 19,  // occasional flashes in color 1, dark (or background) between
   MODE_STROBE       = 20,  // on/off flashing in color 1
+  MODE_CUSTOM       = 21,  // each light painted by hand: custom pattern number `size` (1-8)
 };
-#define MODE_COUNT 21
+#define MODE_COUNT 22
+
+// ---------- Custom patterns ----------
+// A color per physical light, painted on the page; a channel in MODE_CUSTOM shows
+// pattern number `size`. Black = off (or the background). Saved in /patterns.bin.
+#define MAX_PATTERNS 8
+CRGB patterns[MAX_PATTERNS][NUM_OUTPUTS][MAX_LEDS];
 
 #define MAX_COLORS 5   // colors for multi-color effects: color + up to 4 extra
 
@@ -362,6 +370,7 @@ void setup() {
   loadPresets();
   loadScenes();
   loadPrograms();
+  loadPatterns();
   startWifi();
   startWeb();
   startOta();
@@ -375,4 +384,5 @@ void loop() {
   handleSchedule();
   renderFrame();
   handleStateSave();
+  handlePatternSave();
 }

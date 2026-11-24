@@ -85,6 +85,8 @@ ESP32_Eave_Lights/              folder name must equal the main sketch name
   led_output.ino                strand setup, power caps, showFrame()
   locate.ino                    Find a light: show only chosen ranges, 5-min auto-off
   ota.ino                       wireless updates: ArduinoOTA (IDE network port) + web .bin upload
+  patterns.ino                  custom painted patterns (8 × a color per physical light),
+                                MODE_CUSTOM shows pattern `size`; /api/custom; /patterns.bin
   paths.ino                     Whole house path (B65→B1, A1→A65) and paths made from
                                 zones (steps: zone, reverse, gap) in /paths.bin
   presets.ino                   saved looks (name + LightState) in /presets.bin

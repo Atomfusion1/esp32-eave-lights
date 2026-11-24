@@ -38,6 +38,8 @@
 //                       action=delete id=N. Returns the state.
 //   POST /api/scenes    action=save name=Xmas | action=apply id=N | action=delete id=N
 //   GET/POST /api/programs   playlists & calendar (see handlePrograms / schedule.ino)
+//   GET/POST /api/custom     custom painted patterns (see patterns.ino)
+//   POST /api/preview        preview of unapplied changes (see preview.ino)
 //   GET  /api/files, /fs/<path>, POST /api/restore-*   backup and restore (backup.ino)
 //   GET  /api/presets   {"presets":[{"id","name","mode","color","bgOn","bgColor"}],
 //                        "scenes":[{"id","name","on","colors"}]}
@@ -51,7 +53,8 @@
 const char* MODE_NAMES[MODE_COUNT] = {
   "solid", "fade", "test", "chase", "comet",
   "rainbow", "rainbowcycle", "wipe", "gradient", "stripes", "alternate", "colorcycle",
-  "twinkle", "bounce", "center", "meteor", "running", "sparkle", "fire", "lightning", "strobe"
+  "twinkle", "bounce", "center", "meteor", "running", "sparkle", "fire", "lightning", "strobe",
+  "custom"
 };
 
 // "colorCount":N,"colors":["#RRGGBB",x4] (colors 2-5), without braces.
@@ -565,6 +568,8 @@ void startWeb() {
   addBackupRoutes(); // backup / restore (backup.ino)
   server.on("/api/scenes", HTTP_POST, handleScenes);
   server.on("/api/preview", HTTP_POST, handlePreview);
+  server.on("/api/custom", HTTP_GET, handleGetCustom);
+  server.on("/api/custom", HTTP_POST, handlePostCustom);
   server.on("/api/programs", HTTP_GET, handlePrograms);
   server.on("/api/programs", HTTP_POST, handlePrograms);
   server.onNotFound([]() { server.send(404, "text/plain", "Not found"); });
