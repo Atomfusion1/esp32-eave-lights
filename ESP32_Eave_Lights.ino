@@ -16,6 +16,7 @@
 //   ota.ino             wireless firmware updates (Arduino IDE network port + web upload)
 //   paths.ino           Whole house path, and paths made from zones (/paths.bin)
 //   patterns.ino        custom painted patterns (a color per light), /patterns.bin
+//   animations.ino      animations: looping steps that move/fade paintings or colors, /anims.bin
 //   presets.ino         saved looks: named effect settings, stored in /presets.bin
 //   scenes.ino          scenes: whole-house snapshots of every channel, /scenes.bin
 //   schedule.ino        playlists of scenes with times, yearly date ranges, internet clock
@@ -52,7 +53,7 @@
 #define OTA_PASSWORD AP_PASSWORD
 #endif
 
-#define FW_VERSION "0.21.0"
+#define FW_VERSION "0.22.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
@@ -106,8 +107,9 @@ enum Mode : uint8_t {
   MODE_LIGHTNING    = 19,  // occasional flashes in color 1, dark (or background) between
   MODE_STROBE       = 20,  // on/off flashing in color 1
   MODE_CUSTOM       = 21,  // each light painted by hand: custom pattern number `size` (1-8)
+  MODE_ANIM         = 22,  // animation number `size` (1-8): steps that move / fade frames
 };
-#define MODE_COUNT 22
+#define MODE_COUNT 23
 
 // ---------- Custom patterns ----------
 // A color per physical light, painted on the page; a channel in MODE_CUSTOM shows
@@ -244,6 +246,35 @@ const LightState ZONE_DEFAULT_STATE =
 // A new zone path starts as an orange comet, off.
 const LightState PATH_DEFAULT_STATE =
   { false, CRGB(255, 140, 40), 128, MODE_COMET, 5, 64, 20, 8, false, false, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS };
+
+// ---------- Animations ----------
+// A looping list of steps applied to a "frame": the channel's colors as bands, or a
+// painting. Steps move the frame along the line (wrapping around), fade or switch to
+// another frame, or hold. A channel in MODE_ANIM plays animation number `size`.
+// Saved in /anims.bin (animations.ino).
+#define MAX_ANIMS       8
+#define MAX_ANIM_STEPS  16
+#define ANIM_MAX_MOVE   60      // lights per move step, either way
+#define ANIM_MAX_MS     60000   // per step
+enum AnimKind : uint8_t { ANIM_HOLD = 0, ANIM_MOVE = 1, ANIM_FADE = 2, ANIM_CUT = 3 };
+struct AnimStep {
+  uint8_t  kind;      // AnimKind
+  int8_t   lights;    // move: lights to move, + = along the line, - = back
+  uint8_t  frame;     // fade/cut: 0 = colors, 1-8 = painting
+  uint8_t  steady;    // move: 1 = constant speed, 0 = eased (slow start and stop)
+  uint16_t ms;        // how long the step takes (cut: how long to hold after switching)
+};
+struct AnimDef {
+  char     name[NAME_LEN];
+  uint8_t  startFrame;   // frame at the start of each loop: 0 = colors, 1-8 = painting
+  uint8_t  bandWidth;    // colors frame: lights per color band
+  uint8_t  stepCount;
+  AnimStep steps[MAX_ANIM_STEPS];
+};
+AnimDef anims[MAX_ANIMS];
+
+// Milliseconds since each channel's effect started (timed effects: twinkle, animations...).
+uint32_t effectMs[NUM_CHANNELS] = { 0 };
 
 // ---------- Saved looks (presets) ----------
 // A named copy of a channel's settings (everything except on/off), e.g. "Xmas chase".
@@ -386,6 +417,7 @@ void setup() {
   loadScenes();
   loadPrograms();
   loadPatterns();
+  loadAnims();
   startWifi();
   startWeb();
   startOta();

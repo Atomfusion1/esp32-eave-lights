@@ -82,6 +82,9 @@ ESP32_Eave_Lights/              folder name must equal the main sketch name
                                 defines, includes, all shared types (LightState, PathPoint,
                                 ZoneDef, Preset, FileHeader), states[] per channel, globals,
                                 setup(), loop()
+  animations.ino                MODE_ANIM: animation `size` (1-8) = looping steps (hold, move
+                                ±lights with glide + wrap, fade/switch to colors or a painting);
+                                /api/anims, /anims.bin (AnimDef/AnimStep in the main tab)
   effects_more.ino              the 16 extra effects (rainbow, gradient, stripes, twinkle,
                                 fire, lightning…); what speed/size mean per effect is
                                 listed at the top. Must match the MODES table in web_page.h
@@ -143,7 +146,7 @@ How the IDE handles tabs:
 - **Exception: web page text goes in `.h` files** (`web_page.h`, `editor_page.h`). The IDE scans `.ino` tabs to generate prototypes and mistakes JavaScript `function name(){` lines inside a raw string for C++, which breaks the build with "'function' does not name a type".
 - Save `.ino` files as UTF-8 **without** a byte-order mark. PowerShell 5.1 `Set-Content -Encoding utf8` adds one and the compiler rejects it.
 - **Adding an effect:** add it to the end of `enum Mode` (never renumber, the numbers are saved), to `MODE_NAMES` in `web_api.ino`, the `drawChannel()` switch, and the `MODES` table in `web_page.h` (which colors and settings it uses, and their labels). Use `hash32()` instead of `random()` so effects stay repeatable.
-- `.bin` storage files have a `FileHeader` with the record size. Changing `LightState`, `ZoneDef`, `PathDef`/`PathStep`, `Preset`, `Scene`, `Program`, `PaintMeta`, the pattern array, or `MAX_ZONES`/`MAX_PATHS` (which change `Scene`'s size) makes old files unreadable, and that data starts empty. `LightTimer` is stored raw in Preferences, so changing it resets the timer. Converters exist for `LightStateV1` (pre-0.15: zones v2, paths v1, presets v1, scenes v1) and `ZoneDefV1`. Warn the user before changing those structs, and suggest Setup → Download backup first. Better still, write a converter for the old version, as `zones.ino` does for `zones.bin` v1. While a restore runs, `savesBlocked` stops all saving so uploaded files aren't overwritten from memory.
+- `.bin` storage files have a `FileHeader` with the record size. Changing `LightState`, `ZoneDef`, `PathDef`/`PathStep`, `Preset`, `Scene`, `Program`, `PaintMeta`, `AnimDef`/`AnimStep`, the pattern array, or `MAX_ZONES`/`MAX_PATHS` (which change `Scene`'s size) makes old files unreadable, and that data starts empty. `LightTimer` is stored raw in Preferences, so changing it resets the timer. Converters exist for `LightStateV1` (pre-0.15: zones v2, paths v1, presets v1, scenes v1) and `ZoneDefV1`. Warn the user before changing those structs, and suggest Setup → Download backup first. Better still, write a converter for the old version, as `zones.ino` does for `zones.bin` v1. While a restore runs, `savesBlocked` stops all saving so uploaded files aren't overwritten from memory.
 
 Standalone throwaway test sketches go in their own folder under `tests/<name>/<name>.ino`, so they never get compiled into the main sketch.
 

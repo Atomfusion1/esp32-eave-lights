@@ -18,8 +18,8 @@ uint16_t fadePhase[NUM_CHANNELS] = { 0 };
 // Chase/comet position per channel, in 1/256ths of a light (fixed point 24.8).
 uint32_t motionPos[NUM_CHANNELS] = { 0 };
 
-// Milliseconds since the channel's effect started (timed effects: twinkle, lightning...).
-uint32_t effectMs[NUM_CHANNELS] = { 0 };
+// effectMs[] (time since each channel's effect started) is in the main tab:
+// animations.ino comes before this tab and uses it too.
 
 // Makes both strands' fade and movement line up with strand A
 // (used when both strands are changed together).
@@ -202,6 +202,7 @@ void drawChannel(int ch, uint32_t dtMs) {
     case MODE_LIGHTNING:    drawLightning(ch);          break;
     case MODE_STROBE:       drawStrobe(ch);             break;
     case MODE_CUSTOM:       drawCustom(ch);             break;   // patterns.ino
+    case MODE_ANIM:         drawAnim(ch);               break;   // animations.ino
   }
 }
 

@@ -21,7 +21,8 @@ size_t restoreBytes = 0;
 
 bool restorePathAllowed(const String& p) {
   if (p == "/zones.bin" || p == "/paths.bin" || p == "/presets.bin" || p == "/scenes.bin" ||
-      p == "/programs.bin" || p == "/patterns.bin" || p == "/paintmeta.bin") return true;
+      p == "/programs.bin" || p == "/patterns.bin" || p == "/paintmeta.bin" ||
+      p == "/anims.bin") return true;
   if (p.startsWith("/files/")) {
     String n = p.substring(7);
     return n == "layout.json" || (n.length() > 0 && safePhotoName(n) == n);
@@ -114,6 +115,7 @@ void handleRestoreFinish() {
   loadScenes();
   loadPrograms();
   loadPatterns();
+  loadAnims();
   nudgeSchedule();
   savesBlocked = false;
   markStateChanged();

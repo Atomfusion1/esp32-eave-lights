@@ -65,6 +65,7 @@ select.picker{font-size:17px;font-weight:600;padding:12px}
 .row{display:flex;gap:8px;align-items:center}
 .row>*{flex:1}
 .row .btn{flex:0 0 auto}
+.animStep{flex-wrap:wrap;margin-top:6px}.animStep>*{min-width:0}.animStep select,.animStep input[type=number]{padding:8px}.animStep .btn{padding:8px 11px}.animStep label{margin:0;flex:0 0 auto;display:flex;gap:4px;align-items:center}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 @media (max-width:520px){.grid2{grid-template-columns:1fr}}
 .chips{display:flex;flex-wrap:wrap;gap:8px}
@@ -229,6 +230,25 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <label>Painting to show (a painting = every light colored by you; keep up to 8)</label>
 <div class="row"><select id="patSel"></select><button class="btn" id="patRename">Rename</button></div>
 <button class="btn primary" id="paintBtn" style="margin-top:10px;width:100%">✎ Paint it</button>
+</div>
+<div id="animBox" hidden style="margin-top:14px">
+<label>Animation to play (steps that move and fade your colors or paintings; keep up to 8)</label>
+<div class="row"><select id="animSel"></select><button class="btn primary" id="animEditBtn">✎ Edit steps</button></div>
+<p class="hint" id="animSummary"></p>
+</div>
+<div id="animTools" class="sub" hidden>
+<label>Name</label><input id="animName" type="text" maxlength="23">
+<div class="row" style="margin-top:10px;align-items:end">
+<div style="flex:2"><label>Starts with</label><select id="animStart"></select></div>
+<div id="animBandBox"><label>Band width</label><input id="animBand" type="number" min="1" max="30"></div>
+</div>
+<p class="hint">"Colors" = the effect's color list in bands, side by side. Paintings come from the Custom effect.</p>
+<label style="margin-top:10px">Steps (play in order, then loop)</label>
+<div id="animSteps"></div>
+<div class="row" style="margin-top:8px"><button class="btn" id="animAdd">+ Step</button><button class="btn" id="animDance">+ Dance (forward &amp; back)</button></div>
+<p class="hint">Move: + goes along the line (<span id="animDirTxt"></span>), − goes back. Lights that leave one end come back at the other. "Steady" moves at an even speed instead of easing in and out. Loop: <b id="animLoopTxt"></b></p>
+<div class="row" style="margin-top:8px"><button class="btn" id="animReset">Reset</button><button class="btn" id="animCancel">Close</button><button class="btn primary" id="animSave">Save</button></div>
+<p class="err" id="animErr" hidden></p>
 </div>
 <div id="paintTools" class="sub" hidden>
 <label>Painting <b id="paintNum"></b>: tap or drag over the lights in the live view</label>
@@ -544,6 +564,7 @@ const MODES=[
  {g:'Sparkle',id:'lightning',name:'Lightning',colors:1,spd:'How often',fmt:v=>'about every '+Math.round(60/v)+' s',bg:1,hint:'Occasional flashes and flickers; dark (or background) in between.'},
  {g:'Sparkle',id:'strobe',name:'Strobe / flash',colors:1,spd:'Flash rate',fmt:v=>(v/10).toFixed(1)+' per second',bg:1,hint:'Fast on/off flashing. Use sparingly: it can bother neighbors and drivers.'},
  {g:'Custom',id:'custom',name:'Custom (paint each light)',colors:0,pattern:1,bg:1,noColorText:'Colors come from the painting.',hint:'Shows a painting: every light colored by hand. Keep up to 8 (Flag, Xmas…); press ✎ Paint to color the lights.'},
+ {g:'Custom',id:'anim',name:'Animation (your own steps)',colors:'multi',min:1,anim:1,dir:true,bg:1,hint:'Plays your own steps: move the colors or a painting a few lights, fade between paintings, hold… then loop. Press ✎ Edit steps.'},
 ];
 const modeById=id=>MODES.find(m=>m.id===id)||MODES[0];
 (function buildModeSelect(){const groups=[...new Set(MODES.map(m=>m.g))];
@@ -562,6 +583,13 @@ function renderLook(o){const m=modeById(o.mode);
   $('patSel').innerHTML=paintNames.map((nm,k)=>'<option value="'+(k+1)+'">'+esc(nm)+'</option>').join('');$('patSel').value=String(n);
   $('paintBtn').textContent=painting?'Painting "'+paintNames[paintPattern-1]+'"…':'✎ Paint "'+paintNames[n-1]+'"';}
  else if(painting)stopPainting();
+ // animation: the animation number also lives in `size` (1-8)
+ $('animBox').hidden=!m.anim;
+ if(m.anim){const n=Math.min(8,Math.max(1,o.size));
+  $('animSel').innerHTML=animList.map(a=>'<option value="'+a.id+'">'+esc(a.name)+'</option>').join('');$('animSel').value=String(n);
+  $('animSummary').textContent=animList[n-1]?animSummary(animList[n-1]):'';
+  if(animEditing&&animEditing.id!==n)closeAnimEditor();}
+ else if(animEditing)closeAnimEditor();
  const multi=m.colors==='multi',list=multi?colorsOf(o):[o.color];
  $('colorLabel').textContent=multi?(m.colorNames?m.colorNames.join(' / ')+' colors':'Colors (in order)'):'Color';
  const row=$('colorRow');
@@ -942,6 +970,78 @@ $('patSel').onchange=e=>{const n=+e.target.value;send({size:n});if(painting)star
 $('patRename').onclick=async()=>{const n=+$('patSel').value,name=prompt('Name for painting '+n+':',paintNames[n-1]);
  if(name)showPaintMeta(await post('/api/paint-meta',{action:'rename',pattern:n,name}));};
 $('brush').addEventListener('input',renderSwatches);$('brush').addEventListener('change',renderSwatches);
+
+// ================= Animations =================
+// Steps text (same as the firmware): h:MS hold, m<L>:MS[s] move, f<F>:MS fade to, c<F>:MS cut to.
+// Frame F: 0 = the colors in bands, 1-8 = a painting. Saved animations play at once everywhere.
+let animList=[],animEditing=null;   // animEditing: {id,name,start,band,steps:[{k,n,ms,s}]}
+const frameName=f=>f?(paintNames[f-1]||'Painting '+f):'Colors';
+const frameOptions=()=>'<option value="0">Colors</option>'+paintNames.map((nm,k)=>'<option value="'+(k+1)+'">'+esc(nm)+'</option>').join('');
+function parseAnimSteps(t){return (t||'').split(',').filter(x=>x).map(x=>{const m=x.match(/^([hmfc])(-?\d*):(\d+)(s?)$/);
+ return m?{k:m[1],n:+(m[2]||0),ms:+m[3],s:!!m[4]}:{k:'h',n:0,ms:1000,s:false};});}
+const animStepsText=list=>list.map(s=>s.k+(s.k==='h'?'':s.n)+':'+s.ms+(s.k==='m'&&s.s?'s':'')).join(',');
+const secs=ms=>(+(ms/1000).toFixed(2))+' s';
+function stepText(s){return s.k==='m'?'move '+(s.n>0?'+':'')+s.n+' over '+secs(s.ms)
+ :s.k==='f'?'fade to '+frameName(s.n)+' over '+secs(s.ms)
+ :s.k==='c'?'switch to '+frameName(s.n)+(s.ms?', hold '+secs(s.ms):'')
+ :'hold '+secs(s.ms);}
+function animSummary(a){const list=parseAnimSteps(a.steps);
+ return frameName(a.start)+': '+(list.length?list.map(stepText).join(' → ')+', then again':'no steps (stays still)');}
+function showAnims(j){if(!j||!j.anims)return;animList=j.anims;if(st)renderLook(cur());}
+function loadAnims(){return fetch('/api/anims').then(r=>r.json()).then(showAnims).catch(()=>{});}
+function openAnimEditor(n){const a=animList[n-1];if(!a)return;
+ animEditing={id:n,name:a.name,start:a.start,band:a.band,steps:parseAnimSteps(a.steps)};
+ $('animTools').hidden=false;$('animEditBtn').textContent='Editing…';showErr('animErr');renderAnimEditor();}
+function closeAnimEditor(){animEditing=null;$('animTools').hidden=true;$('animEditBtn').textContent='✎ Edit steps';}
+function updateAnimLoop(){const a=animEditing;if(!a)return;
+ const total=a.steps.reduce((t,s)=>t+s.ms,0),net=a.steps.reduce((t,s)=>t+(s.k==='m'?s.n:0),0);
+ $('animLoopTxt').textContent=secs(total)+(net?', ends '+(net>0?'+':'')+net+' lights along each time round':', ends where it started');
+ $('animBandBox').hidden=!(a.start===0||a.steps.some(s=>(s.k==='f'||s.k==='c')&&s.n===0));
+ $('animAdd').disabled=$('animDance').disabled=a.steps.length>=16;}
+function renderAnimEditor(){const a=animEditing;if(!a)return;
+ if(document.activeElement!==$('animName'))$('animName').value=a.name;
+ $('animStart').innerHTML=frameOptions();$('animStart').value=String(a.start);$('animBand').value=a.band;
+ const selDir=[...$('dir').children].find(b=>b.classList.contains('sel'));
+ $('animDirTxt').textContent=selDir?selDir.textContent.split(' (')[0]:'forward';
+ $('animSteps').innerHTML=a.steps.length?a.steps.map((s,k)=>'<div class="row animStep" data-k="'+k+'">'+
+  '<span class="hint" style="margin:0;flex:0 0 1.4em">'+(k+1)+'.</span>'+
+  '<select data-f="k" style="flex:1.3"><option value="m">Move</option><option value="f">Fade to</option><option value="c">Switch to</option><option value="h">Hold</option></select>'+
+  (s.k==='m'?'<input data-f="n" type="number" min="-60" max="60" value="'+s.n+'" style="flex:0.8" title="Lights: + along the line, − back">'
+   :s.k==='h'?'':'<select data-f="n" style="flex:1.3">'+frameOptions()+'</select>')+
+  '<input data-f="ms" type="number" min="0" max="60" step="0.1" value="'+(s.ms/1000)+'" style="flex:0.8" title="Seconds">'+
+  '<span class="hint" style="margin:0;flex:0 0 auto">s</span>'+
+  (s.k==='m'?'<label><input data-f="s" type="checkbox"'+(s.s?' checked':'')+'>steady</label>':'')+
+  '<button class="btn" data-a="up" title="Move this step up"'+(k?'':' disabled')+'>↑</button>'+
+  '<button class="btn danger" data-a="del" title="Remove this step">×</button></div>').join('')
+  :'<p class="hint">No steps yet: the frame stays still. Add a step below.</p>';
+ $('animSteps').querySelectorAll('.animStep').forEach(row=>{const k=+row.dataset.k,s=a.steps[k];
+  row.querySelector('[data-f=k]').value=s.k;
+  const nSel=row.querySelector('select[data-f=n]');if(nSel)nSel.value=String(s.n);
+  row.querySelectorAll('[data-f]').forEach(el=>el.onchange=()=>{const f=el.dataset.f;
+   if(f==='k'){if(el.value!==s.k){s.k=el.value;s.n=s.k==='m'?3:s.k==='h'?0:1;s.s=false;}renderAnimEditor();return;}
+   if(f==='n')s.n=s.k==='m'?Math.max(-60,Math.min(60,Math.round(+el.value||0))):+el.value;
+   if(f==='ms')s.ms=Math.round(Math.max(0,Math.min(60,+el.value||0))*1000);
+   if(f==='s')s.s=el.checked;
+   updateAnimLoop();});
+  row.querySelector('[data-a=up]').onclick=()=>{a.steps.splice(k-1,0,a.steps.splice(k,1)[0]);renderAnimEditor();};
+  row.querySelector('[data-a=del]').onclick=()=>{a.steps.splice(k,1);renderAnimEditor();};});
+ updateAnimLoop();}
+$('animSel').onchange=e=>{const n=+e.target.value;send({size:n});if(animEditing)openAnimEditor(n);};
+$('animEditBtn').onclick=()=>{if(animEditing)closeAnimEditor();else openAnimEditor(+$('animSel').value);};
+$('animName').oninput=e=>{if(animEditing)animEditing.name=e.target.value;};
+$('animStart').onchange=e=>{if(animEditing){animEditing.start=+e.target.value;updateAnimLoop();}};
+$('animBand').onchange=e=>{if(animEditing){animEditing.band=Math.max(1,Math.min(30,Math.round(+e.target.value||1)));e.target.value=animEditing.band;}};
+$('animAdd').onclick=()=>{const a=animEditing;if(a&&a.steps.length<16){a.steps.push({k:'m',n:3,ms:2000,s:false});renderAnimEditor();}};
+$('animDance').onclick=()=>{const a=animEditing;if(a&&a.steps.length<=14){a.steps.push({k:'m',n:3,ms:2000,s:false},{k:'m',n:-3,ms:2000,s:false});renderAnimEditor();}};
+$('animCancel').onclick=closeAnimEditor;
+$('animSave').onclick=async()=>{const a=animEditing;if(!a)return;
+ try{const j=await post('/api/anims',{action:'save',id:a.id,name:a.name.trim()||('Animation '+a.id),start:a.start,band:a.band,steps:animStepsText(a.steps)});
+  if(j.error){showErr('animErr',j.error);return;}
+  showErr('animErr');showAnims(j);$('status').textContent='Animation "'+animList[a.id-1].name+'" saved';}
+ catch(e){showErr('animErr','Not saved (not connected)');}};
+$('animReset').onclick=async()=>{const a=animEditing;if(!a||!confirm('Reset "'+a.name+'" to the default dance?'))return;
+ const j=await post('/api/anims',{action:'reset',id:a.id});if(j.error){showErr('animErr',j.error);return;}
+ showAnims(j);openAnimEditor(a.id);};
 let liveMode=store.get('eaveLiveMode','photo'),photoView=store.get('eavePhotoView',0),frames=0,fpsT=performance.now();
 $('liveMode').querySelectorAll('button').forEach(b=>b.onclick=()=>{liveMode=b.dataset.lm;store.set('eaveLiveMode',liveMode);drawLive();});
 
@@ -1060,5 +1160,5 @@ async function pollFrame(){if(document.hidden||(tab!=='home'&&tab!=='lights')){s
 // ================= Start =================
 fetch('/api/state').then(r=>r.json()).then(s=>{show(s);setTab(['home','lights','house','setup'].includes(tab)?tab:'home');})
  .catch(()=>{$('status').textContent='Not connected';setTab('home');});
-loadLooksAndScenes().then(loadPrograms);loadPaintMeta();loadLayout();pollFrame();
+loadLooksAndScenes().then(loadPrograms);loadPaintMeta();loadAnims();loadLayout();pollFrame();
 </script></body></html>)rawhtml";
