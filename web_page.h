@@ -263,7 +263,7 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <label style="margin-top:10px">Steps (play in order, then loop)</label>
 <div id="animSteps"></div>
 <div class="row" style="margin-top:8px"><button class="btn" id="animAdd">+ Step</button><button class="btn" id="animDance">+ Dance (forward &amp; back)</button></div>
-<p class="hint">Move: + goes along the line (<span id="animDirTxt"></span>), − goes back. Lights that leave one end come back at the other. "Steady" moves at an even speed instead of easing in and out. Loop: <b id="animLoopTxt"></b></p>
+<p class="hint">Move: + goes along the line (<span id="animDirTxt"></span>), − goes back. Lights that leave one end come back at the other. Glide blends smoothly from light to light (eased = slow start and stop, steady = even speed); Step hops a whole light at a time. Loop: <b id="animLoopTxt"></b></p>
 <div class="row" style="margin-top:8px"><button class="btn" id="animReset">Reset</button><button class="btn" id="animCancel">Close</button><button class="btn primary" id="animSave">Save</button></div>
 <p class="err" id="animErr" hidden></p>
 </div>
@@ -1141,11 +1141,11 @@ let animList=[],animEditing=null;   // animEditing: {id,name,start,band,steps:[{
 const animById=id=>animList.find(a=>a.id===id);
 const frameName=f=>f?paintName(f):'Colors';
 const frameOptions=()=>'<option value="0">Colors</option>'+paintList.map(p=>'<option value="'+p.id+'">'+esc(p.name)+'</option>').join('');
-function parseAnimSteps(t){return (t||'').split(',').filter(x=>x).map(x=>{const m=x.match(/^([hmfc])(-?\d*):(\d+)(s?)$/);
- return m?{k:m[1],n:+(m[2]||0),ms:+m[3],s:!!m[4]}:{k:'h',n:0,ms:1000,s:false};});}
-const animStepsText=list=>list.map(s=>s.k+(s.k==='h'?'':s.n)+':'+s.ms+(s.k==='m'&&s.s?'s':'')).join(',');
+function parseAnimSteps(t){return (t||'').split(',').filter(x=>x).map(x=>{const m=x.match(/^([hmfc])(-?\d*):(\d+)([sj]?)$/);
+ return m?{k:m[1],n:+(m[2]||0),ms:+m[3],s:m[4]==='s'?1:m[4]==='j'?2:0}:{k:'h',n:0,ms:1000,s:0};});}
+const animStepsText=list=>list.map(s=>s.k+(s.k==='h'?'':s.n)+':'+s.ms+(s.k==='m'&&s.s?(s.s===2?'j':'s'):'')).join(',');
 const secs=ms=>(+(ms/1000).toFixed(2))+' s';
-function stepText(s){return s.k==='m'?'move '+(s.n>0?'+':'')+s.n+' over '+secs(s.ms)
+function stepText(s){return s.k==='m'?(s.s===2?'step ':'move ')+(s.n>0?'+':'')+s.n+' over '+secs(s.ms)
  :s.k==='f'?'fade to '+frameName(s.n)+' over '+secs(s.ms)
  :s.k==='c'?'switch to '+frameName(s.n)+(s.ms?', hold '+secs(s.ms):'')
  :'hold '+secs(s.ms);}
@@ -1176,18 +1176,19 @@ function renderAnimEditor(){const a=animEditing;if(!a)return;
    :s.k==='h'?'':'<select data-f="n" style="flex:1.3">'+frameOptions()+'</select>')+
   '<input data-f="ms" type="number" min="0" max="60" step="0.1" value="'+(s.ms/1000)+'" style="flex:0.8" title="Seconds">'+
   '<span class="hint" style="margin:0;flex:0 0 auto">s</span>'+
-  (s.k==='m'?'<label><input data-f="s" type="checkbox"'+(s.s?' checked':'')+'>steady</label>':'')+
+  (s.k==='m'?'<select data-f="s" style="flex:1.3" title="How it moves"><option value="0">Glide, eased</option><option value="1">Glide, steady</option><option value="2">Step (light by light)</option></select>':'')+
   '<button class="btn" data-a="up" title="Move this step up"'+(k?'':' disabled')+'>↑</button>'+
   '<button class="btn danger" data-a="del" title="Remove this step">×</button></div>').join('')
   :'<p class="hint">No steps yet: the frame stays still. Add a step below.</p>';
  $('animSteps').querySelectorAll('.animStep').forEach(row=>{const k=+row.dataset.k,s=a.steps[k];
   row.querySelector('[data-f=k]').value=s.k;
   const nSel=row.querySelector('select[data-f=n]');if(nSel)nSel.value=String(s.n);
+  const sSel=row.querySelector('select[data-f=s]');if(sSel)sSel.value=String(s.s);
   row.querySelectorAll('[data-f]').forEach(el=>el.onchange=()=>{const f=el.dataset.f;
-   if(f==='k'){if(el.value!==s.k){s.k=el.value;s.n=s.k==='m'?3:s.k==='h'?0:1;s.s=false;}renderAnimEditor();return;}
+   if(f==='k'){if(el.value!==s.k){s.k=el.value;s.n=s.k==='m'?3:s.k==='h'?0:1;s.s=0;}renderAnimEditor();return;}
    if(f==='n')s.n=s.k==='m'?Math.max(-60,Math.min(60,Math.round(+el.value||0))):+el.value;
    if(f==='ms')s.ms=Math.round(Math.max(0,Math.min(60,+el.value||0))*1000);
-   if(f==='s')s.s=el.checked;
+   if(f==='s')s.s=+el.value;
    updateAnimLoop();});
   row.querySelector('[data-a=up]').onclick=()=>{a.steps.splice(k-1,0,a.steps.splice(k,1)[0]);renderAnimEditor();};
   row.querySelector('[data-a=del]').onclick=()=>{a.steps.splice(k,1);renderAnimEditor();};});
@@ -1211,8 +1212,8 @@ $('animDel').onclick=async()=>{const n=+$('animSel').value,a=animById(n);if(!a||
 $('animName').oninput=e=>{if(animEditing)animEditing.name=e.target.value;};
 $('animStart').onchange=e=>{if(animEditing){animEditing.start=+e.target.value;updateAnimLoop();}};
 $('animBand').onchange=e=>{if(animEditing){animEditing.band=Math.max(1,Math.min(30,Math.round(+e.target.value||1)));e.target.value=animEditing.band;}};
-$('animAdd').onclick=()=>{const a=animEditing;if(a&&a.steps.length<16){a.steps.push({k:'m',n:3,ms:2000,s:false});renderAnimEditor();}};
-$('animDance').onclick=()=>{const a=animEditing;if(a&&a.steps.length<=14){a.steps.push({k:'m',n:3,ms:2000,s:false},{k:'m',n:-3,ms:2000,s:false});renderAnimEditor();}};
+$('animAdd').onclick=()=>{const a=animEditing;if(a&&a.steps.length<16){a.steps.push({k:'m',n:3,ms:2000,s:0});renderAnimEditor();}};
+$('animDance').onclick=()=>{const a=animEditing;if(a&&a.steps.length<=14){a.steps.push({k:'m',n:3,ms:2000,s:0},{k:'m',n:-3,ms:2000,s:0});renderAnimEditor();}};
 $('animCancel').onclick=closeAnimEditor;
 $('animSave').onclick=async()=>{const a=animEditing;if(!a)return;
  try{const j=await post('/api/anims',{action:'save',id:a.id,name:a.name.trim()||('Animation '+a.id),start:a.start,band:a.band,steps:animStepsText(a.steps)});

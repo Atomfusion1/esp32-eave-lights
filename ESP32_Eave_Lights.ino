@@ -53,7 +53,7 @@
 #define OTA_PASSWORD AP_PASSWORD
 #endif
 
-#define FW_VERSION "0.25.1"
+#define FW_VERSION "0.25.2"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
@@ -269,7 +269,8 @@ struct AnimStep {
   uint8_t  kind;      // AnimKind
   int8_t   lights;    // move: lights to move, + = along the line, - = back
   uint8_t  frame;     // fade/cut: 0 = colors, 1-30 = painting
-  uint8_t  steady;    // move: 1 = constant speed, 0 = eased (slow start and stop)
+  uint8_t  steady;    // move: 0 = glide eased (slow start and stop), 1 = glide steady,
+                      //       2 = step (hop a whole light at a time, even pace)
   uint16_t ms;        // how long the step takes (cut: how long to hold after switching)
 };
 struct AnimDef {

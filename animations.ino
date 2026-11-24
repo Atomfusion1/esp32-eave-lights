@@ -8,7 +8,8 @@
 //   move  +/-L over N s  slide the frame L lights along the line (- = back); lights that
 //                        leave one end come back in at the other. Smooth glide: colors
 //                        blend between neighboring lights. Eased (slow start and stop)
-//                        unless the step is "steady".
+//                        unless the step is "steady". Or "step": hops a whole light at
+//                        a time (no blending), at an even pace.
 //   fade  to F over N s  cross-fade to frame F, which appears where it was painted
 //   cut   to F, hold N s switch to frame F at once (where it was painted)
 // Each loop starts again from the start frame. With fades/switches it also starts back
@@ -22,7 +23,7 @@
 //   POST /api/anims   action=save id=N name=Dance start=0 band=3 steps=m3:2000,m-3:2000
 //                     action=reset id=N   back to the default animation
 // Steps text, comma separated, times in milliseconds:
-//   h:MS  hold    m<L>:MS  move (add "s" at the end for steady: m5:3000s)
+//   h:MS  hold    m<L>:MS  move (end with "s" for steady: m5:3000s, "j" for step: m5:3000j)
 //   f<F>:MS  fade to frame F    c<F>:MS  cut to frame F      (F: 0 = colors, 1-30 painting)
 
 const char*    ANIMS_FILE    = "/anims.bin";
@@ -51,6 +52,7 @@ void sanitizeAnim(AnimDef& a) {
     if (s.kind > ANIM_CUT) s.kind = ANIM_HOLD;
     if (s.frame > MAX_PATTERNS) s.frame = 0;
     s.lights = constrain((int)s.lights, -ANIM_MAX_MOVE, ANIM_MAX_MOVE);
+    if (s.steady > 2) s.steady = 0;
     s.ms = min((uint32_t)s.ms, (uint32_t)ANIM_MAX_MS);
   }
 }
@@ -106,7 +108,7 @@ String animStepsText(const AnimDef& a) {
     }
     t += ":";
     t += (unsigned)s.ms;
-    if (s.kind == ANIM_MOVE && s.steady) t += "s";
+    if (s.kind == ANIM_MOVE && s.steady) t += s.steady == 2 ? "j" : "s";
   }
   return t;
 }
@@ -130,6 +132,7 @@ const char* parseAnimSteps(const String& text, AnimDef& a) {
     int num = item.substring(1, colon).toInt();
     String msText = item.substring(colon + 1);
     if (msText.endsWith("s")) { s.steady = 1; msText.remove(msText.length() - 1); }
+    else if (msText.endsWith("j")) { s.steady = 2; msText.remove(msText.length() - 1); }
     long ms = msText.toInt();
     if (ms < 0 || ms > ANIM_MAX_MS) return "a step can take up to 60 seconds";
     s.ms = ms;
@@ -301,7 +304,9 @@ void drawAnim(int ch) {
       uint32_t p = done ? 65536 : (uint32_t)(((uint64_t)tc << 16) / st.ms);   // 0-65536
       if (st.kind == ANIM_MOVE) {
         uint32_t e = (done || st.steady) ? p : easeInOut16(p);
-        offset += ((int64_t)st.lights * 256 * e) >> 16;
+        int64_t moved = ((int64_t)st.lights * 256 * e) >> 16;
+        if (st.steady == 2) moved = moved / 256 * 256;   // step: whole lights only
+        offset += moved;
       } else if (st.kind == ANIM_CUT) {
         fromFrame = toFrame = st.frame;
         offset = 0;
