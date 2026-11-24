@@ -8,7 +8,9 @@
 // Layout file (/files/layout.json, written by this page, only stored by the board):
 // {
 //   "schemaVersion": 1,
-//   "settings": {"night": 0.6, "glow": 1.0},
+//   "settings": {"night": 0.6, "glow": 1.0, "style": "down"|"glow", "throw": 1.0, "spread": 1.0},
+//               (style "down" = downlight scallops like the real pucks; throw/spread are
+//                multiples of the light spacing; glow = size for the round "glow" style)
 //   "views": [{"id":"v1","name":"Front left","image":"/files/v1-123.jpg","width":1920,"height":1440,
 //              "placements":[{"item":"z0","itemName":"Right Side","from":1,"to":26,
 //                             "points":[[x,y],...]}]}]     x, y = 0-1 across the photo
@@ -87,7 +89,13 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 <div class="card" id="liveCard" hidden>
 <h2>Night look</h2>
 <label>Photo darkness <span id="nightVal"></span></label><input type="range" id="night" min="0" max="0.95" step="0.01">
-<label>Glow size <span id="glowVal"></span></label><input type="range" id="glow" min="0.3" max="3" step="0.05">
+<label>Light style</label>
+<div class="seg" id="styleSeg"><button data-st="down">Downlight (like the pucks)</button><button data-st="glow">Glow</button></div>
+<div id="downBox">
+<label>Throw: how far down the wall <span id="throwVal"></span></label><input type="range" id="throw" min="0.3" max="3" step="0.05">
+<label>Spread: how wide each scallop is <span id="spreadVal"></span></label><input type="range" id="spread" min="0.3" max="2.5" step="0.05">
+</div>
+<div id="glowBox"><label>Glow size <span id="glowVal"></span></label><input type="range" id="glow" min="0.3" max="3" step="0.05"></div>
 <p class="hint">Colors come live from the board, about 10 updates a second. Brightness on screen is approximate.</p>
 </div>
 
@@ -197,6 +205,31 @@ function removeBend(p,j){if(p.points.length<=2||j<=0||j>=p.points.length-1)retur
  p.points.splice(j,1);
  const h=new Set();(p.hidden||[]).forEach(s=>h.add(s<j?s:s-1));p.hidden=[...h].filter(s=>s>=0&&s<p.points.length-1);return true;}
 
+// ---- How a light looks on the photo (same code as the main page's house view) ----
+function lookSettings(s){return Object.assign({night:0.6,glow:1,style:'down',throw:1,spread:1},s||{});}
+// Average distance between neighbouring lights of a section, in canvas px.
+function spacingPx(pos,w,h){if(pos.length<2)return w*0.04;let d=0;
+ for(let k=1;k<pos.length;k++)d+=Math.hypot((pos[k].x-pos[k-1].x)*w,(pos[k].y-pos[k-1].y)*h);return Math.max(4,d/(pos.length-1));}
+// Downlight (default): like the real eave pucks, a small bright point with a scallop of
+// light fanning down the wall below it and a faint wash. Glow: a round glow (older look).
+// Draw with globalCompositeOperation 'lighter'. c = [r,g,b] already gamma-lifted.
+function drawLight(g,x,y,c,sp,R,set){const rgb=c.join(','),core='rgba('+c.map(z=>Math.round(z+(255-z)*0.7)).join(',')+',0.95)';
+ if(set.style==='glow'){
+  let gr=g.createRadialGradient(x,y,0,x,y,R*4);gr.addColorStop(0,'rgba('+rgb+',0.22)');gr.addColorStop(1,'rgba('+rgb+',0)');
+  g.fillStyle=gr;g.beginPath();g.arc(x,y,R*4,0,7);g.fill();
+  gr=g.createRadialGradient(x,y,0,x,y,R);gr.addColorStop(0,'rgba('+rgb+',0.95)');gr.addColorStop(0.35,'rgba('+rgb+',0.45)');gr.addColorStop(1,'rgba('+rgb+',0)');
+  g.fillStyle=gr;g.beginPath();g.arc(x,y,R,0,7);g.fill();
+  g.fillStyle=core;g.beginPath();g.arc(x,y,Math.max(1.2,R*0.16),0,7);g.fill();return;}
+ const L=Math.max(6,sp*set.throw),W=Math.max(3,sp*0.5*set.spread);
+ let gr=g.createRadialGradient(x,y+L*0.35,0,x,y+L*0.35,L*1.4);gr.addColorStop(0,'rgba('+rgb+',0.10)');gr.addColorStop(1,'rgba('+rgb+',0)');
+ g.fillStyle=gr;g.beginPath();g.arc(x,y+L*0.35,L*1.4,0,7);g.fill();
+ g.save();g.beginPath();g.rect(x-W*2,y,W*4,L*1.3);g.clip();
+ g.translate(x,y);g.scale(W/L,1);
+ gr=g.createRadialGradient(0,L*0.1,0,0,L*0.1,L);
+ gr.addColorStop(0,'rgba('+rgb+',0.75)');gr.addColorStop(0.35,'rgba('+rgb+',0.42)');gr.addColorStop(0.75,'rgba('+rgb+',0.12)');gr.addColorStop(1,'rgba('+rgb+',0)');
+ g.fillStyle=gr;g.beginPath();g.arc(0,L*0.1,L,0,7);g.fill();g.restore();
+ g.fillStyle=core;g.beginPath();g.arc(x,y,Math.max(1.2,sp*0.07),0,7);g.fill();}
+
 // ---- Drawing ----
 function size(){const v=view();if(!v)return;const w=$('stage').clientWidth,h=Math.round(w*v.height/v.width),dpr=window.devicePixelRatio||1;
  if(cv.width!==Math.round(w*dpr)||cv.height!==Math.round(h*dpr)){cv.width=Math.round(w*dpr);cv.height=Math.round(h*dpr);cv.style.height=h+'px';}
@@ -214,16 +247,8 @@ function draw(){const v=view();$('empty').hidden=!!v;cv.hidden=!v;if(!v)return;
  if(live&&night>0){ctx.fillStyle='rgba(0,0,0,'+night+')';ctx.fillRect(0,0,w,h);}
  const R=w*0.012*glowK;
  v.placements.forEach((p,pi)=>{const ls=placementLights(p),pos=positions(p,ls.length);
-  if(live){ctx.globalCompositeOperation='lighter';
-   pos.forEach((q,i)=>{const c=lightColor(ls[i]);if(!c||isHidden(p,q.seg))return;const x=q.x*w,y=q.y*h,rgb=c.join(',');
-    // soft wash on the wall around the light
-    let g=ctx.createRadialGradient(x,y,0,x,y,R*4);g.addColorStop(0,'rgba('+rgb+',0.22)');g.addColorStop(1,'rgba('+rgb+',0)');
-    ctx.fillStyle=g;ctx.beginPath();ctx.arc(x,y,R*4,0,7);ctx.fill();
-    // glow
-    g=ctx.createRadialGradient(x,y,0,x,y,R);g.addColorStop(0,'rgba('+rgb+',0.95)');g.addColorStop(0.35,'rgba('+rgb+',0.45)');g.addColorStop(1,'rgba('+rgb+',0)');
-    ctx.fillStyle=g;ctx.beginPath();ctx.arc(x,y,R,0,7);ctx.fill();
-    // hot core
-    ctx.fillStyle='rgba('+c.map(x=>Math.round(x+(255-x)*0.6)).join(',')+',0.9)';ctx.beginPath();ctx.arc(x,y,Math.max(1.2,R*0.16),0,7);ctx.fill();});
+  if(live){ctx.globalCompositeOperation='lighter';const set=lookSettings(layout.settings),sp=spacingPx(pos,w,h);
+   pos.forEach((q,i)=>{const c=lightColor(ls[i]);if(!c||isHidden(p,q.seg))return;drawLight(ctx,q.x*w,q.y*h,c,sp,R,set);});
    ctx.globalCompositeOperation='source-over';return;}
   // edit mode
   const sel=pi===selP;
@@ -274,7 +299,12 @@ function renderPlist(){const v=view();$('editCard').hidden=$('addCard').hidden=!
 function renderAll(){renderViews();renderPlist();
  $('modeSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',b.dataset.m===mode));
  $('night').value=layout.settings.night;$('nightVal').textContent=Math.round(layout.settings.night*100)+'%';
- $('glow').value=layout.settings.glow;$('glowVal').textContent=layout.settings.glow.toFixed(1)+'×';draw();}
+ $('glow').value=layout.settings.glow;$('glowVal').textContent=layout.settings.glow.toFixed(1)+'×';
+ const ls=lookSettings(layout.settings);
+ $('styleSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',b.dataset.st===ls.style));
+ $('downBox').hidden=ls.style!=='down';$('glowBox').hidden=ls.style!=='glow';
+ $('throw').value=ls.throw;$('throwVal').textContent=ls.throw.toFixed(2)+'×';
+ $('spread').value=ls.spread;$('spreadVal').textContent=ls.spread.toFixed(2)+'×';draw();}
 
 // ---- Saving ----
 function save(){clearTimeout(saveTimer);$('status').textContent='Saving…';
@@ -354,6 +384,9 @@ $('stopFind').onclick=()=>{findLabel='';fetch('/api/locate',{method:'POST',body:
 $('modeSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{mode=b.dataset.m;drawing=false;try{localStorage.setItem('eaveEditorMode',mode);}catch(e){}renderAll();});
 $('night').oninput=e=>{layout.settings.night=+e.target.value;$('nightVal').textContent=Math.round(layout.settings.night*100)+'%';draw();save();};
 $('glow').oninput=e=>{layout.settings.glow=+e.target.value;$('glowVal').textContent=layout.settings.glow.toFixed(1)+'×';draw();save();};
+$('styleSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{layout.settings.style=b.dataset.st;save();renderAll();});
+$('throw').oninput=e=>{layout.settings.throw=+e.target.value;$('throwVal').textContent=(+e.target.value).toFixed(2)+'×';draw();save();};
+$('spread').oninput=e=>{layout.settings.spread=+e.target.value;$('spreadVal').textContent=(+e.target.value).toFixed(2)+'×';draw();save();};
 window.addEventListener('resize',()=>draw());
 
 // ---- Live frames ----

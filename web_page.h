@@ -945,23 +945,46 @@ function drawPhoto(fi){const v=layout.views[photoView];let im=imgs[v.image];
  const w=$('photoBox').clientWidth,h=Math.round(w*v.height/v.width),dpr=window.devicePixelRatio||1;if(!w)return;
  if(photoCv.width!==Math.round(w*dpr)||photoCv.height!==Math.round(h*dpr)){photoCv.width=Math.round(w*dpr);photoCv.height=Math.round(h*dpr);photoCv.style.height=h+'px';}
  pctx.setTransform(dpr,0,0,dpr,0,0);pctx.globalCompositeOperation='source-over';pctx.drawImage(im,0,0,w,h);
- const set=Object.assign({night:0.6,glow:1},layout.settings||{});
+ const set=lookSettings(layout.settings);
  if(set.night>0){pctx.fillStyle='rgba(0,0,0,'+set.night+')';pctx.fillRect(0,0,w,h);}
  const R=w*0.012*set.glow;pctx.globalCompositeOperation='lighter';
  (v.placements||[]).forEach(p=>{const all=itemLights(p.item),ls=all.slice(Math.max(0,p.from-1),Math.min(all.length,p.to)),pos=positions(v,p.points||[],ls.length);
-  const hid=p.hidden||[];
+  const hid=p.hidden||[],sp=spacingPx(pos,w,h);
   pos.forEach((q,i)=>{if(hid.includes(q.seg))return;   // behind something on this photo
    const c=lightRGB(fi,ls[i][0],ls[i][1]),x=q.x*w,y=q.y*h;
-   dots.push({box:'photo',o:ls[i][0],i:ls[i][1],x,y,r:Math.max(R*0.7,7)});
+   dots.push({box:'photo',o:ls[i][0],i:ls[i][1],x,y,r:Math.max(Math.min(sp*0.5,R),7)});
    if(!c){if(painting){pctx.globalCompositeOperation='source-over';pctx.strokeStyle='rgba(255,255,255,0.35)';pctx.lineWidth=1;
-     pctx.beginPath();pctx.arc(x,y,Math.max(2.5,R*0.25),0,7);pctx.stroke();pctx.globalCompositeOperation='lighter';}return;}
-   const rgb=c.join(',');
-   let g=pctx.createRadialGradient(x,y,0,x,y,R*4);g.addColorStop(0,'rgba('+rgb+',0.22)');g.addColorStop(1,'rgba('+rgb+',0)');
-   pctx.fillStyle=g;pctx.beginPath();pctx.arc(x,y,R*4,0,7);pctx.fill();
-   g=pctx.createRadialGradient(x,y,0,x,y,R);g.addColorStop(0,'rgba('+rgb+',0.95)');g.addColorStop(0.35,'rgba('+rgb+',0.45)');g.addColorStop(1,'rgba('+rgb+',0)');
-   pctx.fillStyle=g;pctx.beginPath();pctx.arc(x,y,R,0,7);pctx.fill();
-   pctx.fillStyle='rgba('+c.map(z=>Math.round(z+(255-z)*0.6)).join(',')+',0.9)';pctx.beginPath();pctx.arc(x,y,Math.max(1.2,R*0.16),0,7);pctx.fill();});});
+     pctx.beginPath();pctx.arc(x,y,Math.max(2.5,sp*0.08),0,7);pctx.stroke();pctx.globalCompositeOperation='lighter';}return;}
+   drawLight(pctx,x,y,c,sp,R,set);});});
  pctx.globalCompositeOperation='source-over';}
+
+// ---- How a light looks on the photo (same code in the House editor) ----
+function lookSettings(s){return Object.assign({night:0.6,glow:1,style:'down',throw:1,spread:1},s||{});}
+// Average distance between neighbouring lights of a section, in canvas px.
+function spacingPx(pos,w,h){if(pos.length<2)return w*0.04;let d=0;
+ for(let k=1;k<pos.length;k++)d+=Math.hypot((pos[k].x-pos[k-1].x)*w,(pos[k].y-pos[k-1].y)*h);return Math.max(4,d/(pos.length-1));}
+// Downlight (default): like the real eave pucks, a small bright point with a scallop of
+// light fanning down the wall below it and a faint wash. Glow: a round glow (older look).
+// Draw with globalCompositeOperation 'lighter'. c = [r,g,b] already gamma-lifted.
+function drawLight(g,x,y,c,sp,R,set){const rgb=c.join(','),core='rgba('+c.map(z=>Math.round(z+(255-z)*0.7)).join(',')+',0.95)';
+ if(set.style==='glow'){
+  let gr=g.createRadialGradient(x,y,0,x,y,R*4);gr.addColorStop(0,'rgba('+rgb+',0.22)');gr.addColorStop(1,'rgba('+rgb+',0)');
+  g.fillStyle=gr;g.beginPath();g.arc(x,y,R*4,0,7);g.fill();
+  gr=g.createRadialGradient(x,y,0,x,y,R);gr.addColorStop(0,'rgba('+rgb+',0.95)');gr.addColorStop(0.35,'rgba('+rgb+',0.45)');gr.addColorStop(1,'rgba('+rgb+',0)');
+  g.fillStyle=gr;g.beginPath();g.arc(x,y,R,0,7);g.fill();
+  g.fillStyle=core;g.beginPath();g.arc(x,y,Math.max(1.2,R*0.16),0,7);g.fill();return;}
+ const L=Math.max(6,sp*set.throw),W=Math.max(3,sp*0.5*set.spread);
+ // faint wash on the wall around the light
+ let gr=g.createRadialGradient(x,y+L*0.35,0,x,y+L*0.35,L*1.4);gr.addColorStop(0,'rgba('+rgb+',0.10)');gr.addColorStop(1,'rgba('+rgb+',0)');
+ g.fillStyle=gr;g.beginPath();g.arc(x,y+L*0.35,L*1.4,0,7);g.fill();
+ // the scallop: an oval of light below the puck, cut off at the eave line
+ g.save();g.beginPath();g.rect(x-W*2,y,W*4,L*1.3);g.clip();
+ g.translate(x,y);g.scale(W/L,1);
+ gr=g.createRadialGradient(0,L*0.1,0,0,L*0.1,L);
+ gr.addColorStop(0,'rgba('+rgb+',0.75)');gr.addColorStop(0.35,'rgba('+rgb+',0.42)');gr.addColorStop(0.75,'rgba('+rgb+',0.12)');gr.addColorStop(1,'rgba('+rgb+',0)');
+ g.fillStyle=gr;g.beginPath();g.arc(0,L*0.1,L,0,7);g.fill();g.restore();
+ // the puck itself
+ g.fillStyle=core;g.beginPath();g.arc(x,y,Math.max(1.2,sp*0.07),0,7);g.fill();}
 
 function drawLive(){const hasPhoto=!!(layout&&layout.views&&layout.views.length),usePhoto=liveMode==='photo'&&hasPhoto;
  $('liveMode').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',b.dataset.lm===(usePhoto?'photo':'strip')));
