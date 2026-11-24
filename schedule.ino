@@ -7,7 +7,8 @@
 //   1. a playlist started with Play (manualProgram), until Stop
 //   2. otherwise, if the calendar is on and the clock is set: the playlist whose yearly
 //      date range includes today (the shortest range wins, so "Dec 20-26" beats "Dec 1-31")
-//   3. otherwise nothing: the lights stay as they are
+//   3. otherwise (a date no playlist covers) the fallback: the everyday playlist,
+//      lights off (when a playlist's dates end), or nothing (lights stay as they are)
 // Stop also pauses the calendar for the rest of the day.
 //
 // The clock comes from the internet (NTP, TIMEZONE in the main tab) once Wi-Fi connects.
@@ -186,6 +187,20 @@ void handleSchedule() {
     want = manualProgram;
   } else if (scheduleOn && haveClock && t.tm_yday != stoppedYday) {
     want = programForDate(t.tm_mon + 1, t.tm_mday);
+    if (want < 0) {
+      // a date no playlist covers: the everyday playlist, or lights off
+      if (fallbackProgram >= 0 && fallbackProgram < MAX_PROGRAMS && programs[fallbackProgram].used &&
+          programs[fallbackProgram].stepCount) {
+        want = fallbackProgram;
+      } else if (fallbackProgram == FALLBACK_OFF && activeProgram >= 0) {
+        // a playlist's dates just ended: off, with nothing for "All on" / the timer to
+        // bring back (so e.g. the Christmas look doesn't come back in January)
+        allLightsOff();
+        allOnMask = 0;
+        markStateChanged();
+        Serial.println("Calendar: no playlist today, lights off");
+      }
+    }
   }
 
   if (want != activeProgram) {
@@ -328,6 +343,7 @@ const char* deleteProgram(int id) {
   if (id < 0 || id >= MAX_PROGRAMS || !programs[id].used) return "playlist not found";
   programs[id].used = false;
   if (manualProgram == id) { manualProgram = -1; markStateChanged(); }
+  if (fallbackProgram == id) { fallbackProgram = FALLBACK_KEEP; markStateChanged(); }   // slot reuse
   if (activeProgram == id) activeProgram = -1;
   scheduleForce = true;
   saveProgramsFile();
@@ -341,6 +357,7 @@ String programsJson() {
   bool haveClock = clockNow(t);
   String j = "{\"scheduleOn\":";
   j += scheduleOn ? "true" : "false";
+  j += ",\"fallback\":" + String((int)fallbackProgram);
   j += ",\"clock\":\"";
   if (haveClock) {
     char buf[40];

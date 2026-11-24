@@ -120,6 +120,7 @@ const char* deleteZonePath(int id) {
   pathDefs[id].name[0] = 0;
   pathDefs[id].stepCount = 0;
   states[CH_PATH0 + id] = PATH_DEFAULT_STATE;
+  forgetChannel(CH_PATH0 + id, PATH_DEFAULT_STATE);   // scenes forget it (slot reuse)
   rebuildZonePath(id);
   markStateChanged();
   return nullptr;

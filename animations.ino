@@ -1,7 +1,9 @@
 // animations - custom animations made of steps (MODE_ANIM shows animation number `size`).
+// A library of up to MAX_ANIMS named animations; one used by a saved scene or look is
+// locked (the page edits a copy), and one in use can't be deleted (see lookUsers()).
 //
 // An animation works on a "frame": the channel's colors as bands of `bandWidth` lights,
-// or one of the 8 paintings. Its steps play in order and then loop:
+// or one of the paintings. Its steps play in order and then loop:
 //   hold  N s            keep still
 //   move  +/-L over N s  slide the frame L lights along the line (- = back); lights that
 //                        leave one end come back in at the other. Smooth glide: colors
@@ -20,7 +22,7 @@
 //                     action=reset id=N   back to the default animation
 // Steps text, comma separated, times in milliseconds:
 //   h:MS  hold    m<L>:MS  move (add "s" at the end for steady: m5:3000s)
-//   f<F>:MS  fade to frame F    c<F>:MS  cut to frame F      (F: 0 = colors, 1-8 painting)
+//   f<F>:MS  fade to frame F    c<F>:MS  cut to frame F      (F: 0 = colors, 1-30 painting)
 
 const char*    ANIMS_FILE    = "/anims.bin";
 const uint32_t ANIMS_MAGIC   = 0x4D494E41;  // "ANIM"
@@ -53,7 +55,8 @@ void sanitizeAnim(AnimDef& a) {
 }
 
 void loadAnims() {
-  for (int n = 0; n < MAX_ANIMS; n++) defaultAnim(n);
+  memset(anims, 0, sizeof(anims));   // a slot with no name does not exist
+  defaultAnim(0);
   if (!storageOk || !FFat.exists(ANIMS_FILE)) return;
   File f = FFat.open(ANIMS_FILE, "r");
   if (!f) return;
@@ -136,7 +139,7 @@ const char* parseAnimSteps(const String& text, AnimDef& a) {
       s.kind = ANIM_MOVE;
       s.lights = num;
     } else if (kind == 'f' || kind == 'c') {
-      if (num < 0 || num > MAX_PATTERNS) return "frame must be colors or painting 1 to 8";
+      if (num < 0 || num > MAX_PATTERNS) return "frame must be colors or a painting";
       s.kind = kind == 'f' ? ANIM_FADE : ANIM_CUT;
       s.frame = num;
     } else {
@@ -147,56 +150,96 @@ const char* parseAnimSteps(const String& text, AnimDef& a) {
   return nullptr;
 }
 
-String animsJson() {
-  String j = "{\"anims\":[";
-  for (int n = 0; n < MAX_ANIMS; n++) {
-    const AnimDef& a = anims[n];
-    if (n) j += ",";
-    j += "{\"id\":";
-    j += n + 1;
-    j += ",\"name\":\"";
-    j += a.name;
-    j += "\",\"start\":";
-    j += a.startFrame;
-    j += ",\"band\":";
-    j += a.bandWidth;
-    j += ",\"steps\":\"";
-    j += animStepsText(a);
-    j += "\"}";
-  }
-  j += "]}";
-  return j;
+bool animExists(int a) {
+  return a >= 0 && a < MAX_ANIMS && anims[a].name[0] != 0;
 }
 
+// True if animation a shows painting p (0-based) at any point.
+bool animUsesPainting(int a, int p) {
+  if (!animExists(a)) return false;
+  const AnimDef& d = anims[a];
+  if (d.startFrame == p + 1) return true;
+  for (int k = 0; k < d.stepCount; k++)
+    if ((d.steps[k].kind == ANIM_FADE || d.steps[k].kind == ANIM_CUT) && d.steps[k].frame == p + 1) return true;
+  return false;
+}
+
+String animsJson() {
+  String j = "{\"anims\":[";
+  bool first = true;
+  for (int n = 0; n < MAX_ANIMS; n++) {
+    if (!animExists(n)) continue;
+    const AnimDef& a = anims[n];
+    bool locked = false;
+    String users = lookUsers(1, n, locked, false);
+    if (!first) j += ",";
+    first = false;
+    j += "{\"id\":" + String(n + 1) + ",\"name\":\"" + a.name + "\",\"start\":" + String(a.startFrame) +
+         ",\"band\":" + String(a.bandWidth) + ",\"steps\":\"" + animStepsText(a) + "\",\"used\":" + users +
+         ",\"locked\":" + (locked ? "true" : "false") + "}";
+  }
+  j += "]";
+  return j;   // caller adds "}" (and maybe "newId")
+}
+
+//   POST /api/anims  action=new [name=]  action=copy id=N [name=]   -> also "newId"
+//                    action=delete id=N   (refused while it is used)
 void handleAnims() {
   String action = server.arg("action");
+  int newId = -1;
   if (action.length()) {
-    int n = server.arg("id").toInt();
-    if (n < 1 || n > MAX_ANIMS) return sendError("animation must be 1 to 8");
-    n--;
-    if (action == "save") {
-      AnimDef a = anims[n];
-      if (server.hasArg("name")) {
-        char clean[NAME_LEN];
-        if (!copyName(server.arg("name"), clean)) return sendError("enter a name");
-        strcpy(a.name, clean);
+    int n = server.arg("id").toInt() - 1;
+    if (action == "new" || action == "copy") {
+      if (action == "copy" && !animExists(n)) return sendError("animation not found");
+      int f = -1;
+      for (int k = 0; k < MAX_ANIMS && f < 0; k++) if (!animExists(k)) f = k;
+      if (f < 0) return sendError("all 30 animations are used; delete one first");
+      if (action == "copy") {
+        anims[f] = anims[n];
+        copyNameOf(anims[n].name, anims[f].name);
+      } else {
+        defaultAnim(f);
       }
-      if (server.hasArg("start")) a.startFrame = constrain(server.arg("start").toInt(), 0, MAX_PATTERNS);
-      if (server.hasArg("band"))  a.bandWidth  = constrain(server.arg("band").toInt(), 1, SIZE_MAX);
-      if (server.hasArg("steps")) {
-        const char* err = parseAnimSteps(server.arg("steps"), a);
-        if (err) return sendError(err);
-      }
-      sanitizeAnim(a);
-      anims[n] = a;
-    } else if (action == "reset") {
-      defaultAnim(n);
+      char clean[NAME_LEN];
+      if (server.hasArg("name") && copyName(server.arg("name"), clean)) strcpy(anims[f].name, clean);
+      newId = f + 1;
     } else {
-      return sendError("action must be save or reset");
+      if (!animExists(n)) return sendError("animation not found");
+      if (action == "save") {
+        AnimDef a = anims[n];
+        if (server.hasArg("name")) {
+          char clean[NAME_LEN];
+          if (!copyName(server.arg("name"), clean)) return sendError("enter a name");
+          strcpy(a.name, clean);
+        }
+        if (server.hasArg("start")) a.startFrame = constrain(server.arg("start").toInt(), 0, MAX_PATTERNS);
+        if (server.hasArg("band"))  a.bandWidth  = constrain(server.arg("band").toInt(), 1, SIZE_MAX);
+        if (server.hasArg("steps")) {
+          const char* err = parseAnimSteps(server.arg("steps"), a);
+          if (err) return sendError(err);
+        }
+        sanitizeAnim(a);
+        anims[n] = a;
+      } else if (action == "reset") {
+        char keep[NAME_LEN];
+        strcpy(keep, anims[n].name);
+        defaultAnim(n);
+        strcpy(anims[n].name, keep);
+      } else if (action == "delete") {
+        bool locked = false;
+        String users = lookUsers(1, n, locked, true);
+        if (users != "[]") return sendError(("can't delete, still used by: " + listText(users)).c_str());
+        memset(&anims[n], 0, sizeof(AnimDef));
+      } else {
+        return sendError("action must be new, copy, save, reset or delete");
+      }
     }
     saveAnims();
   }
-  server.send(200, "application/json", animsJson());
+  String j = animsJson();
+  if (newId > 0) j += ",\"newId\":" + String(newId);
+  j += "}";
+  server.send(200, "application/json", j);
 }
 
 // ---------- Drawing ----------
@@ -223,9 +266,14 @@ CRGB animFrameColor(int ch, const AnimDef& a, uint8_t f, int j) {
 
 void drawAnim(int ch) {
   const LightState& s = states[ch];
-  const AnimDef& a = anims[constrain((int)s.size, 1, MAX_ANIMS) - 1];
+  int an = constrain((int)s.size, 1, MAX_ANIMS) - 1;
+  const AnimDef& a = anims[an];
   int len = lineLength(ch);
   if (len <= 0) return;
+  if (!animExists(an)) {            // deleted / never made: background or off
+    for (int i = 0; i < len; i++) lineLight(ch, i) = bgOrOff(s);
+    return;
+  }
 
   // Where in the loop are we?
   uint32_t loopMs = 0;

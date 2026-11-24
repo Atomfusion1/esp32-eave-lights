@@ -3,7 +3,9 @@
 // /scenes.bin. Applying a scene restores everything at once.
 //
 // Zone and path definitions (which lights they use) are not stored in a scene; all
-// scenes share them. A scene's settings for an unused zone/path slot are ignored.
+// scenes share them. A scene's settings for an unused zone/path slot are ignored, and
+// are cleared when a zone/path is deleted (forgetChannel). Paintings and animations are
+// shared too, but the page never edits one a saved scene uses: it edits a copy.
 
 const char*    SCENES_FILE    = "/scenes.bin";
 const uint32_t SCENES_MAGIC   = 0x4E454353;  // "SCEN"
@@ -20,6 +22,95 @@ bool channelInUse(int ch) {
   if (ch < CH_ZONE0) return true;
   if (ch < CH_PATH0) return zones[ch - CH_ZONE0].used;
   return pathDefs[ch - CH_PATH0].used;
+}
+
+// ---- Who uses a painting / animation ----
+
+// kind 0 = painting idx, 1 = animation idx (both 0-based).
+bool stateUses(int kind, int idx, const LightState& s) {
+  if (s.mode == MODE_ANIM) {
+    int a = (int)s.size - 1;
+    return kind == 1 ? a == idx : animUsesPainting(a, idx);
+  }
+  return kind == 0 && s.mode == MODE_CUSTOM && (int)s.size - 1 == idx;
+}
+
+// True if a saved scene (a channel that is on in it) or a saved look uses it.
+bool savedUses(int kind, int idx) {
+  for (int sc = 0; sc < MAX_SCENES; sc++) {
+    if (!scenes[sc].used) continue;
+    for (int ch = 0; ch < NUM_CHANNELS; ch++)
+      if (channelInUse(ch) && scenes[sc].states[ch].on && stateUses(kind, idx, scenes[sc].states[ch])) return true;
+  }
+  for (int p = 0; p < MAX_PRESETS; p++)
+    if (presets[p].used && stateUses(kind, idx, presets[p].look)) return true;
+  return false;
+}
+
+void addUser(String& list, const String& item) {
+  String q = "\"" + item + "\"";
+  if (list.indexOf(q) >= 0) return;
+  if (list.length() > 1) list += ",";
+  list += q;
+}
+
+// JSON list of what uses painting/animation idx: ["Scene: Xmas","Look: Flag",...].
+// locked = a saved scene or look uses it (directly, or through an animation), so the
+// page edits a copy instead. withLive = also list animations and what the lights are
+// set to now (for deleting).
+String lookUsers(int kind, int idx, bool& locked, bool withLive) {
+  String list = "[";
+  locked = false;
+  for (int sc = 0; sc < MAX_SCENES; sc++) {
+    if (!scenes[sc].used) continue;
+    for (int ch = 0; ch < NUM_CHANNELS; ch++) {
+      if (channelInUse(ch) && scenes[sc].states[ch].on && stateUses(kind, idx, scenes[sc].states[ch])) {
+        addUser(list, String("Scene: ") + scenes[sc].name);
+        locked = true;
+        break;
+      }
+    }
+  }
+  for (int p = 0; p < MAX_PRESETS; p++) {
+    if (presets[p].used && stateUses(kind, idx, presets[p].look)) {
+      addUser(list, String("Look: ") + presets[p].name);
+      locked = true;
+    }
+  }
+  if (kind == 0) {
+    for (int a = 0; a < MAX_ANIMS; a++) {
+      if (!animExists(a) || !animUsesPainting(a, idx)) continue;
+      bool saved = savedUses(1, a);   // the animation is in a saved scene/look
+      if (saved) locked = true;
+      if (withLive || saved) addUser(list, String("Animation: ") + anims[a].name);
+    }
+  }
+  if (withLive) {
+    for (int ch = 0; ch < NUM_CHANNELS; ch++)
+      if (channelInUse(ch) && stateUses(kind, idx, states[ch])) addUser(list, String("Now set on: ") + channelName(ch));
+  }
+  return list + "]";
+}
+
+// ["A","B"] -> A, B
+String listText(const String& json) {
+  String t = json.substring(1, json.length() - 1);
+  t.replace("\",\"", ", ");
+  t.replace("\"", "");
+  return t;
+}
+
+// A deleted zone/path slot: scenes forget their settings for it, so a new zone or path
+// that later gets the same slot doesn't inherit them. Also leaves "All on".
+void forgetChannel(int ch, const LightState& def) {
+  bool changed = false;
+  for (int sc = 0; sc < MAX_SCENES; sc++) {
+    if (!scenes[sc].used) continue;
+    scenes[sc].states[ch] = def;
+    changed = true;
+  }
+  if (changed) saveScenesFile();
+  allOnMask &= ~(1UL << ch);
 }
 
 // Saves the current settings of every channel as `name`. Same name replaces it.
@@ -63,6 +154,22 @@ const char* deleteScene(int id) {
   scenes[id].used = false;
   scenes[id].name[0] = 0;
   saveScenesFile();
+  // Playlists drop their steps for it, so a new scene in this slot isn't played by them.
+  bool changed = false;
+  for (int p = 0; p < MAX_PROGRAMS; p++) {
+    Program& pr = programs[p];
+    if (!pr.used) continue;
+    int n = 0;
+    for (int k = 0; k < pr.stepCount; k++) {
+      if (pr.steps[k].scene == id) { changed = true; continue; }
+      pr.steps[n++] = pr.steps[k];
+    }
+    pr.stepCount = n;
+  }
+  if (changed) {
+    saveProgramsFile();
+    nudgeSchedule();
+  }
   return nullptr;
 }
 

@@ -165,7 +165,17 @@ const char* deleteZone(int id) {
   zones[id].rangeCount = 0;
   states[CH_ZONE0 + id] = ZONE_DEFAULT_STATE;
   rebuildZone(id);
-  rebuildAllZonePaths();   // paths that used this zone skip it now
+  // Paths drop their steps for it, and scenes forget it, so a new zone that gets this
+  // slot later isn't pulled into them.
+  for (int p = 0; p < MAX_PATHS; p++) {
+    PathDef& pd = pathDefs[p];
+    if (!pd.used) continue;
+    int n = 0;
+    for (int k = 0; k < pd.stepCount; k++) if (pd.steps[k].zone != id) pd.steps[n++] = pd.steps[k];
+    pd.stepCount = n;
+  }
+  forgetChannel(CH_ZONE0 + id, ZONE_DEFAULT_STATE);
+  rebuildAllZonePaths();
   markStateChanged();
   return nullptr;
 }

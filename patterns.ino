@@ -1,9 +1,13 @@
-// patterns - custom painted patterns: a color for each physical light.
+// patterns - custom paintings: a color for each physical light.
 //
-// MODE_CUSTOM shows pattern number `size` (1-MAX_PATTERNS) on the channel's lights,
-// scaled by its brightness; black lights show the background (or stay off).
-// A pattern belongs to the physical lights, so A12 has the same color whether it is
-// shown through strand A, a zone, a path or Whole house.
+// A library of up to MAX_PATTERNS named paintings. MODE_CUSTOM shows painting number
+// `size` (1-MAX_PATTERNS) on the channel's lights, scaled by its brightness; black lights
+// show the background (or stay off). A painting belongs to the physical lights, so A12
+// has the same color whether it is shown through strand A, a zone, a path or Whole house.
+//
+// Paintings used by a saved scene or saved look are "locked" (see lookUsers() in
+// scenes.ino): the page paints a copy instead, so saved scenes never change. A painting
+// that is used anywhere can't be deleted.
 //
 //   GET  /api/custom?pattern=N   binary, same layout as /api/frame:
 //                                [outputs], per output [count lo][count hi], RGB per light
@@ -17,34 +21,60 @@
 // Draft: with the page in "on Apply" mode, paint goes to a copy of the painting
 // (paintDraft, one painting at a time). Only the preview shows it, so the real lights
 // keep the saved painting until Apply.
-// Paint is saved to /patterns.bin PATTERN_SAVE_MS after the last change.
+// Paint is saved to /patterns.bin PATTERN_SAVE_MS after the last change; only the
+// paintings that changed are rewritten.
 
 const char*    PATTERNS_FILE    = "/patterns.bin";
 const uint32_t PATTERNS_MAGIC   = 0x4E545450;  // "PTTN"
-const uint16_t PATTERNS_VERSION = 1;
+const uint16_t PATTERNS_VERSION = 1;           // record = one painting; count grew 8 -> 30
 const uint32_t PATTERN_SAVE_MS  = 2000;
 
-// Painting names and saved brush colors (swatches), in /paintmeta.bin.
-//   GET  /api/paint-meta                               {"names":[8],"swatches":["#RRGGBB",...]}
-//   POST /api/paint-meta action=rename pattern=N name=Flag
-//   POST /api/paint-meta action=swatches list=RRGGBB,RRGGBB,...   (replaces the list)
+// Painting names, which slots exist, and saved brush colors (swatches), in /paintmeta.bin.
+//   GET  /api/paint-meta   {"paintings":[{"id","name","used":["Scene: Xmas",...],"locked"}],
+//                           "swatches":["#RRGGBB",...]}
+//   POST /api/paint-meta action=new name=Flag            -> also "newId"
+//                        action=copy pattern=N [name=]   -> also "newId"
+//                        action=rename pattern=N name=Flag
+//                        action=delete pattern=N         (refused while it is used)
+//                        action=swatches list=RRGGBB,RRGGBB,...   (replaces the list)
 #define MAX_SWATCHES 12
 const char*    PAINTMETA_FILE    = "/paintmeta.bin";
 const uint32_t PAINTMETA_MAGIC   = 0x4154454D;  // "META"
-const uint16_t PAINTMETA_VERSION = 1;
+const uint16_t PAINTMETA_VERSION = 2;
 
 struct PaintMeta {
   char    names[MAX_PATTERNS][NAME_LEN];
+  uint8_t exists[MAX_PATTERNS];      // 1 = this painting slot is in use
+  uint8_t swatchCount;
+  CRGB    swatches[MAX_SWATCHES];
+};
+// v1 (v0.18-v0.22): always 8 paintings, no exists[].
+struct PaintMetaV1 {
+  char    names[8][NAME_LEN];
   uint8_t swatchCount;
   CRGB    swatches[MAX_SWATCHES];
 };
 PaintMeta paintMeta;
+bool      paintMetaLoaded = false;   // false = no file yet (exists[] guessed from the paint)
 
-bool     patternsDirty   = false;
-uint32_t patternsDirtyMs = 0;
+bool     patternsDirty     = false;
+uint32_t patternsDirtyMs   = 0;
+uint32_t patternsDirtyMask = 0;      // which paintings changed since the last save
+
+bool paintingExists(int p) {
+  return p >= 0 && p < MAX_PATTERNS && paintMeta.exists[p];
+}
+
+void markPatternDirty(int p) {
+  patternsDirty = true;
+  patternsDirtyMs = millis();
+  patternsDirtyMask |= 1UL << p;
+}
 
 void defaultPaintMeta() {
+  memset(&paintMeta, 0, sizeof(paintMeta));
   for (int p = 0; p < MAX_PATTERNS; p++) snprintf(paintMeta.names[p], NAME_LEN, "Painting %d", p + 1);
+  paintMeta.exists[0] = 1;
   const CRGB defaults[] = { CRGB(255, 0, 0), CRGB(0, 255, 16), CRGB(255, 255, 255), CRGB(255, 140, 60),
                             CRGB(0, 48, 255), CRGB(255, 74, 0), CRGB(128, 0, 255), CRGB(255, 154, 0) };
   paintMeta.swatchCount = sizeof(defaults) / sizeof(defaults[0]);
@@ -53,19 +83,30 @@ void defaultPaintMeta() {
 
 void loadPaintMeta() {
   defaultPaintMeta();
+  paintMetaLoaded = false;
   if (!storageOk || !FFat.exists(PAINTMETA_FILE)) return;
   File f = FFat.open(PAINTMETA_FILE, "r");
   if (!f) return;
   FileHeader h;
-  PaintMeta m;
-  if (f.read((uint8_t*)&h, sizeof(h)) == sizeof(h) && h.magic == PAINTMETA_MAGIC &&
-      h.version == PAINTMETA_VERSION && h.recordSize == sizeof(PaintMeta) &&
-      f.read((uint8_t*)&m, sizeof(m)) == sizeof(m)) {
-    paintMeta = m;
-    for (int p = 0; p < MAX_PATTERNS; p++) paintMeta.names[p][NAME_LEN - 1] = 0;
-    paintMeta.swatchCount = min((int)paintMeta.swatchCount, MAX_SWATCHES);
+  if (f.read((uint8_t*)&h, sizeof(h)) == sizeof(h) && h.magic == PAINTMETA_MAGIC) {
+    if (h.version == PAINTMETA_VERSION && h.recordSize == sizeof(PaintMeta)) {
+      PaintMeta m;
+      if (f.read((uint8_t*)&m, sizeof(m)) == sizeof(m)) { paintMeta = m; paintMetaLoaded = true; }
+    } else if (h.version == 1 && h.recordSize == sizeof(PaintMetaV1)) {
+      // converter: the old 8 paintings keep their names and all stay
+      PaintMetaV1 m;
+      if (f.read((uint8_t*)&m, sizeof(m)) == sizeof(m)) {
+        for (int p = 0; p < 8; p++) { memcpy(paintMeta.names[p], m.names[p], NAME_LEN); paintMeta.exists[p] = 1; }
+        paintMeta.swatchCount = m.swatchCount;
+        memcpy(paintMeta.swatches, m.swatches, sizeof(m.swatches));
+        paintMetaLoaded = true;
+        Serial.println("Paintings: converted names from v1");
+      }
+    }
   }
   f.close();
+  for (int p = 0; p < MAX_PATTERNS; p++) paintMeta.names[p][NAME_LEN - 1] = 0;
+  paintMeta.swatchCount = min((int)paintMeta.swatchCount, MAX_SWATCHES);
 }
 
 void savePaintMeta() {
@@ -79,11 +120,16 @@ void savePaintMeta() {
 }
 
 String paintMetaJson() {
-  String j = "{\"names\":[";
+  String j = "{\"paintings\":[";
+  bool first = true;
   for (int p = 0; p < MAX_PATTERNS; p++) {
-    j += p ? ",\"" : "\"";
-    j += paintMeta.names[p];
-    j += "\"";
+    if (!paintMeta.exists[p]) continue;
+    bool locked = false;
+    String users = lookUsers(0, p, locked, false);
+    if (!first) j += ",";
+    first = false;
+    j += "{\"id\":" + String(p + 1) + ",\"name\":\"" + paintMeta.names[p] + "\",\"used\":" + users +
+         ",\"locked\":" + (locked ? "true" : "false") + "}";
   }
   j += "],\"swatches\":[";
   for (int k = 0; k < paintMeta.swatchCount; k++) {
@@ -92,18 +138,70 @@ String paintMetaJson() {
              paintMeta.swatches[k].r, paintMeta.swatches[k].g, paintMeta.swatches[k].b);
     j += c;
   }
-  j += "]}";
-  return j;
+  j += "]";
+  return j;   // caller adds "}" (and maybe "newId")
+}
+
+// A free painting slot, or -1.
+int freePainting() {
+  for (int p = 0; p < MAX_PATTERNS; p++) if (!paintMeta.exists[p]) return p;
+  return -1;
+}
+
+// "<name> copy" (cut to fit).
+void copyNameOf(const char* name, char* out) {
+  char tmp[NAME_LEN + 8];
+  snprintf(tmp, sizeof(tmp), "%s copy", name);
+  if (strlen(tmp) >= NAME_LEN) {   // keep " copy" visible
+    int keep = NAME_LEN - 1 - 5;
+    memcpy(tmp, name, keep);
+    strcpy(tmp + keep, " copy");
+  }
+  strncpy(out, tmp, NAME_LEN - 1);
+  out[NAME_LEN - 1] = 0;
 }
 
 void handlePaintMeta() {
   String action = server.arg("action");
-  if (action == "rename") {
-    int p = server.arg("pattern").toInt();
-    if (p < 1 || p > MAX_PATTERNS) return sendError("painting must be 1 to 8");
+  int newId = -1;
+  int p = server.arg("pattern").toInt() - 1;
+  if (action == "new" || action == "copy") {
+    if (action == "copy" && !paintingExists(p)) return sendError("painting not found");
+    int n = freePainting();
+    if (n < 0) return sendError("all 30 paintings are used; delete one first");
+    char clean[NAME_LEN];
+    if (server.hasArg("name") && copyName(server.arg("name"), clean)) {
+      strcpy(paintMeta.names[n], clean);
+    } else if (action == "copy") {
+      copyNameOf(paintMeta.names[p], paintMeta.names[n]);
+    } else {
+      snprintf(paintMeta.names[n], NAME_LEN, "Painting %d", n + 1);
+    }
+    if (action == "copy") {
+      // a copy of what the lights would show after Apply: the draft if there is one
+      memcpy(patterns[n], draftPattern == p ? paintDraft : patterns[p], sizeof(patterns[0]));
+    } else {
+      memset(patterns[n], 0, sizeof(patterns[0]));
+    }
+    paintMeta.exists[n] = 1;
+    markPatternDirty(n);
+    savePaintMeta();
+    newId = n + 1;
+  } else if (action == "rename") {
+    if (!paintingExists(p)) return sendError("painting not found");
     char clean[NAME_LEN];
     if (!copyName(server.arg("name"), clean)) return sendError("enter a name");
-    strcpy(paintMeta.names[p - 1], clean);
+    strcpy(paintMeta.names[p], clean);
+    savePaintMeta();
+  } else if (action == "delete") {
+    if (!paintingExists(p)) return sendError("painting not found");
+    bool locked = false;
+    String users = lookUsers(0, p, locked, true);
+    if (users != "[]") return sendError(("can't delete, still used by: " + listText(users)).c_str());
+    paintMeta.exists[p] = 0;
+    if (draftPattern == p) draftPattern = -1;
+    memset(patterns[p], 0, sizeof(patterns[0]));
+    markPatternDirty(p);
     savePaintMeta();
   } else if (action == "swatches") {
     String list = server.arg("list");
@@ -122,9 +220,12 @@ void handlePaintMeta() {
     paintMeta.swatchCount = n;
     savePaintMeta();
   } else if (action.length()) {
-    return sendError("action must be rename or swatches");
+    return sendError("action must be new, copy, rename, delete or swatches");
   }
-  server.send(200, "application/json", paintMetaJson());
+  String j = paintMetaJson();
+  if (newId > 0) j += ",\"newId\":" + String(newId);
+  j += "}";
+  server.send(200, "application/json", j);
 }
 
 // Painting p's colors on output o: its draft while drawing the preview, else the saved one.
@@ -137,10 +238,11 @@ void drawCustom(int ch) {
   int p = constrain((int)s.size, 1, MAX_PATTERNS) - 1;
   int len = lineLength(ch);
   CRGB base = bgOrOff(s);
+  bool have = paintingExists(p);
   for (int i = 0; i < len; i++) {
     int o, idx;
     if (!linePoint(ch, i, o, idx)) continue;           // path gap
-    CRGB c = paintingRow(p, o)[idx];
+    CRGB c = have ? paintingRow(p, o)[idx] : CRGB(0, 0, 0);
     lineLight(ch, i) = (c.r | c.g | c.b) ? litColor(c, s, 255) : base;
   }
 }
@@ -201,17 +303,15 @@ void handlePostCustom() {
   if (action == "commit" || action == "discard") {
     if (action == "commit" && draftPattern >= 0) {
       memcpy(patterns[draftPattern], paintDraft, sizeof(paintDraft));
-      patternsDirty = true;
-      patternsDirtyMs = millis();
+      markPatternDirty(draftPattern);
     }
     draftPattern = -1;
     server.send(200, "application/json", "{\"ok\":true}");
     return;
   }
 
-  int p = server.arg("pattern").toInt();
-  if (p < 1 || p > MAX_PATTERNS) return sendError("pattern must be 1 to 8");
-  p--;
+  int p = server.arg("pattern").toInt() - 1;
+  if (!paintingExists(p)) return sendError("painting not found");
   // draft=1: paint into the draft (a copy of the painting) instead of the painting itself
   bool draft = server.arg("draft") == "1";
   if (draft && draftPattern != p) {
@@ -231,10 +331,7 @@ void handlePostCustom() {
   } else {
     painted = paintLights(p, draft, server.arg("lights"), color);
   }
-  if (!draft) {
-    patternsDirty = true;
-    patternsDirtyMs = millis();
-  }
+  if (!draft) markPatternDirty(p);
   server.send(200, "application/json", String("{\"ok\":true,\"painted\":") + painted + "}");
 }
 
@@ -242,38 +339,76 @@ void handlePatternSave() {
   if (!patternsDirty || millis() - patternsDirtyMs < PATTERN_SAVE_MS) return;
   if (savesBlocked) return;
   patternsDirty = false;
-  savePatternsFile();
+  savePatternsFile(false);
 }
 
 void loadPatterns() {
+  if (!patterns) {
+    size_t bytes = (size_t)MAX_PATTERNS * sizeof(patterns[0]);
+    patterns = (CRGB(*)[NUM_OUTPUTS][MAX_LEDS])ps_malloc(bytes);           // PSRAM
+    if (!patterns) patterns = (CRGB(*)[NUM_OUTPUTS][MAX_LEDS])malloc(bytes);
+  }
+  memset(patterns, 0, (size_t)MAX_PATTERNS * sizeof(patterns[0]));
+  draftPattern = -1;
+  patternsDirtyMask = 0;
   loadPaintMeta();
-  memset(patterns, 0, sizeof(patterns));
   if (!storageOk || !FFat.exists(PATTERNS_FILE)) return;
   File f = FFat.open(PATTERNS_FILE, "r");
   if (!f) return;
   FileHeader h;
   if (f.read((uint8_t*)&h, sizeof(h)) != sizeof(h) || h.magic != PATTERNS_MAGIC ||
       h.version != PATTERNS_VERSION || h.recordSize != sizeof(patterns[0])) {
-    Serial.println("Patterns: file is from a different firmware layout, starting empty");
+    Serial.println("Paintings: file is from a different firmware layout, starting empty");
     f.close();
     return;
   }
+  int loaded = 0;
   for (int p = 0; p < h.count && p < MAX_PATTERNS; p++) {
     if (f.read((uint8_t*)patterns[p], sizeof(patterns[0])) != sizeof(patterns[0])) break;
+    loaded++;
   }
   f.close();
-  Serial.println("Patterns: loaded");
+  // Older firmware with no names file: every painting that has paint in it exists.
+  if (!paintMetaLoaded) {
+    for (int p = 0; p < loaded; p++) {
+      for (int o = 0; o < NUM_OUTPUTS && !paintMeta.exists[p]; o++)
+        for (int i = 0; i < MAX_LEDS; i++)
+          if (patterns[p][o][i].r | patterns[p][o][i].g | patterns[p][o][i].b) { paintMeta.exists[p] = 1; break; }
+    }
+  }
+  // An old file with fewer records: rewrite it at full size so single paintings can be saved.
+  if (h.count != MAX_PATTERNS) savePatternsFile(true);
+  Serial.printf("Paintings: loaded %d\n", loaded);
 }
 
-void savePatternsFile() {
-  if (!storageOk || savesBlocked) return;
+// Saves the paintings that changed (all = every painting, rewriting the file).
+void savePatternsFile(bool all) {
+  if (!storageOk || savesBlocked || !patterns) return;
+  const size_t rec = sizeof(patterns[0]);
+  if (!all && FFat.exists(PATTERNS_FILE)) {
+    File f = FFat.open(PATTERNS_FILE, "r+");
+    FileHeader h;
+    if (f && f.read((uint8_t*)&h, sizeof(h)) == sizeof(h) && h.magic == PATTERNS_MAGIC &&
+        h.recordSize == rec && h.count == MAX_PATTERNS) {
+      for (int p = 0; p < MAX_PATTERNS; p++) {
+        if (!(patternsDirtyMask & (1UL << p))) continue;
+        f.seek(sizeof(h) + p * rec);
+        f.write((const uint8_t*)patterns[p], rec);
+      }
+      f.close();
+      patternsDirtyMask = 0;
+      return;
+    }
+    if (f) f.close();
+  }
   File f = FFat.open(PATTERNS_FILE, "w");
   if (!f) {
-    Serial.println("Patterns: could not write file");
+    Serial.println("Paintings: could not write file");
     return;
   }
-  FileHeader h = { PATTERNS_MAGIC, PATTERNS_VERSION, (uint16_t)sizeof(patterns[0]), MAX_PATTERNS };
+  FileHeader h = { PATTERNS_MAGIC, PATTERNS_VERSION, (uint16_t)rec, MAX_PATTERNS };
   f.write((const uint8_t*)&h, sizeof(h));
-  f.write((const uint8_t*)patterns, sizeof(patterns));
+  f.write((const uint8_t*)patterns, MAX_PATTERNS * rec);
   f.close();
+  patternsDirtyMask = 0;
 }

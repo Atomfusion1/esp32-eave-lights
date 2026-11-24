@@ -548,7 +548,14 @@ void handlePrograms() {
   } else if (action == "next") {
     nextProgramStep();
   } else if (action == "calendar") {
-    setScheduleOn(argIsTrue("on"));
+    if (server.hasArg("on")) setScheduleOn(argIsTrue("on"));
+    if (server.hasArg("fallback")) {   // -1 keep, -2 off, 0+ playlist
+      int fb = server.arg("fallback").toInt();
+      if (fb < FALLBACK_OFF || fb >= MAX_PROGRAMS) return sendError("fallback must be -1, -2 or a playlist");
+      fallbackProgram = fb;
+      nudgeSchedule();
+      markStateChanged();
+    }
   } else if (action == "timer") {
     setTimerFromArgs();
   } else if (action.length()) {

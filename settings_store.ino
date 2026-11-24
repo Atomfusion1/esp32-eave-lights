@@ -118,6 +118,7 @@ void loadState() {
     if (prefs.getBytesLength("timer") == sizeof(t) && prefs.getBytes("timer", &t, sizeof(t)) == sizeof(t)) lightTimer = t;
   }
   manualProgram = prefs.getChar("mprog", -1);
+  fallbackProgram = prefs.getChar("fallback", FALLBACK_KEEP);
   prefs.end();
 
   Serial.println("State loaded:");
@@ -168,6 +169,7 @@ void handleStateSave() {
   prefs.putBool("sched", scheduleOn);
   prefs.putBytes("timer", &lightTimer, sizeof(lightTimer));
   prefs.putChar("mprog", manualProgram);
+  prefs.putChar("fallback", fallbackProgram);
   prefs.end();
 
   // Zone and path settings (on/off, color, ...) live in their files, so write them too.

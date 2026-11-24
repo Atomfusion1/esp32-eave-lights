@@ -148,6 +148,9 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <div class="row" id="progNowBtns" style="margin-top:8px" hidden><button class="btn" id="progNext">Next scene ▶</button><button class="btn danger" id="progStop">Stop</button></div>
 <label style="display:flex;gap:8px;align-items:center;margin:14px 0 4px;color:var(--text);font-size:15px"><input type="checkbox" id="schedOn" style="width:20px;height:20px;accent-color:var(--accent)"> Follow the calendar</label>
 <p class="hint" id="clockTxt" style="margin:0 0 10px"></p>
+<div id="fallbackBox" style="margin:0 0 12px"><label>On days no playlist's dates cover</label>
+<select id="fallbackSel"></select>
+<p class="hint" id="fallbackHint" style="margin:6px 0 0"></p></div>
 <div id="progList"></div>
 <p class="hint" id="noProgs">No playlists yet. A playlist rotates through scenes, e.g. Xmas classic 10 min → Snowfall 5 min, and can have dates so it runs by itself every year.</p>
 <button class="btn" id="progNew" style="margin-top:10px">+ New playlist</button>
@@ -227,14 +230,18 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 </div>
 <p class="hint" id="noColorHint" hidden>This effect makes its own colors.</p>
 <div id="patBox" hidden style="margin-top:14px">
-<label>Painting to show (a painting = every light colored by you; keep up to 8)</label>
-<div class="row"><select id="patSel"></select><button class="btn" id="patRename">Rename</button></div>
+<label>Painting to show (a painting = every light colored by you; keep up to 30)</label>
+<div class="row"><select id="patSel"></select></div>
+<div class="row" style="margin-top:8px"><button class="btn" id="patNew">+ New</button><button class="btn" id="patCopy">Copy</button><button class="btn" id="patRename">Rename</button><button class="btn danger" id="patDel">Delete</button></div>
+<p class="hint" id="patUsed"></p>
 <button class="btn primary" id="paintBtn" style="margin-top:10px;width:100%">✎ Paint it</button>
 </div>
 <div id="animBox" hidden style="margin-top:14px">
-<label>Animation to play (steps that move and fade your colors or paintings; keep up to 8)</label>
+<label>Animation to play (steps that move and fade your colors or paintings; keep up to 30)</label>
 <div class="row"><select id="animSel"></select><button class="btn primary" id="animEditBtn">✎ Edit steps</button></div>
+<div class="row" style="margin-top:8px"><button class="btn" id="animNew">+ New</button><button class="btn" id="animCopy">Copy</button><button class="btn danger" id="animDel">Delete</button></div>
 <p class="hint" id="animSummary"></p>
+<p class="hint" id="animUsed"></p>
 </div>
 <div id="animTools" class="sub" hidden>
 <label>Name</label><input id="animName" type="text" maxlength="23">
@@ -582,17 +589,21 @@ function renderLook(o){const m=modeById(o.mode);
  // colors
  $('colorBox').hidden=!m.colors;$('noColorHint').hidden=!!m.colors;
  $('noColorHint').textContent=m.noColorText||'This effect makes its own colors.';
- // custom: the painting number lives in `size` (1-8)
+ // custom: the painting number lives in `size` (1-30)
  $('patBox').hidden=!m.pattern;
- if(m.pattern){const n=Math.min(8,Math.max(1,o.size));
-  $('patSel').innerHTML=paintNames.map((nm,k)=>'<option value="'+(k+1)+'">'+esc(nm)+'</option>').join('');$('patSel').value=String(n);
-  $('paintBtn').textContent=painting?'Painting "'+paintNames[paintPattern-1]+'"…':'✎ Paint "'+paintNames[n-1]+'"';}
+ if(m.pattern){const n=Math.min(30,Math.max(1,o.size)),p=paintById(n);
+  $('patSel').innerHTML=(p?'':'<option value="'+n+'">(deleted painting)</option>')+paintList.map(q=>'<option value="'+q.id+'">'+(q.locked?'🔒 ':'')+esc(q.name)+'</option>').join('');$('patSel').value=String(n);
+  $('paintBtn').textContent=painting?'Painting "'+paintName(paintPattern)+'"…':p&&p.locked?'✎ Paint a copy of "'+p.name+'"':'✎ Paint "'+paintName(n)+'"';
+  $('paintBtn').disabled=!p&&!painting;
+  $('patUsed').textContent=usedText(p);$('patCopy').disabled=$('patRename').disabled=$('patDel').disabled=!p;}
  else if(painting)stopPainting();
- // animation: the animation number also lives in `size` (1-8)
+ // animation: the animation number also lives in `size` (1-30)
  $('animBox').hidden=!m.anim;
- if(m.anim){const n=Math.min(8,Math.max(1,o.size));
-  $('animSel').innerHTML=animList.map(a=>'<option value="'+a.id+'">'+esc(a.name)+'</option>').join('');$('animSel').value=String(n);
-  $('animSummary').textContent=animList[n-1]?animSummary(animList[n-1]):'';
+ if(m.anim){const n=Math.min(30,Math.max(1,o.size)),a=animById(n);
+  $('animSel').innerHTML=(a?'':'<option value="'+n+'">(deleted animation)</option>')+animList.map(q=>'<option value="'+q.id+'">'+(q.locked?'🔒 ':'')+esc(q.name)+'</option>').join('');$('animSel').value=String(n);
+  $('animSummary').textContent=a?animSummary(a):'';$('animUsed').textContent=usedText(a);
+  $('animEditBtn').disabled=!a;$('animCopy').disabled=$('animDel').disabled=!a;
+  if(!animEditing)$('animEditBtn').textContent=a&&a.locked?'✎ Edit a copy':'✎ Edit steps';
   if(animEditing&&animEditing.id!==n)closeAnimEditor();}
  else if(animEditing)closeAnimEditor();
  const multi=m.colors==='multi',list=multi?colorsOf(o):[o.color];
@@ -626,7 +637,7 @@ $('colorLess').onclick=()=>{const o=cur();send({colorCount:Math.max(1,colorsOf(o
 $('colorMore').onclick=()=>{const o=cur();send({colorCount:Math.min(5,colorsOf(o).length+1)});};
 
 // ================= Saved looks =================
-function showLooks(list){looks=list||[];
+function showLooks(list){looks=list||[];refreshLocks();
  $('looks').innerHTML=looks.map(p=>{const m=modeById(p.mode),cs=m.colors==='multi'?colorsOf(p):m.colors?[p.color]:[];
   return '<span class="chip" data-id="'+p.id+'" title="'+esc(m.name)+'">'+
   (m.colors?'':'<span class="dot" style="background:linear-gradient(90deg,red,yellow,lime,cyan,blue,magenta)"></span>')+
@@ -647,7 +658,7 @@ $('saveLook').onclick=async()=>{if(hasPending()&&!confirm('Saving uses the setti
  if(j.error)showErr('lookErr',j.error);else{showErr('lookErr');showLooks(j.presets);}};
 
 // ================= Scenes =================
-function showScenes(list){sceneList=list||[];
+function showScenes(list){sceneList=list||[];refreshLocks();
  $('scenes').innerHTML=sceneList.map(s=>'<span class="chip" data-id="'+s.id+'" title="'+s.on+' parts on">'+
   s.colors.map(c=>'<span class="dot" style="background:'+c+'"></span>').join('')+esc(s.name)+
   '<span class="x" data-x="'+s.id+'" title="Delete">×</span></span>').join('');
@@ -677,6 +688,14 @@ const fmtMins=s=>s%60?(s/60).toFixed(1).replace(/\.0$/,''):String(s/60);
  ['fromM','toM'].forEach(id=>$(id).innerHTML=mo);['fromD','toD'].forEach(id=>$(id).innerHTML=dy);})();
 function showPrograms(j){progData=j;renderTimer(j.timer);
  $('schedOn').checked=j.scheduleOn;
+ // what plays on dates no playlist covers: -1 keep, -2 off, 0+ an everyday playlist
+ $('fallbackBox').hidden=!j.scheduleOn;
+ $('fallbackSel').innerHTML='<option value="-1">Keep the last look (lights stay as they are)</option><option value="-2">Turn the lights off</option>'+
+  j.programs.map(p=>'<option value="'+p.id+'">Play "'+esc(p.name)+'"</option>').join('');
+ $('fallbackSel').value=String(j.fallback==null?-1:j.fallback);
+ $('fallbackHint').textContent=j.fallback>=0?'Tip: a playlist with one everyday scene (e.g. warm white) works well here.'
+  :j.fallback===-2?'When a playlist\'s dates end, the lights go off and stay off until the next playlist\'s dates.'
+  :'After e.g. Christmas ends, its look stays on until another playlist\'s dates start.';
  $('clockTxt').textContent=j.clock?'Clock: '+j.clock+(j.stoppedToday?' · calendar paused until tomorrow (Stop was pressed)':''):
   'Clock not set yet (needs internet). Playlists you start with ▶ still work.';
  const a=j.active,ap=a&&j.programs.find(p=>p.id===a.id);
@@ -719,6 +738,7 @@ async function progAction(p){const j=await post('/api/programs',p);if(j.error){s
  showErr('progErr');showPrograms(j);try{show(await (await fetch('/api/state')).json());}catch(e){}return j;}
 function loadPrograms(){return fetch('/api/programs').then(r=>r.json()).then(showPrograms).catch(()=>{});}
 $('schedOn').onchange=e=>progAction({action:'calendar',on:e.target.checked?1:0});
+$('fallbackSel').onchange=e=>progAction({action:'calendar',fallback:e.target.value});
 $('progNext').onclick=()=>progAction({action:'next'});
 $('progStop').onclick=()=>progAction({action:'stop'});
 function renderProgSteps(){$('progNeedsScenes').hidden=sceneList.length>0;$('progStepHead').hidden=!progSteps.length;
@@ -783,7 +803,15 @@ function resetZoneForm(){editZone=-1;$('zoneName').value='';$('zoneRanges').valu
 function startEdit(slot){const z=zoneBySlot(slot);editZone=slot;$('zoneName').value=z.name;$('zoneRanges').value=z.ranges;
  $('zoneFormTitle').textContent='Edit zone: '+z.name;$('zoneCancel').hidden=false;showErr('zoneErr');$('zoneName').focus();}
 async function delZone(slot){const z=zoneBySlot(slot);if(!confirm('Delete zone "'+z.name+'"?'))return;
- const j=await post('/api/zones',{action:'delete',id:slot});if(j.error)showErr('zoneErr',j.error);else{if(editZone===slot)resetZoneForm();show(j);}}
+ const j=await post('/api/zones',{action:'delete',id:slot});if(j.error)showErr('zoneErr',j.error);else{if(editZone===slot)resetZoneForm();show(j);unlinkZoneFromLayout(slot,z.name);}}
+// The house photos' sections for a deleted zone are kept (so the drawn line isn't lost) but
+// unlinked, so a new zone that later gets the same slot number doesn't take them over.
+async function unlinkZoneFromLayout(slot,name){try{
+ const r=await fetch('/files/layout.json',{cache:'no-store'});if(!r.ok)return;const lay=await r.json();let n=0;
+ (lay.views||[]).forEach(v=>(v.placements||[]).forEach(p=>{if(p.item==='z'+slot){p.item='';p.itemName=name+' (deleted zone)';n++;}}));
+ if(!n)return;
+ await fetch('/api/layout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(lay)});
+ if(editorFrame.src)editorFrame.src='/editor?embed=1';loadLayout();}catch(e){}}
 $('zoneShow').onclick=async()=>{const j=await locate($('zoneRanges').value.trim());showErr('zoneErr',j.error);};
 $('zoneSave').onclick=async()=>{const p={action:'save',name:$('zoneName').value,ranges:$('zoneRanges').value};if(editZone>=0)p.id=editZone;
  const j=await post('/api/zones',p);if(j.error){showErr('zoneErr',j.error);return;}
@@ -838,7 +866,7 @@ $('backupBtn').onclick=async()=>{const say=t=>$('backupStatus').textContent=t;
    strands:s.outputs.map(o=>({id:o.id,count:o.count})),
    channels:Object.assign({house:chanFields(s.house)},...s.outputs.map(o=>({[o.id.toLowerCase()]:chanFields(o)}))),
    timer:progData&&progData.timer?(({enabled,onMode,onClock,onOffset,offMode,offClock,offOffset,lat,lon})=>({enabled:enabled?1:0,onMode,onClock,onOffset,offMode,offClock,offOffset,lat,lon}))(progData.timer):null,
-   calendar:progData?(progData.scheduleOn?1:0):null,files};
+   calendar:progData?(progData.scheduleOn?1:0):null,fallback:progData?progData.fallback:null,files};
   const blob=new Blob([JSON.stringify(backup)],{type:'application/json'}),a=document.createElement('a');
   a.href=URL.createObjectURL(blob);a.download='eave-lights-backup-'+new Date().toISOString().slice(0,10)+'.json';a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),5000);say('Backup downloaded ('+files.length+' files, '+Math.round(blob.size/1024)+' KB).');}
@@ -860,6 +888,7 @@ $('restoreFile').onchange=async e=>{const f=e.target.files[0];e.target.value='';
   for(const [id,fields] of Object.entries(b.channels||{}))await post('/api/state',Object.assign({output:id},fields));
   if(b.timer)await post('/api/programs',Object.assign({action:'timer'},b.timer));
   if(b.calendar!==null&&b.calendar!==undefined)await post('/api/programs',{action:'calendar',on:b.calendar});
+  if(b.fallback!==null&&b.fallback!==undefined)await post('/api/programs',{action:'calendar',fallback:b.fallback});
   await loadPrograms();
   await loadLooksAndScenes();show(await (await fetch('/api/state')).json());layout=null;loadLayout();
   if(editorFrame.src)editorFrame.src='/editor?embed=1';
@@ -927,7 +956,7 @@ async function discardPaint(){if(!paintPending)return;paintPending=false;clearTi
 async function startPainting(n){paintPattern=n;
  try{patternFrame=new Uint8Array(await (await fetch('/api/custom?pattern='+n+(paintPending?'&draft=1':''),{cache:'no-store'})).arrayBuffer());}
  catch(e){$('status').textContent='Could not load the pattern';return;}
- painting=true;$('paintTools').hidden=false;$('paintNum').textContent='"'+paintNames[n-1]+'"';
+ painting=true;$('paintTools').hidden=false;$('paintNum').textContent='"'+paintName(n)+'"';
  $('photoCv').style.touchAction='none';$('stripBox').style.touchAction='none';
  if(st)renderLook(cur());drawLive();}
 function stopPainting(){flushStroke();painting=false;patternFrame=null;$('paintTools').hidden=true;
@@ -972,21 +1001,46 @@ function paintAt(box,e){if(!painting||!patternFrame)return;
  el.addEventListener('pointermove',e=>{if(painting&&paintDown)paintAt(box,e);});
  el.addEventListener('pointerup',()=>{if(paintDown){paintDown=false;flushStroke();}});
  el.addEventListener('pointercancel',()=>{paintDown=false;flushStroke();});});
-$('paintBtn').onclick=()=>{if(painting)stopPainting();else startPainting(Math.min(8,Math.max(1,cur().size)));};
+// A painting used by a saved scene or look is locked: painting it makes a copy first,
+// so saved scenes never change.
+$('paintBtn').onclick=async()=>{if(painting){stopPainting();return;}
+ const n=Math.min(30,Math.max(1,cur().size)),p=paintById(n);if(!p)return;
+ if(p.locked){if(!confirm('"'+p.name+'" is used by '+p.used.join(', ')+'.\nChanging it would change those too.\n\nOK = make a copy and paint the copy.'))return;
+  const id=await copyPainting(p.id);if(id)startPainting(id);return;}
+ startPainting(n);};
+// Copies painting id, shows the copy on what you're controlling. Returns the new id.
+async function copyPainting(id){const j=await post('/api/paint-meta',{action:'copy',pattern:id});
+ if(j.error){alert(j.error);return 0;}showPaintMeta(j);await send({size:j.newId});return j.newId;}
+$('patNew').onclick=async()=>{const name=prompt('Name for the new painting (e.g. Flag, Pumpkins):');if(name===null)return;
+ const j=await post('/api/paint-meta',{action:'new',name});if(j.error){alert(j.error);return;}
+ showPaintMeta(j);await send({size:j.newId});};
+$('patCopy').onclick=()=>copyPainting(+$('patSel').value);
+$('patDel').onclick=async()=>{const n=+$('patSel').value;if(!confirm('Delete painting "'+paintName(n)+'"?'))return;
+ if(painting&&paintPattern===n)stopPainting();
+ const j=await post('/api/paint-meta',{action:'delete',pattern:n});if(j.error){alert(j.error);return;}showPaintMeta(j);};
 $('paintDone').onclick=stopPainting;
 $('paintTool').querySelectorAll('button').forEach(b=>b.onclick=()=>{flushStroke();paintTool=b.dataset.tool;
  $('paintTool').querySelectorAll('button').forEach(x=>x.classList.toggle('sel',x===b));});
 $('brush').oninput=()=>{flushStroke();if(paintTool!=='paint')setPaintTool('paint');};
 // Fill / Clear: only the lights of what's being controlled.
 async function paintAll(clear){const lights=targetRangesText();if(!lights)return;
- if(!confirm((clear?'Clear the lights of ':'Fill the lights of ')+curName()+(clear?'':' with the brush color')+' in "'+paintNames[paintPattern-1]+'"?'))return;
+ if(!confirm((clear?'Clear the lights of ':'Fill the lights of ')+curName()+(clear?'':' with the brush color')+' in "'+paintName(paintPattern)+'"?'))return;
  await flushStroke();markPaintPending();await post('/api/custom',Object.assign({pattern:paintPattern,lights,color:clear?'000000':brushHex()},paintDraftArg()));
  startPainting(paintPattern);}
 $('paintFill').onclick=()=>paintAll(false);$('paintClear').onclick=()=>paintAll(true);
 
 // ---- Painting names and brush swatches (saved on the board) ----
-let paintNames=['Painting 1','Painting 2','Painting 3','Painting 4','Painting 5','Painting 6','Painting 7','Painting 8'],swatchList=[],swatchDelMode=false;
-function showPaintMeta(j){if(!j||j.error)return;paintNames=j.names;swatchList=j.swatches;renderSwatches();if(st)renderLook(cur());}
+// paintList: the painting library [{id,name,used:["Scene: Xmas",...],locked}] from /api/paint-meta.
+let paintList=[],swatchList=[],swatchDelMode=false;
+// Saved scenes/looks changed: reload which paintings/animations they lock.
+let lockTimer=null;
+function refreshLocks(){clearTimeout(lockTimer);lockTimer=setTimeout(()=>{loadPaintMeta();loadAnims();},300);}
+// "🔒 Used by Scene: Xmas, …" for a painting or animation.
+function usedText(x){if(!x||!x.used||!x.used.length)return '';
+ return x.locked?'🔒 Used by '+x.used.join(', ')+'. Editing makes a copy, so those never change.':'Used by '+x.used.join(', ')+'.';}
+const paintById=id=>paintList.find(p=>p.id===id);
+const paintName=id=>{const p=paintById(id);return p?p.name:'(deleted painting)';};
+function showPaintMeta(j){if(!j||j.error)return;paintList=j.paintings||[];swatchList=j.swatches;renderSwatches();if(st)renderLook(cur());}
 function loadPaintMeta(){return fetch('/api/paint-meta').then(r=>r.json()).then(showPaintMeta).catch(()=>{});}
 // Saved colors also appear as suggestions inside every color picker on the page
 // (<datalist> on input type=color: Chrome/Edge show them in the picker popup).
@@ -1011,18 +1065,19 @@ async function saveSwatches(list){showPaintMeta(await post('/api/paint-meta',{ac
 $('swatchAdd').onclick=()=>{const c=$('brush').value.toUpperCase();if(swatchList.map(x=>x.toUpperCase()).includes(c))return;saveSwatches(swatchList.concat([c]));};
 $('swatchDel').onclick=()=>{swatchDelMode=!swatchDelMode;renderSwatches();};
 $('patSel').onchange=async e=>{const n=+e.target.value;
- if(paintPending&&n!==paintPattern){if(confirm('Apply your paint changes to "'+paintNames[paintPattern-1]+'" first?\n\nOK = apply them, Cancel = throw them away.'))await commitPaint();else await discardPaint();updateApplyBar();}
+ if(paintPending&&n!==paintPattern){if(confirm('Apply your paint changes to "'+paintName(paintPattern)+'" first?\n\nOK = apply them, Cancel = throw them away.'))await commitPaint();else await discardPaint();updateApplyBar();}
  send({size:n});if(painting)startPainting(n);};
-$('patRename').onclick=async()=>{const n=+$('patSel').value,name=prompt('Name for painting '+n+':',paintNames[n-1]);
+$('patRename').onclick=async()=>{const n=+$('patSel').value,name=prompt('Name for painting '+n+':',paintName(n));
  if(name)showPaintMeta(await post('/api/paint-meta',{action:'rename',pattern:n,name}));};
 $('brush').addEventListener('input',renderSwatches);$('brush').addEventListener('change',renderSwatches);
 
 // ================= Animations =================
 // Steps text (same as the firmware): h:MS hold, m<L>:MS[s] move, f<F>:MS fade to, c<F>:MS cut to.
-// Frame F: 0 = the colors in bands, 1-8 = a painting. Saved animations play at once everywhere.
+// Frame F: 0 = the colors in bands, 1-30 = a painting. Saved animations play at once everywhere.
 let animList=[],animEditing=null;   // animEditing: {id,name,start,band,steps:[{k,n,ms,s}]}
-const frameName=f=>f?(paintNames[f-1]||'Painting '+f):'Colors';
-const frameOptions=()=>'<option value="0">Colors</option>'+paintNames.map((nm,k)=>'<option value="'+(k+1)+'">'+esc(nm)+'</option>').join('');
+const animById=id=>animList.find(a=>a.id===id);
+const frameName=f=>f?paintName(f):'Colors';
+const frameOptions=()=>'<option value="0">Colors</option>'+paintList.map(p=>'<option value="'+p.id+'">'+esc(p.name)+'</option>').join('');
 function parseAnimSteps(t){return (t||'').split(',').filter(x=>x).map(x=>{const m=x.match(/^([hmfc])(-?\d*):(\d+)(s?)$/);
  return m?{k:m[1],n:+(m[2]||0),ms:+m[3],s:!!m[4]}:{k:'h',n:0,ms:1000,s:false};});}
 const animStepsText=list=>list.map(s=>s.k+(s.k==='h'?'':s.n)+':'+s.ms+(s.k==='m'&&s.s?'s':'')).join(',');
@@ -1035,7 +1090,7 @@ function animSummary(a){const list=parseAnimSteps(a.steps);
  return frameName(a.start)+': '+(list.length?list.map(stepText).join(' → ')+', then again':'no steps (stays still)');}
 function showAnims(j){if(!j||!j.anims)return;animList=j.anims;if(st)renderLook(cur());}
 function loadAnims(){return fetch('/api/anims').then(r=>r.json()).then(showAnims).catch(()=>{});}
-function openAnimEditor(n){const a=animList[n-1];if(!a)return;
+function openAnimEditor(n){const a=animById(n);if(!a)return;
  animEditing={id:n,name:a.name,start:a.start,band:a.band,steps:parseAnimSteps(a.steps)};
  $('animTools').hidden=false;$('animEditBtn').textContent='Editing…';showErr('animErr');renderAnimEditor();}
 function closeAnimEditor(){animEditing=null;$('animTools').hidden=true;$('animEditBtn').textContent='✎ Edit steps';}
@@ -1073,7 +1128,21 @@ function renderAnimEditor(){const a=animEditing;if(!a)return;
   row.querySelector('[data-a=del]').onclick=()=>{a.steps.splice(k,1);renderAnimEditor();};});
  updateAnimLoop();}
 $('animSel').onchange=e=>{const n=+e.target.value;send({size:n});if(animEditing)openAnimEditor(n);};
-$('animEditBtn').onclick=()=>{if(animEditing)closeAnimEditor();else openAnimEditor(+$('animSel').value);};
+// Locked (used by a saved scene or look): edit a copy instead.
+$('animEditBtn').onclick=async()=>{if(animEditing){closeAnimEditor();return;}
+ const a=animById(+$('animSel').value);if(!a)return;
+ if(a.locked){if(!confirm('"'+a.name+'" is used by '+a.used.join(', ')+'.\nChanging it would change those too.\n\nOK = make a copy and edit the copy.'))return;
+  const id=await copyAnim(a.id);if(id)openAnimEditor(id);return;}
+ openAnimEditor(a.id);};
+async function copyAnim(id){const j=await post('/api/anims',{action:'copy',id});
+ if(j.error){alert(j.error);return 0;}showAnims(j);await send({size:j.newId});return j.newId;}
+$('animNew').onclick=async()=>{const name=prompt('Name for the new animation (e.g. Candy dance):');if(name===null)return;
+ const j=await post('/api/anims',{action:'new',name});if(j.error){alert(j.error);return;}
+ showAnims(j);await send({size:j.newId});openAnimEditor(j.newId);};
+$('animCopy').onclick=()=>copyAnim(+$('animSel').value);
+$('animDel').onclick=async()=>{const n=+$('animSel').value,a=animById(n);if(!a||!confirm('Delete animation "'+a.name+'"?'))return;
+ if(animEditing&&animEditing.id===n)closeAnimEditor();
+ const j=await post('/api/anims',{action:'delete',id:n});if(j.error){alert(j.error);return;}showAnims(j);};
 $('animName').oninput=e=>{if(animEditing)animEditing.name=e.target.value;};
 $('animStart').onchange=e=>{if(animEditing){animEditing.start=+e.target.value;updateAnimLoop();}};
 $('animBand').onchange=e=>{if(animEditing){animEditing.band=Math.max(1,Math.min(30,Math.round(+e.target.value||1)));e.target.value=animEditing.band;}};
@@ -1083,7 +1152,7 @@ $('animCancel').onclick=closeAnimEditor;
 $('animSave').onclick=async()=>{const a=animEditing;if(!a)return;
  try{const j=await post('/api/anims',{action:'save',id:a.id,name:a.name.trim()||('Animation '+a.id),start:a.start,band:a.band,steps:animStepsText(a.steps)});
   if(j.error){showErr('animErr',j.error);return;}
-  showErr('animErr');showAnims(j);$('status').textContent='Animation "'+animList[a.id-1].name+'" saved';}
+  showErr('animErr');showAnims(j);$('status').textContent='Animation "'+(animById(a.id)||a).name+'" saved';}
  catch(e){showErr('animErr','Not saved (not connected)');}};
 $('animReset').onclick=async()=>{const a=animEditing;if(!a||!confirm('Reset "'+a.name+'" to the default dance?'))return;
  const j=await post('/api/anims',{action:'reset',id:a.id});if(j.error){showErr('animErr',j.error);return;}

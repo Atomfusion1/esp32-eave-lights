@@ -53,7 +53,7 @@
 #define OTA_PASSWORD AP_PASSWORD
 #endif
 
-#define FW_VERSION "0.22.2"
+#define FW_VERSION "0.23.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
@@ -106,16 +106,18 @@ enum Mode : uint8_t {
   MODE_FIRE         = 18,  // candle-like flicker in color 1
   MODE_LIGHTNING    = 19,  // occasional flashes in color 1, dark (or background) between
   MODE_STROBE       = 20,  // on/off flashing in color 1
-  MODE_CUSTOM       = 21,  // each light painted by hand: custom pattern number `size` (1-8)
-  MODE_ANIM         = 22,  // animation number `size` (1-8): steps that move / fade frames
+  MODE_CUSTOM       = 21,  // each light painted by hand: painting number `size` (1-30)
+  MODE_ANIM         = 22,  // animation number `size` (1-30): steps that move / fade frames
 };
 #define MODE_COUNT 23
 
 // ---------- Custom patterns ----------
 // A color per physical light, painted on the page; a channel in MODE_CUSTOM shows
 // pattern number `size`. Black = off (or the background). Saved in /patterns.bin.
-#define MAX_PATTERNS 8
-CRGB patterns[MAX_PATTERNS][NUM_OUTPUTS][MAX_LEDS];
+// A library of up to MAX_PATTERNS named paintings (size = painting number 1-30, so it
+// stays within SIZE_MAX). Kept in PSRAM (allocated in loadPatterns()).
+#define MAX_PATTERNS 30
+CRGB (*patterns)[NUM_OUTPUTS][MAX_LEDS] = nullptr;   // patterns[p][output][light]
 // Unapplied paint (page in "on Apply" mode): edits go to paintDraft, which only the
 // preview shows, until Apply (commit) or Discard. draftPattern -1 = no draft.
 int8_t draftPattern = -1;
@@ -257,7 +259,7 @@ const LightState PATH_DEFAULT_STATE =
 // painting. Steps move the frame along the line (wrapping around), fade or switch to
 // another frame, or hold. A channel in MODE_ANIM plays animation number `size`.
 // Saved in /anims.bin (animations.ino).
-#define MAX_ANIMS       8
+#define MAX_ANIMS       30      // animation number = size (1-30); a slot exists if it has a name
 #define MAX_ANIM_STEPS  16
 #define ANIM_MAX_MOVE   60      // lights per move step, either way
 #define ANIM_MAX_MS     60000   // per step
@@ -265,13 +267,13 @@ enum AnimKind : uint8_t { ANIM_HOLD = 0, ANIM_MOVE = 1, ANIM_FADE = 2, ANIM_CUT 
 struct AnimStep {
   uint8_t  kind;      // AnimKind
   int8_t   lights;    // move: lights to move, + = along the line, - = back
-  uint8_t  frame;     // fade/cut: 0 = colors, 1-8 = painting
+  uint8_t  frame;     // fade/cut: 0 = colors, 1-30 = painting
   uint8_t  steady;    // move: 1 = constant speed, 0 = eased (slow start and stop)
   uint16_t ms;        // how long the step takes (cut: how long to hold after switching)
 };
 struct AnimDef {
   char     name[NAME_LEN];
-  uint8_t  startFrame;   // frame at the start of each loop: 0 = colors, 1-8 = painting
+  uint8_t  startFrame;   // frame at the start of each loop: 0 = colors, 1-30 = painting
   uint8_t  bandWidth;    // colors frame: lights per color band
   uint8_t  stepCount;
   AnimStep steps[MAX_ANIM_STEPS];
@@ -349,6 +351,11 @@ struct LightTimer {
 LightTimer lightTimer = { false, TIMER_SUN, 17 * 60, 0, TIMER_SUN, 7 * 60, 0, 40.0f, -82.9f };
 bool    scheduleOn    = false;   // follow the calendar (saved)
 int8_t  manualProgram = -1;      // playlist started with Play, or -1 (saved)
+// Calendar dates no playlist covers: FALLBACK_KEEP = lights stay as they are,
+// FALLBACK_OFF = all lights off (and nothing for "All on" to bring back), 0+ = that playlist.
+#define FALLBACK_KEEP -1
+#define FALLBACK_OFF  -2
+int8_t  fallbackProgram = FALLBACK_KEEP;   // saved in Preferences "fallback"
 
 // ---------- All off / All on ----------
 // Bit ch set = channel ch was on when "All lights off" was last pressed; "All lights on"
