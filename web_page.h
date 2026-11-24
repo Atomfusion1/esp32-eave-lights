@@ -902,10 +902,17 @@ function targetRangesText(){if(!st)return '';
 // "o:i" keys of those lights: only these can be painted.
 function paintTargetSet(){return new Set(parseRanges(targetRangesText()).map(l=>l[0]+':'+l[1]));}
 // The live (or preview) frame with the painting shown on the controlled lights only.
+// Drawn like the board does (drawCustom): painted colors at the effect's brightness;
+// black (unpainted) lights show the background if it's on, otherwise off.
 function paintComposite(){const base=frame||patternFrame,out=new Uint8Array(base),fb=frameInfo(base),fp=frameInfo(patternFrame);
+ const o0=cur()||{},bri=o0.brightness==null?255:o0.brightness,bgHex=o0.bgOn&&o0.bgColor?o0.bgColor:null;
+ const bg=bgHex?[1,3,5].map(k=>parseInt(bgHex.substr(k,2),16)):[0,0,0];
+ const lit=v=>v&&bri?Math.max(1,Math.round(v*bri/255)):0;   // like nscale8_video: lit stays lit
  paintTargetSet().forEach(key=>{const [o,i]=key.split(':').map(Number);
   if(o>=fb.outs||o>=fp.outs||i>=fb.cnt[o]||i>=fp.cnt[o])return;
-  const a=fb.start[o]+i*3,b=fp.start[o]+i*3;out[a]=patternFrame[b];out[a+1]=patternFrame[b+1];out[a+2]=patternFrame[b+2];});
+  const a=fb.start[o]+i*3,b=fp.start[o]+i*3;
+  let c=[patternFrame[b],patternFrame[b+1],patternFrame[b+2]];if(!(c[0]|c[1]|c[2]))c=bg;
+  out[a]=lit(c[0]);out[a+1]=lit(c[1]);out[a+2]=lit(c[2]);});
  return out;}
 // "on Apply" mode: paint goes to a draft on the board (only the preview shows it) until Apply / Discard.
 const paintDraftArg=()=>(paintPending||applyMode==='apply')?{draft:1}:{};
