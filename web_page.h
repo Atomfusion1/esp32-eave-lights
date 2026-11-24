@@ -142,9 +142,10 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <div class="chips" id="sceneDots" style="margin-top:8px"></div>
 <div class="row" id="sceneTools" style="margin-top:8px"><span class="hint" style="margin:0;flex:0 0 auto">Group</span><select id="sceneGroupSel"></select><button class="btn danger" id="sceneDel">Delete</button></div>
 <p class="hint" id="scenesEmpty">No scenes yet. Start from Blank (or any look), set up the house in the Lights tab, then save it here as a scene, e.g. "Xmas".</p>
-<div class="row" style="margin-top:12px"><button class="btn" id="saveScene">Save current scene…</button></div>
+<div class="row" style="margin-top:12px"><button class="btn" id="saveScene">Save current scene…</button><button class="btn" id="updateScene" hidden>Update scene</button></div>
 <div id="sceneForm" class="sub" hidden>
 <label>Name</label><input id="sceneName" type="text" maxlength="23" list="sceneNames" placeholder="e.g. Xmas classic"><datalist id="sceneNames"></datalist>
+<p class="err" id="sceneOverwrite" hidden></p>
 <label style="margin-top:10px">Group</label><select id="sceneNewGroup"></select>
 <p class="hint">Saves what every strand, zone and path is doing right now. Using an existing name replaces that scene.</p>
 <div class="row"><button class="btn" id="sceneCancel">Cancel</button><button class="btn primary" id="sceneSaveGo">Save scene</button></div>
@@ -695,6 +696,7 @@ function showScenes(list){sceneList=list||[];refreshLocks();
  if(typeof progData!=='undefined'&&progData)showPrograms(progData);}   // playlists show scene names
 function renderSceneInfo(){const s=sceneList.find(x=>String(x.id)===String(sceneSelId));
  $('sceneTools').hidden=!s;
+ $('updateScene').hidden=!s;if(s)$('updateScene').textContent='Update "'+s.name+'"';
  $('sceneDots').innerHTML=s?s.colors.map(c=>'<span class="dot" style="background:'+c+'"></span>').join('')+'<span class="hint" style="margin:0">'+s.on+' parts on</span>'
   :'<span class="hint" style="margin:0">Turns everything off and sets every strand, zone and path back to plain warm white, to build a new look from. Your saved scenes don\'t change.</span>';
  if(s){$('sceneGroupSel').innerHTML=groupOptions();$('sceneGroupSel').value=String(sceneGroupOf(s));}}
@@ -713,11 +715,20 @@ let sceneGroupTouched=false;
 $('saveScene').onclick=async()=>{if(hasPending()&&!confirm('Your unapplied changes to '+pendingName+' will be applied first so they are part of the scene. Continue?'))return;
  await applyPending();const s=sceneList.find(x=>String(x.id)===String(sceneSelId));
  $('sceneName').value=s?s.name:'';$('sceneNewGroup').innerHTML=groupOptions();$('sceneNewGroup').value=String(s?sceneGroupOf(s):14);
- sceneGroupTouched=!!s;$('sceneForm').hidden=false;$('sceneName').focus();};
+ sceneGroupTouched=!!s;$('sceneForm').hidden=false;$('sceneName').oninput();$('sceneName').focus();};
 $('sceneName').oninput=()=>{const nm=$('sceneName').value,old=sceneList.find(x=>x.name.toLowerCase()===nm.trim().toLowerCase());
- if(old){$('sceneNewGroup').value=String(sceneGroupOf(old));}else if(!sceneGroupTouched&&nm.trim())$('sceneNewGroup').value=String(guessGroup(nm));};
+ if(old){$('sceneNewGroup').value=String(sceneGroupOf(old));}else if(!sceneGroupTouched&&nm.trim())$('sceneNewGroup').value=String(guessGroup(nm));
+ showErr('sceneOverwrite',old?'⚠ "'+old.name+'" already exists: saving overwrites it.':'');};
 $('sceneNewGroup').onchange=()=>{sceneGroupTouched=true;};
 $('sceneCancel').onclick=()=>{$('sceneForm').hidden=true;};
+// Update: overwrite the selected scene with what the lights are doing now (keeps its name and group).
+$('updateScene').onclick=async()=>{const s=sceneList.find(x=>String(x.id)===String(sceneSelId));if(!s)return;
+ if(!confirm('Overwrite scene "'+s.name+'" with what every strand, zone and path is doing right now?\n\nThe old version of "'+s.name+'" is replaced and can\'t be brought back. Playlists that use it will show the new version.'+
+  (hasPending()?'\n\nYour unapplied changes to '+pendingName+' are applied first.':'')))return;
+ await applyPending();
+ const j=await post('/api/scenes',{action:'save',name:s.name});
+ if(j.error){showErr('sceneErr',j.error);return;}
+ showErr('sceneErr');showScenes(j.scenes);$('status').textContent='Scene "'+s.name+'" updated';};
 $('sceneSaveGo').onclick=async()=>{const name=$('sceneName').value.trim();if(!name){showErr('sceneErr','Enter a name for the scene.');return;}
  const old=sceneList.find(x=>x.name.toLowerCase()===name.toLowerCase());
  if(old&&!confirm('Replace scene "'+old.name+'" with what the lights are doing now?'))return;
