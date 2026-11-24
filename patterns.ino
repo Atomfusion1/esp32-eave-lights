@@ -10,6 +10,13 @@
 //   POST /api/custom  pattern=N  lights=A12,A13,B4-9  color=RRGGBB   paint those lights
 //                     pattern=N  action=fill color=RRGGBB            every light
 //                     pattern=N  action=clear                        every light off
+//                     add draft=1 to paint into the draft instead (see below)
+//                     action=commit   copy the draft into its painting (Apply)
+//                     action=discard  throw the draft away (Discard)
+//   GET  /api/custom?pattern=N&draft=1   the draft, if painting N has one
+// Draft: with the page in "on Apply" mode, paint goes to a copy of the painting
+// (paintDraft, one painting at a time). Only the preview shows it, so the real lights
+// keep the saved painting until Apply.
 // Paint is saved to /patterns.bin PATTERN_SAVE_MS after the last change.
 
 const char*    PATTERNS_FILE    = "/patterns.bin";
@@ -120,6 +127,11 @@ void handlePaintMeta() {
   server.send(200, "application/json", paintMetaJson());
 }
 
+// Painting p's colors on output o: its draft while drawing the preview, else the saved one.
+const CRGB* paintingRow(int p, int o) {
+  return (previewPass && draftPattern == p) ? paintDraft[o] : patterns[p][o];
+}
+
 void drawCustom(int ch) {
   const LightState& s = states[ch];
   int p = constrain((int)s.size, 1, MAX_PATTERNS) - 1;
@@ -128,13 +140,14 @@ void drawCustom(int ch) {
   for (int i = 0; i < len; i++) {
     int o, idx;
     if (!linePoint(ch, i, o, idx)) continue;           // path gap
-    CRGB c = patterns[p][o][idx];
+    CRGB c = paintingRow(p, o)[idx];
     lineLight(ch, i) = (c.r | c.g | c.b) ? litColor(c, s, 255) : base;
   }
 }
 
 // Paints lights listed like "A12,A13,B4-9" (light numbers 1-based). Returns lights painted.
-int paintLights(int p, const String& list, CRGB color) {
+int paintLights(int p, bool draft, const String& list, CRGB color) {
+  CRGB (*dst)[MAX_LEDS] = draft ? paintDraft : patterns[p];
   int painted = 0, pos = 0, len = list.length();
   while (pos < len) {
     while (pos < len && (list[pos] == ',' || list[pos] == ' ')) pos++;
@@ -154,7 +167,7 @@ int paintLights(int p, const String& list, CRGB color) {
     if (o < 0 || a < 1 || b < 1) continue;
     if (a > b) { int t = a; a = b; b = t; }
     for (int i = a; i <= b && i <= ledCount[o]; i++) {
-      patterns[p][o][i - 1] = color;
+      dst[o][i - 1] = color;
       painted++;
     }
   }
@@ -163,6 +176,7 @@ int paintLights(int p, const String& list, CRGB color) {
 
 void handleGetCustom() {
   int p = constrain(server.arg("pattern").toInt(), 1, MAX_PATTERNS) - 1;
+  CRGB (*src)[MAX_LEDS] = (server.arg("draft") == "1" && draftPattern == p) ? paintDraft : patterns[p];
   static uint8_t buf[1 + NUM_OUTPUTS * 2 + MAX_TOTAL_LEDS * 3];
   size_t n = 0;
   buf[n++] = NUM_OUTPUTS;
@@ -172,9 +186,9 @@ void handleGetCustom() {
   }
   for (int o = 0; o < NUM_OUTPUTS; o++) {
     for (int i = 0; i < ledCount[o]; i++) {
-      buf[n++] = patterns[p][o][i].r;
-      buf[n++] = patterns[p][o][i].g;
-      buf[n++] = patterns[p][o][i].b;
+      buf[n++] = src[o][i].r;
+      buf[n++] = src[o][i].g;
+      buf[n++] = src[o][i].b;
     }
   }
   server.sendHeader("Cache-Control", "no-store");
@@ -182,24 +196,45 @@ void handleGetCustom() {
 }
 
 void handlePostCustom() {
+  String action = server.arg("action");
+  // Apply / Discard of unapplied paint
+  if (action == "commit" || action == "discard") {
+    if (action == "commit" && draftPattern >= 0) {
+      memcpy(patterns[draftPattern], paintDraft, sizeof(paintDraft));
+      patternsDirty = true;
+      patternsDirtyMs = millis();
+    }
+    draftPattern = -1;
+    server.send(200, "application/json", "{\"ok\":true}");
+    return;
+  }
+
   int p = server.arg("pattern").toInt();
   if (p < 1 || p > MAX_PATTERNS) return sendError("pattern must be 1 to 8");
   p--;
-  String action = server.arg("action");
+  // draft=1: paint into the draft (a copy of the painting) instead of the painting itself
+  bool draft = server.arg("draft") == "1";
+  if (draft && draftPattern != p) {
+    memcpy(paintDraft, patterns[p], sizeof(paintDraft));
+    draftPattern = p;
+  }
+  CRGB (*dst)[MAX_LEDS] = draft ? paintDraft : patterns[p];
   CRGB color(0, 0, 0);
   if (server.hasArg("color") && !parseColorArg("color", color)) return sendError("color must be RRGGBB");
   int painted = 0;
   if (action == "fill" || action == "clear") {
     if (action == "clear") color = CRGB(0, 0, 0);
     for (int o = 0; o < NUM_OUTPUTS; o++) {
-      for (int i = 0; i < MAX_LEDS; i++) patterns[p][o][i] = color;
+      for (int i = 0; i < MAX_LEDS; i++) dst[o][i] = color;
       painted += ledCount[o];
     }
   } else {
-    painted = paintLights(p, server.arg("lights"), color);
+    painted = paintLights(p, draft, server.arg("lights"), color);
   }
-  patternsDirty = true;
-  patternsDirtyMs = millis();
+  if (!draft) {
+    patternsDirty = true;
+    patternsDirtyMs = millis();
+  }
   server.send(200, "application/json", String("{\"ok\":true,\"painted\":") + painted + "}");
 }
 

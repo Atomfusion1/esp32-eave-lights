@@ -1,7 +1,7 @@
 # ESP32-S3 House Eave Lighting — Project Handoff
 
 **Date:** 2026-11-23 (updated end of day)  
-**Status:** Firmware **v0.22.0** written and compiling. The board is installed outside on strand A (67 lights, GPIO 8) and updated over Wi-Fi. Strand B (GPIO 9) not yet connected. See **§0** for what works, what's untested and what's next.  
+**Status:** Firmware **v0.22.1** written and compiling. The board is installed outside on strand A (67 lights, GPIO 8) and updated over Wi-Fi. Strand B (GPIO 9) not yet connected. See **§0** for what works, what's untested and what's next.  
 **Purpose:** Give a new VS Code/Codex coding session the hardware facts, target architecture, safety constraints and current state without requiring the conversation history. How to build, upload and lay out code: [AGENTS.md](../AGENTS.md).
 
 ## 0. Current state & next steps (end of 2026-11-23)
@@ -18,6 +18,7 @@ Wi-Fi control page at `http://eavelights.local` (192.168.1.25), saved settings, 
 - v0.20: house view draws lights as downlight scallops like the real pucks (Throw/Spread), per-section look (Points only for side eaves going up the roof line).
 - v0.21: on/off timer (sunset/sunrise ± minutes or set times, location default central Ohio); timer + calendar included in backups.
 - v0.22: Animation effect (Custom group): 8 animations of up to 16 looping steps (move ± lights with smooth glide + wrap, fade / switch to a painting or the colors, hold), in `animations.ino`, `/anims.bin`, `/api/anims`; editor under Lights → ✎ Edit steps.
+- v0.22.1: painting follows Apply/Discard (in "on Apply" mode paint goes to a draft on the board, `paintDraft`, shown only in the preview until Apply); eyedropper (Shift/Ctrl + click or the Pick tool) and brush brightness (per-light level; Pick copies it).
 
 **Next steps:**
 1. Test v0.15–v0.22 on the house (effects, Apply/preview, a 2-scene playlist, the calendar after a power cycle, painting one zone, the timer, an animation).

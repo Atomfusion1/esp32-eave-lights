@@ -53,7 +53,7 @@
 #define OTA_PASSWORD AP_PASSWORD
 #endif
 
-#define FW_VERSION "0.22.0"
+#define FW_VERSION "0.22.1"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
@@ -116,6 +116,11 @@ enum Mode : uint8_t {
 // pattern number `size`. Black = off (or the background). Saved in /patterns.bin.
 #define MAX_PATTERNS 8
 CRGB patterns[MAX_PATTERNS][NUM_OUTPUTS][MAX_LEDS];
+// Unapplied paint (page in "on Apply" mode): edits go to paintDraft, which only the
+// preview shows, until Apply (commit) or Discard. draftPattern -1 = no draft.
+int8_t draftPattern = -1;
+CRGB   paintDraft[NUM_OUTPUTS][MAX_LEDS];
+bool   previewPass = false;   // true while preview.ino draws the preview frame
 
 #define MAX_COLORS 5   // colors for multi-color effects: color + up to 4 extra
 

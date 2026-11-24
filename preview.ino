@@ -65,7 +65,9 @@ void previewAfterFrame(uint32_t dtMs) {
     effectMs[ch]  = pvEffect[ch];
   }
 
+  previewPass = true;    // paintings show their unapplied draft, if any
   drawLayers(dtMs);
+  previewPass = false;
   for (int o = 0; o < NUM_OUTPUTS; o++) {
     for (int i = 0; i < ledCount[o]; i++) previewOut[o][i] = capPixel(frame[o][i]);
   }

@@ -215,7 +215,7 @@ CRGB animFrameColor(int ch, const AnimDef& a, uint8_t f, int j) {
   } else {
     int o, idx;
     if (!linePoint(ch, j, o, idx)) c = CRGB(0, 0, 0);   // path gap
-    else c = patterns[f - 1][o][idx];
+    else c = paintingRow(f - 1, o)[idx];
   }
   if (!(c.r | c.g | c.b) && s.bgOn) c = s.bgColor;
   return c;

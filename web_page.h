@@ -254,15 +254,17 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <label>Painting <b id="paintNum"></b>: tap or drag over the lights in the live view</label>
 <div class="row" style="align-items:center">
 <input type="color" id="brush" value="#ff0000" style="height:44px" list="savedColors">
-<div class="seg" id="paintTool" style="flex:2"><button data-tool="paint" class="sel">Paint</button><button data-tool="erase">Erase</button></div>
+<div class="seg" id="paintTool" style="flex:2"><button data-tool="paint" class="sel">Paint</button><button data-tool="erase">Erase</button><button data-tool="pick" title="Tap a light to take its color (or Shift/Ctrl + click)">Pick</button></div>
 </div>
+<label style="margin-top:10px">Brush brightness: <span id="brushLvlVal">100%</span> <small>(this light only; the effect's Brightness dims the whole painting on top)</small></label>
+<input id="brushLvl" type="range" min="5" max="100" value="100">
 <label style="margin-top:10px">Saved colors <span id="swatchMode"></span></label>
 <div class="chips" id="swatches"></div>
 <div class="row" style="margin-top:8px"><button class="btn" id="swatchAdd">+ Save brush color</button><button class="btn" id="swatchDel">Remove…</button></div>
 <div class="row" style="margin-top:8px">
 <button class="btn" id="paintFill">Fill with brush</button><button class="btn danger" id="paintClear">Clear</button><button class="btn primary" id="paintDone">Done</button>
 </div>
-<p class="hint">Only the lights you're controlling can be painted; the rest of the house stays as it is. Paint is saved right away (no Apply needed). Black = off, or the background if it's on.</p>
+<p class="hint">Only the lights you're controlling can be painted; the rest of the house stays as it is. Shift or Ctrl + click a light (or use Pick) to take its color. With "on Apply", paint shows in the preview and reaches the lights on Apply; Discard throws it away. Black = off, or the background if it's on.</p>
 </div>
 <label style="margin-top:14px">Brightness <span id="briVal"></span></label><input id="bri" type="range" min="0" max="255">
 <details class="inner" id="setFold"><summary id="setSum"></summary>
@@ -424,7 +426,7 @@ function renderPicker(s){const onOff=o=>o.on?'  ● on':'  ○ off';
  $('picker').innerHTML=h;$('picker').value=String(sel);}
 $('picker').onchange=async e=>{const next=+e.target.value;
  if(hasPending()){if(confirm('Apply your changes to '+pendingName+' first?\n\nOK = apply them, Cancel = throw them away.'))await applyPending();
-  else{pending={};pendingTarget=null;updateApplyBar();stopPreview();}}
+  else{pending={};pendingTarget=null;stopPreview();await discardPaint();updateApplyBar();}}
  sel=next;store.set('eaveSel',sel);show(st);};
 
 function show(s){st=s;
@@ -478,9 +480,10 @@ function show(s){st=s;
 async function post(url,p){const r=await fetch(url,{method:'POST',body:new URLSearchParams(p)});return r.json();}
 
 // ---- Apply mode: look changes wait on the page until Apply (on/off stays instant) ----
-let applyMode=store.get('eaveApplyMode','apply'),pending={},pendingTarget=null,pendingName='';
+// paintPending: a painting has unapplied paint (a draft on the board, see markPaintPending).
+let applyMode=store.get('eaveApplyMode','apply'),pending={},pendingTarget=null,pendingName='',paintPending=false;
 const LOOK_KEYS=['color','brightness','mode','fadeSeconds','fadeMin','speed','size','reverse','bgOn','bgColor','colorCount','color2','color3','color4','color5'];
-const hasPending=()=>Object.keys(pending).length>0;
+const hasPending=()=>Object.keys(pending).length>0||paintPending;
 // Shows pending values on the page's copy of the settings (the lights don't change yet).
 function applyPendingTo(o,p){if(!o)return;
  for(const [k,v] of Object.entries(p)){
@@ -491,10 +494,12 @@ function applyPendingTo(o,p){if(!o)return;
   else o[k]=+v;}}
 function updateApplyBar(){$('applyBar').hidden=!hasPending();$('applyTxt').textContent='Not applied yet: '+pendingName;
  $('applyMode').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',b.dataset.am===applyMode));}
-async function applyPending(){if(!hasPending())return;const p=Object.assign({output:pendingTarget},pending);
- pending={};pendingTarget=null;updateApplyBar();stopPreview();
- try{const j=await post('/api/state',p);if(j.error)$('status').textContent=j.error;else show(j);}catch(e){$('status').textContent='Not connected';}}
-async function discardPending(){pending={};pendingTarget=null;updateApplyBar();stopPreview();
+async function applyPending(){if(!hasPending())return;const look=Object.keys(pending).length>0,p=Object.assign({output:pendingTarget},pending);
+ pending={};pendingTarget=null;
+ await commitPaint();updateApplyBar();stopPreview();
+ try{const j=look?await post('/api/state',p):await (await fetch('/api/state')).json();if(j.error)$('status').textContent=j.error;else show(j);}catch(e){$('status').textContent='Not connected';}}
+async function discardPending(){pending={};pendingTarget=null;stopPreview();
+ await discardPaint();updateApplyBar();
  try{show(await (await fetch('/api/state')).json());}catch(e){}}
 // The board draws unapplied changes into a hidden preview frame; the live view shows it.
 let previewTimer=null;
@@ -633,7 +638,7 @@ function showLooks(list){looks=list||[];
   const x=e.target.dataset.x;
   if(x!==undefined){const p=looks.find(l=>l.id===+x);if(!confirm('Delete saved look "'+p.name+'"?'))return;
    const j=await post('/api/presets',{action:'delete',id:x});if(j.error)showErr('lookErr',j.error);else{showErr('lookErr');showLooks(j.presets);}return;}
-  if(pendingTarget===target()){pending={};pendingTarget=null;stopPreview();}   // the look replaces unapplied changes
+  if(pendingTarget===target()){pending={};pendingTarget=null;stopPreview();await discardPaint();}   // the look replaces unapplied changes
   const j=await post('/api/presets',{action:'apply',id:c.dataset.id,output:target()});
   if(j.error)showErr('lookErr',j.error);else{showErr('lookErr');show(j);}});}
 $('saveLook').onclick=async()=>{if(hasPending()&&!confirm('Saving uses the settings the lights have now. Your unapplied changes will be applied first. Continue?'))return;
@@ -652,7 +657,7 @@ function showScenes(list){sceneList=list||[];
   const x=e.target.dataset.x;
   if(x!==undefined){const s=sceneList.find(l=>l.id===+x);if(!confirm('Delete scene "'+s.name+'"?'))return;
    const j=await post('/api/scenes',{action:'delete',id:x});if(j.error)showErr('sceneErr',j.error);else{showErr('sceneErr');showScenes(j.scenes);}return;}
-  if(hasPending())stopPreview();pending={};pendingTarget=null;   // a scene replaces any unapplied changes
+  if(hasPending())stopPreview();pending={};pendingTarget=null;await discardPaint();   // a scene replaces any unapplied changes
   const j=await post('/api/scenes',{action:'apply',id:c.dataset.id});
   if(j.error)showErr('sceneErr',j.error);else{showErr('sceneErr');show(j);}});}
 $('saveScene').onclick=async()=>{if(hasPending()&&!confirm('Your unapplied changes to '+pendingName+' will be applied first so they are part of the scene. Continue?'))return;
@@ -902,29 +907,61 @@ function paintComposite(){const base=frame||patternFrame,out=new Uint8Array(base
   if(o>=fb.outs||o>=fp.outs||i>=fb.cnt[o]||i>=fp.cnt[o])return;
   const a=fb.start[o]+i*3,b=fp.start[o]+i*3;out[a]=patternFrame[b];out[a+1]=patternFrame[b+1];out[a+2]=patternFrame[b+2];});
  return out;}
+// "on Apply" mode: paint goes to a draft on the board (only the preview shows it) until Apply / Discard.
+const paintDraftArg=()=>(paintPending||applyMode==='apply')?{draft:1}:{};
+function markPaintPending(){if(applyMode!=='apply'||paintPending)return;paintPending=true;
+ if(!Object.keys(pending).length){pendingTarget=target();pendingName=curName();}
+ updateApplyBar();sendPreview();}
+async function commitPaint(){if(!paintPending)return;await flushStroke();paintPending=false;
+ try{await post('/api/custom',{action:'commit'});}catch(e){$('status').textContent='Paint not saved (not connected)';}}
+async function discardPaint(){if(!paintPending)return;paintPending=false;clearTimeout(strokeTimer);strokeLights.clear();
+ try{await post('/api/custom',{action:'discard'});}catch(e){}
+ if(painting)await startPainting(paintPattern);}
 async function startPainting(n){paintPattern=n;
- try{patternFrame=new Uint8Array(await (await fetch('/api/custom?pattern='+n,{cache:'no-store'})).arrayBuffer());}
+ try{patternFrame=new Uint8Array(await (await fetch('/api/custom?pattern='+n+(paintPending?'&draft=1':''),{cache:'no-store'})).arrayBuffer());}
  catch(e){$('status').textContent='Could not load the pattern';return;}
  painting=true;$('paintTools').hidden=false;$('paintNum').textContent='"'+paintNames[n-1]+'"';
  $('photoCv').style.touchAction='none';$('stripBox').style.touchAction='none';
  if(st)renderLook(cur());drawLive();}
 function stopPainting(){flushStroke();painting=false;patternFrame=null;$('paintTools').hidden=true;
  $('photoCv').style.touchAction='';$('stripBox').style.touchAction='';if(st)renderLook(cur());drawLive();}
-const brushHex=()=>paintTool==='erase'?'000000':$('brush').value.slice(1);
+// The color painted: the brush color at the brush brightness (black for Erase).
+function brushHex(){if(paintTool==='erase')return '000000';const lvl=+$('brushLvl').value/100,h=$('brush').value;
+ return [1,3,5].map(k=>Math.round(parseInt(h.substr(k,2),16)*lvl).toString(16).padStart(2,'0')).join('');}
+$('brushLvl').oninput=()=>{flushStroke();$('brushLvlVal').textContent=$('brushLvl').value+'%';if(paintTool!=='paint')setPaintTool('paint');};
 // Sends the lights painted since the last send (batched while dragging).
-function flushStroke(){clearTimeout(strokeTimer);if(!strokeLights.size)return;
- const lights=[...strokeLights].join(',');strokeLights.clear();
- post('/api/custom',{pattern:paintPattern,lights,color:brushHex()}).catch(()=>{$('status').textContent='Paint not saved (not connected)';});}
-function paintAt(box,e){if(!painting||!patternFrame)return;
- const el=box==='photo'?$('photoCv'):stripCv;if(!el)return;const rc=el.getBoundingClientRect(),x=e.clientX-rc.left,y=e.clientY-rc.top;
+function flushStroke(){clearTimeout(strokeTimer);if(!strokeLights.size)return Promise.resolve();
+ const lights=[...strokeLights].join(',');strokeLights.clear();markPaintPending();
+ return post('/api/custom',Object.assign({pattern:paintPattern,lights,color:brushHex()},paintDraftArg())).catch(()=>{$('status').textContent='Paint not saved (not connected)';});}
+// The light drawn nearest the pointer, or null.
+function nearestDot(box,e){const el=box==='photo'?$('photoCv'):stripCv;if(!el)return null;
+ const rc=el.getBoundingClientRect(),x=e.clientX-rc.left,y=e.clientY-rc.top;
  let best=null,bd=1e9;dots.forEach(d=>{if(d.box!==box)return;const dd=Math.hypot(d.x-x,d.y-y);if(dd<=d.r*1.6&&dd<bd){bd=dd;best=d;}});
+ return best;}
+function setPaintTool(t){paintTool=t;$('paintTool').querySelectorAll('button').forEach(x=>x.classList.toggle('sel',x.dataset.tool===t));renderSwatches();}
+// Eyedropper (Shift/Ctrl + click, or the Pick tool): the brush takes that light's color.
+// Controlled lights give their painted color; others give what they show now. Black = Erase.
+function pickAt(box,e){const best=nearestDot(box,e);if(!best)return;
+ const own=patternFrame&&paintTargetSet().has(best.o+':'+best.i),buf=own?patternFrame:(frame||patternFrame);if(!buf)return;
+ const fi=frameInfo(buf);if(best.o>=fi.outs||best.i>=fi.cnt[best.o])return;
+ const k=fi.start[best.o]+best.i*3,rgb=[buf[k],buf[k+1],buf[k+2]],m=Math.max(...rgb);
+ flushStroke();const name=(best.o===0?'A':'B')+(best.i+1);
+ if(!m){setPaintTool('erase');$('status').textContent='Picked '+name+': off (Erase)';return;}
+ // split into a full-strength color + its brightness, so painting with it matches exactly
+ const lvl=Math.max(5,Math.round(m/255*100)),hex='#'+rgb.map(v=>Math.min(255,Math.round(v*255/m)).toString(16).padStart(2,'0')).join('');
+ $('brush').value=hex;$('brushLvl').value=lvl;$('brushLvlVal').textContent=lvl+'%';setPaintTool('paint');
+ $('status').textContent='Picked '+name+': '+hex.toUpperCase()+' at '+lvl+'%'+(own?'':' (as it shows now)');}
+function paintAt(box,e){if(!painting||!patternFrame)return;
+ const best=nearestDot(box,e);
  if(!best||!paintTargetSet().has(best.o+':'+best.i))return;   // only the controlled lights
  const fi=frameInfo(patternFrame),k=fi.start[best.o]+best.i*3,hex=brushHex();
  patternFrame[k]=parseInt(hex.slice(0,2),16);patternFrame[k+1]=parseInt(hex.slice(2,4),16);patternFrame[k+2]=parseInt(hex.slice(4,6),16);
  strokeLights.add((best.o===0?'A':'B')+(best.i+1));drawLive();
  clearTimeout(strokeTimer);strokeTimer=setTimeout(flushStroke,150);}
 [['photo',$('photoBox')],['strip',$('stripBox')]].forEach(([box,el])=>{
- el.addEventListener('pointerdown',e=>{if(!painting)return;paintDown=true;el.setPointerCapture(e.pointerId);paintAt(box,e);e.preventDefault();});
+ el.addEventListener('pointerdown',e=>{if(!painting)return;
+  if(e.shiftKey||e.ctrlKey||paintTool==='pick'){pickAt(box,e);e.preventDefault();return;}
+  paintDown=true;el.setPointerCapture(e.pointerId);paintAt(box,e);e.preventDefault();});
  el.addEventListener('pointermove',e=>{if(painting&&paintDown)paintAt(box,e);});
  el.addEventListener('pointerup',()=>{if(paintDown){paintDown=false;flushStroke();}});
  el.addEventListener('pointercancel',()=>{paintDown=false;flushStroke();});});
@@ -932,11 +969,11 @@ $('paintBtn').onclick=()=>{if(painting)stopPainting();else startPainting(Math.mi
 $('paintDone').onclick=stopPainting;
 $('paintTool').querySelectorAll('button').forEach(b=>b.onclick=()=>{flushStroke();paintTool=b.dataset.tool;
  $('paintTool').querySelectorAll('button').forEach(x=>x.classList.toggle('sel',x===b));});
-$('brush').oninput=()=>{flushStroke();if(paintTool==='erase'){paintTool='paint';$('paintTool').querySelectorAll('button').forEach(x=>x.classList.toggle('sel',x.dataset.tool==='paint'));}};
+$('brush').oninput=()=>{flushStroke();if(paintTool!=='paint')setPaintTool('paint');};
 // Fill / Clear: only the lights of what's being controlled.
 async function paintAll(clear){const lights=targetRangesText();if(!lights)return;
  if(!confirm((clear?'Clear the lights of ':'Fill the lights of ')+curName()+(clear?'':' with the brush color')+' in "'+paintNames[paintPattern-1]+'"?'))return;
- flushStroke();await post('/api/custom',{pattern:paintPattern,lights,color:clear?'000000':$('brush').value.slice(1)});
+ await flushStroke();markPaintPending();await post('/api/custom',Object.assign({pattern:paintPattern,lights,color:clear?'000000':brushHex()},paintDraftArg()));
  startPainting(paintPattern);}
 $('paintFill').onclick=()=>paintAll(false);$('paintClear').onclick=()=>paintAll(true);
 
@@ -966,7 +1003,9 @@ function renderSwatches(){updateSavedColorList();renderSavedSetup();const cur=$(
 async function saveSwatches(list){showPaintMeta(await post('/api/paint-meta',{action:'swatches',list:list.map(c=>c.replace('#','')).join(',')}));}
 $('swatchAdd').onclick=()=>{const c=$('brush').value.toUpperCase();if(swatchList.map(x=>x.toUpperCase()).includes(c))return;saveSwatches(swatchList.concat([c]));};
 $('swatchDel').onclick=()=>{swatchDelMode=!swatchDelMode;renderSwatches();};
-$('patSel').onchange=e=>{const n=+e.target.value;send({size:n});if(painting)startPainting(n);};
+$('patSel').onchange=async e=>{const n=+e.target.value;
+ if(paintPending&&n!==paintPattern){if(confirm('Apply your paint changes to "'+paintNames[paintPattern-1]+'" first?\n\nOK = apply them, Cancel = throw them away.'))await commitPaint();else await discardPaint();updateApplyBar();}
+ send({size:n});if(painting)startPainting(n);};
 $('patRename').onclick=async()=>{const n=+$('patSel').value,name=prompt('Name for painting '+n+':',paintNames[n-1]);
  if(name)showPaintMeta(await post('/api/paint-meta',{action:'rename',pattern:n,name}));};
 $('brush').addEventListener('input',renderSwatches);$('brush').addEventListener('change',renderSwatches);
