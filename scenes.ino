@@ -166,7 +166,7 @@ const char* saveScene(const String& name, int group) {
   for (int s = 0; s < MAX_SCENES && id < 0; s++) {
     if (!scenes[s].used) id = s;
   }
-  if (id < 0) return "all 40 scenes are used; delete one first";
+  if (id < 0) return "all 64 scenes are used; delete one first";
 
   scenes[id].used = true;
   strcpy(scenes[id].name, cleanName);
