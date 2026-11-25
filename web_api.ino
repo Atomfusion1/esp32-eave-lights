@@ -31,8 +31,10 @@
 //   POST /api/locate    ranges=A23 | A1-12,B30-65   light only those (auto-off after 5 min)
 //                       [seconds=1-300] shorter auto-off, [white=1] all white (no green first)
 //                       stop=1                      back to normal. Returns the state.
-//   POST /api/zones     action=save   [id=N] name=Porch ranges=A1-12   (no id = new zone)
-//                       action=delete id=N. Returns the state.
+//   POST /api/zones     action=save   [id=N] name=Porch ranges=A1-12 [hidden=0|1]
+//                         (no id = new zone; hidden=1 = never light, e.g. the lead-in)
+//                       action=delete id=N | action=move id=N dir=-1|1 (list order).
+//                       Returns the state; "zones" are listed in the page's order.
 //   POST /api/paths     action=save   [id=N] name=Front sweep steps=0:0:0,2:1:3
 //                         steps = zone slot : reverse 0|1 : gap lights after (0-30), in order
 //                       action=delete id=N. Returns the state.
@@ -111,8 +113,10 @@ String stateJson() {
   json += channelFieldsJson(CH_HOUSE);
   json += "},\"zones\":[";
   bool first = true;
-  for (int z = 0; z < MAX_ZONES; z++) {
-    if (!zones[z].used) continue;
+  uint8_t order[MAX_ZONES];
+  int zoneCount = zonesInOrder(order);   // in the order set on the page
+  for (int k = 0; k < zoneCount; k++) {
+    int z = order[k];
     if (!first) json += ",";
     first = false;
     json += "{\"id\":\"z";
@@ -125,7 +129,7 @@ String stateJson() {
     json += rangesText(zones[z].ranges, zones[z].rangeCount);
     json += "\",\"length\":";
     json += zoneLen[z];
-    json += ",";
+    json += zoneHidden[z] ? ",\"hidden\":true," : ",\"hidden\":false,";
     json += channelFieldsJson(CH_ZONE0 + z);
     json += "}";
   }
@@ -448,10 +452,13 @@ void handleZones() {
   if (action == "save") {
     int newId;
     err = saveZone(id, server.arg("name"), server.arg("ranges"), newId);
+    if (!err && server.hasArg("hidden")) err = setZoneHidden(newId, argIsTrue("hidden"));
   } else if (action == "delete") {
     err = deleteZone(id);
+  } else if (action == "move") {
+    err = moveZone(id, server.arg("dir").toInt());
   } else {
-    err = "action must be save or delete";
+    err = "action must be save, delete or move";
   }
   if (err) return sendError(err);
   sendState();

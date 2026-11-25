@@ -39,7 +39,7 @@ void resetPhase(int ch) {
 }
 
 int lineLength(int ch) {
-  if (ch < NUM_OUTPUTS) return ledCount[ch];
+  if (ch < NUM_OUTPUTS) return strandLen[ch];   // "never light" zones left out
   if (ch == CH_HOUSE)   return houseLen;
   if (ch < CH_PATH0)    return zoneLen[ch - CH_ZONE0];
   return pathLen[ch - CH_PATH0];
@@ -51,7 +51,7 @@ CRGB gapSink;
 // Which physical light is at position i of channel ch's line.
 // Returns false for a path gap (no real light there).
 bool linePoint(int ch, int i, int& output, int& index) {
-  if (ch < NUM_OUTPUTS) { output = ch; index = i; return true; }
+  if (ch < NUM_OUTPUTS) { output = ch; index = strandMap[ch][i]; return true; }
   const PathPoint& p = (ch == CH_HOUSE) ? housePath[i]
                      : (ch < CH_PATH0)  ? zonePoints[ch - CH_ZONE0][i]
                                         : pathPoints[ch - CH_PATH0][i];
@@ -62,7 +62,7 @@ bool linePoint(int ch, int i, int& output, int& index) {
 
 // The physical light at position i of channel ch's line.
 CRGB& lineLight(int ch, int i) {
-  if (ch < NUM_OUTPUTS) return frame[ch][i];
+  if (ch < NUM_OUTPUTS) return frame[ch][strandMap[ch][i]];
   const PathPoint& p = (ch == CH_HOUSE) ? housePath[i]
                      : (ch < CH_PATH0)  ? zonePoints[ch - CH_ZONE0][i]
                                         : pathPoints[ch - CH_PATH0][i];
@@ -225,16 +225,21 @@ void renderFrame() {
 // are on (e.g. a steady porch stays steady while a comet passes behind it).
 void drawLayers(uint32_t dtMs) {
   for (int o = 0; o < NUM_OUTPUTS; o++) {
-    drawChannel(o, dtMs);
+    if (strandLen[o]) drawChannel(o, dtMs);
   }
-  if (states[CH_HOUSE].on) {
+  if (states[CH_HOUSE].on && houseLen) {
     drawChannel(CH_HOUSE, dtMs);
   }
   for (int p = 0; p < MAX_PATHS; p++) {
-    if (pathDefs[p].used && states[CH_PATH0 + p].on) drawChannel(CH_PATH0 + p, dtMs);
+    if (pathDefs[p].used && states[CH_PATH0 + p].on && pathLen[p]) drawChannel(CH_PATH0 + p, dtMs);
   }
   for (int z = 0; z < MAX_ZONES; z++) {
-    if (zones[z].used && states[CH_ZONE0 + z].on) drawChannel(CH_ZONE0 + z, dtMs);
+    if (zones[z].used && !zoneHidden[z] && states[CH_ZONE0 + z].on && zoneLen[z]) drawChannel(CH_ZONE0 + z, dtMs);
+  }
+
+  // "Never light" zones: dark whatever else covers them (zone paths, overlapping zones).
+  for (int o = 0; o < NUM_OUTPUTS; o++) {
+    for (int i = 0; i < ledCount[o]; i++) if (lightHidden[o][i]) frame[o][i] = CRGB(0, 0, 0);
   }
 
   // Find a light: replaces everything with just the chosen lights.

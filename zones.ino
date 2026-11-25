@@ -27,6 +27,8 @@ void initZones() {
     zones[z].name[0] = 0;
     zones[z].rangeCount = 0;
     zoneLen[z] = 0;
+    zoneHidden[z] = 0;
+    zoneRank[z] = z;
     states[CH_ZONE0 + z] = ZONE_DEFAULT_STATE;
   }
 }
@@ -140,6 +142,11 @@ const char* saveZone(int id, const String& name, const String& rangesStr, int& n
     for (int z = 0; z < MAX_ZONES && id < 0; z++) if (!zones[z].used) id = z;
     if (id < 0) return "all 12 zones are used; delete one first";
     states[CH_ZONE0 + id] = ZONE_DEFAULT_STATE;
+    // A new zone goes to the end of the list.
+    uint8_t last = 0;
+    for (int z = 0; z < MAX_ZONES; z++) if (zones[z].used && zoneRank[z] >= last) last = zoneRank[z] + 1;
+    zoneRank[id] = last;
+    zoneHidden[id] = 0;
   } else if (id >= MAX_ZONES || !zones[id].used) {
     return "zone not found";
   }
@@ -151,7 +158,9 @@ const char* saveZone(int id, const String& name, const String& rangesStr, int& n
   for (int r = 0; r < count; r++) zd.ranges[r] = ranges[r];
   rebuildZone(id);
   rebuildAllZonePaths();   // paths follow the zone's new lights
+  if (zoneHidden[id]) initPaths();   // its lights changed: strands skip the new ones
   resetPhase(CH_ZONE0 + id);
+  saveZoneMeta();
 
   markStateChanged();
   newId = id;
@@ -165,6 +174,11 @@ const char* deleteZone(int id) {
   zones[id].rangeCount = 0;
   states[CH_ZONE0 + id] = ZONE_DEFAULT_STATE;
   rebuildZone(id);
+  if (zoneHidden[id]) {
+    zoneHidden[id] = 0;
+    initPaths();   // its lights go back into the strands and Whole house
+  }
+  saveZoneMeta();
   // Paths drop their steps for it, and scenes forget it, so a new zone that gets this
   // slot later isn't pulled into them.
   for (int p = 0; p < MAX_PATHS; p++) {
@@ -231,13 +245,15 @@ void loadZones() {
     if (zones[z].used) loaded++;
   }
   f.close();
+  loadZoneMeta();
+  initPaths();   // strands and Whole house skip the "never light" zones
   Serial.printf("Zones: %d loaded%s\n", loaded, converted ? " (converted from the old format)" : "");
   if (converted) markStateChanged();   // write it back in the new format
   for (int z = 0; z < MAX_ZONES; z++) {
     if (!zones[z].used) continue;
     Serial.printf("  %s = %s (%u lights), %s\n", zones[z].name,
                   rangesText(zones[z].ranges, zones[z].rangeCount).c_str(), zoneLen[z],
-                  states[CH_ZONE0 + z].on ? "ON" : "OFF");
+                  zoneHidden[z] ? "NEVER LIT" : states[CH_ZONE0 + z].on ? "ON" : "OFF");
   }
 }
 
@@ -255,6 +271,104 @@ void saveZonesFile() {
   for (int z = 0; z < MAX_ZONES; z++) {
     f.write((const uint8_t*)&zones[z], sizeof(ZoneDef));
     f.write((const uint8_t*)&states[CH_ZONE0 + z], sizeof(LightState));
+  }
+  f.close();
+}
+
+// ---- "Never light" zones and list order (/zonemeta.bin) ----
+// Per zone slot: hidden (0/1), rank (list position, lower first).
+
+const char*    ZONEMETA_FILE  = "/zonemeta.bin";
+const uint32_t ZONEMETA_MAGIC = 0x4154455A;  // "ZETA"
+
+// Marks every light of a "never light" zone. Lights past a strand's end are ignored.
+void rebuildHiddenLights() {
+  memset(lightHidden, 0, sizeof(lightHidden));
+  for (int z = 0; z < MAX_ZONES; z++) {
+    if (!zones[z].used || !zoneHidden[z]) continue;
+    for (int r = 0; r < zones[z].rangeCount; r++) {
+      const ZoneRange& zr = zones[z].ranges[r];
+      int a = min(zr.first, zr.last), b = max(zr.first, zr.last);
+      for (int i = a; i <= b && i < ledCount[zr.output]; i++) lightHidden[zr.output][i] = true;
+    }
+  }
+}
+
+// Used zone slots in list order. Returns how many.
+int zonesInOrder(uint8_t* slots) {
+  int n = 0;
+  for (int z = 0; z < MAX_ZONES; z++) if (zones[z].used) slots[n++] = z;
+  for (int i = 1; i < n; i++) {           // insertion sort by rank, then slot
+    uint8_t s = slots[i];
+    int j = i - 1;
+    while (j >= 0 && (zoneRank[slots[j]] > zoneRank[s] ||
+                      (zoneRank[slots[j]] == zoneRank[s] && slots[j] > s))) {
+      slots[j + 1] = slots[j];
+      j--;
+    }
+    slots[j + 1] = s;
+  }
+  return n;
+}
+
+// Renumbers the ranks 0, 1, 2... in the current order.
+void normalizeZoneRanks() {
+  uint8_t slots[MAX_ZONES];
+  int n = zonesInOrder(slots);
+  for (int i = 0; i < n; i++) zoneRank[slots[i]] = i;
+}
+
+const char* setZoneHidden(int id, bool hidden) {
+  if (id < 0 || id >= MAX_ZONES || !zones[id].used) return "zone not found";
+  if ((zoneHidden[id] != 0) == hidden) return nullptr;
+  zoneHidden[id] = hidden ? 1 : 0;
+  initPaths();
+  saveZoneMeta();
+  return nullptr;
+}
+
+// dir < 0 = up one place in the list, otherwise down one place.
+const char* moveZone(int id, int dir) {
+  if (id < 0 || id >= MAX_ZONES || !zones[id].used) return "zone not found";
+  normalizeZoneRanks();
+  uint8_t slots[MAX_ZONES];
+  int n = zonesInOrder(slots);
+  int pos = zoneRank[id], other = pos + (dir < 0 ? -1 : 1);
+  if (other < 0 || other >= n) return nullptr;   // already first / last
+  zoneRank[slots[other]] = pos;
+  zoneRank[id] = other;
+  saveZoneMeta();
+  return nullptr;
+}
+
+void loadZoneMeta() {
+  for (int z = 0; z < MAX_ZONES; z++) { zoneHidden[z] = 0; zoneRank[z] = z; }
+  if (storageOk && FFat.exists(ZONEMETA_FILE)) {
+    File f = FFat.open(ZONEMETA_FILE, "r");
+    FileHeader h;
+    if (f && f.read((uint8_t*)&h, sizeof(h)) == sizeof(h) && h.magic == ZONEMETA_MAGIC && h.recordSize == 2) {
+      for (int z = 0; z < h.count && z < MAX_ZONES; z++) {
+        uint8_t rec[2];
+        if (f.read(rec, 2) != 2) break;
+        zoneHidden[z] = rec[0] ? 1 : 0;
+        zoneRank[z] = rec[1];
+      }
+    }
+    if (f) f.close();
+  }
+  for (int z = 0; z < MAX_ZONES; z++) if (!zones[z].used) zoneHidden[z] = 0;
+  normalizeZoneRanks();
+}
+
+void saveZoneMeta() {
+  if (!storageOk || savesBlocked) return;
+  File f = FFat.open(ZONEMETA_FILE, "w");
+  if (!f) return;
+  FileHeader h = { ZONEMETA_MAGIC, 1, 2, MAX_ZONES };
+  f.write((const uint8_t*)&h, sizeof(h));
+  for (int z = 0; z < MAX_ZONES; z++) {
+    uint8_t rec[2] = { zoneHidden[z], zoneRank[z] };
+    f.write(rec, 2);
   }
   f.close();
 }

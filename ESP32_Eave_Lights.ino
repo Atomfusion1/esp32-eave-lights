@@ -53,7 +53,7 @@
 #define OTA_PASSWORD AP_PASSWORD
 #endif
 
-#define FW_VERSION "0.25.2"
+#define FW_VERSION "0.26.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
@@ -203,6 +203,16 @@ struct ZoneDef {
 ZoneDef   zones[MAX_ZONES];
 PathPoint zonePoints[MAX_ZONES][MAX_TOTAL_LEDS];  // each zone's lights in line order
 uint16_t  zoneLen[MAX_ZONES];                     // lights in each zone (0 if unused)
+
+// Zone extras, kept in /zonemeta.bin so zones.bin's format didn't change:
+// zoneHidden = "never light" (e.g. the lead-in running down the wall): those lights stay
+// dark and are left out of the strand lines and the Whole house path, so effects start
+// at the eave. Find a light can still show them. zoneRank = position in the page's lists.
+uint8_t  zoneHidden[MAX_ZONES];
+uint8_t  zoneRank[MAX_ZONES];
+bool     lightHidden[NUM_OUTPUTS][MAX_LEDS];   // built from the hidden zones
+uint16_t strandMap[NUM_OUTPUTS][MAX_LEDS];     // strand line position -> light index
+uint16_t strandLen[NUM_OUTPUTS];               // visible lights per strand
 
 // ---------- Paths made from zones ----------
 // A zone path is a name plus an ordered list of zones; each step can run its zone

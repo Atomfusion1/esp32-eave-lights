@@ -338,13 +338,15 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 </div></details>
 
 <details class="fold" data-fold="zones"><summary>Zones <small id="zoneSum"></small></summary><div class="body">
-<p class="hint" style="margin:0 0 10px">A zone is a name plus lights, e.g. <b>A1-12</b> or <b>A1-12, B30-65</b>. <b>A12-1</b> runs backwards. <b>Click a zone</b> to light it white for 10 seconds. Zones that are on are drawn on top of everything else.</p>
+<p class="hint" style="margin:0 0 10px">A zone is a name plus lights, e.g. <b>A1-12</b> or <b>A1-12, B30-65</b>. <b>A12-1</b> runs backwards. <b>Click a zone</b> to light it white for 10 seconds. Zones that are on are drawn on top of everything else. <b>↑ ↓</b> set the order zones are listed in.</p>
 <div id="zoneList"></div>
 <p class="hint" id="noZones">No zones yet.</p>
 <div class="sub">
 <label id="zoneFormTitle">New zone</label>
 <input id="zoneName" type="text" placeholder="Name, e.g. Porch" maxlength="23">
 <input id="zoneRanges" type="text" placeholder="Lights, e.g. A1-12, B30-65" style="margin-top:8px">
+<label style="display:flex;gap:8px;align-items:center;margin:10px 0 0;color:var(--text);font-size:14px"><input type="checkbox" id="zoneHidden" style="width:18px;height:18px;accent-color:var(--accent)"> Never light (e.g. the lead-in running down the wall)</label>
+<p class="hint" style="margin:4px 0 0">These lights always stay dark, and Strand A/B and Whole house effects skip them so they start at the eave.</p>
 <div class="row" style="margin-top:10px">
 <button class="btn" id="zoneShow">Show on lights</button><button class="btn primary" id="zoneSave">Save zone</button><button class="btn" id="zoneCancel" hidden>Cancel</button>
 </div>
@@ -432,14 +434,15 @@ function curName(){return house()?'Whole house':both()?'Both strands':(zoneSel()
 function anyStrandOn(){return st.outputs.some(o=>o.on);}
 // everything that is on, by name
 function onNames(s){const n=[];s.outputs.forEach(o=>o.on&&n.push('Strand '+o.id));if(s.house.on)n.push('Whole house');
- s.paths.forEach(p=>p.on&&n.push(p.name));s.zones.forEach(z=>z.on&&n.push(z.name));return n;}
+ s.paths.forEach(p=>p.on&&n.push(p.name));s.zones.forEach(z=>z.on&&!z.hidden&&n.push(z.name));return n;}
 
 function renderPicker(s){const onOff=o=>o.on?'  ● on':'  ○ off';
  let h='<optgroup label="Strands">'+s.outputs.map((o,i)=>'<option value="'+i+'">Strand '+o.id+(o.id==='A'?' (left)':' (right)')+onOff(o)+'</option>').join('')+
   '<option value="'+BOTH+'">Both strands'+(s.outputs.every(o=>o.on)?'  ● on':anyStrandOn()?'  ◐ some on':'  ○ off')+'</option></optgroup>'+
   '<optgroup label="Whole house"><option value="'+HOUSE+'">Whole house'+onOff(s.house)+'</option></optgroup>';
  if(s.paths.length)h+='<optgroup label="Paths">'+s.paths.map(p=>'<option value="'+(PATH+p.slot)+'">'+esc(p.name)+onOff(p)+'</option>').join('')+'</optgroup>';
- if(s.zones.length)h+='<optgroup label="Zones">'+s.zones.map(z=>'<option value="'+(ZONE+z.slot)+'">'+esc(z.name)+onOff(z)+'</option>').join('')+'</optgroup>';
+ const lit=s.zones.filter(z=>!z.hidden);   // "never light" zones can't be picked
+ if(lit.length)h+='<optgroup label="Zones">'+lit.map(z=>'<option value="'+(ZONE+z.slot)+'">'+esc(z.name)+onOff(z)+'</option>').join('')+'</optgroup>';
  $('picker').innerHTML=h;$('picker').value=String(sel);}
 $('picker').onchange=async e=>{const next=+e.target.value;
  if(hasPending()){if(confirm('Apply your changes to '+pendingName+' first?\n\nOK = apply them, Cancel = throw them away.'))await applyPending();
@@ -447,14 +450,14 @@ $('picker').onchange=async e=>{const next=+e.target.value;
  sel=next;store.set('eaveSel',sel);show(st);};
 
 function show(s){st=s;
- if((zoneSel()&&!zoneBySlot(sel-ZONE))||(pathSel()&&!pathBySlot(sel-PATH))||(sel>=0&&sel<ZONE&&sel>=s.outputs.length)||(sel<HOUSE))sel=0;
+ if((zoneSel()&&(!zoneBySlot(sel-ZONE)||zoneBySlot(sel-ZONE).hidden))||(pathSel()&&!pathBySlot(sel-PATH))||(sel>=0&&sel<ZONE&&sel>=s.outputs.length)||(sel<HOUSE))sel=0;
  const names=onNames(s);
  $('onPill').textContent=names.length?names.length+' on':'all off';$('onPill').classList.toggle('on',names.length>0);
  $('onList').textContent=names.length?names.join(' · '):'Everything is off.';
  $('allOff').textContent=names.length?'All lights off':s.canAllOn?'All lights on (as before)':'Everything is off';
  $('allOff').disabled=!names.length&&!s.canAllOn;$('allOff').classList.toggle('on',!names.length&&s.canAllOn);
  renderPicker(s);
- const h=s.house,zonesOn=s.zones.filter(z=>z.on),pathsOn=s.paths.filter(p=>p.on);
+ const h=s.house,zonesOn=s.zones.filter(z=>z.on&&!z.hidden),pathsOn=s.paths.filter(p=>p.on);
  const coverStrands=(h.on?['Whole house']:[]).concat(pathsOn.map(p=>p.name),zonesOn.map(z=>z.name));
  const o=cur(),lastA='A'+s.outputs[0].count,lastB='B'+(s.outputs[1]?s.outputs[1].count:'');
  let hint='';
@@ -472,10 +475,14 @@ function show(s){st=s;
  // setup
  $('strandSum').textContent='A '+s.outputs[0].count+(s.outputs[1]?' · B '+s.outputs[1].count:'');
  $('zoneSum').textContent=s.zones.length+' of 12';$('pathSum').textContent=s.paths.length+' of 8';$('fwSum').textContent='v'+s.version;
- $('zoneList').innerHTML=s.zones.map(z=>'<div class="zoneRow click'+(z.slot===showingZone?' showing':'')+'" data-show="'+z.slot+'" title="Click to light this zone white for 10 seconds"><div>'+esc(z.name)+
-  '<small>'+esc(z.ranges)+' · '+z.length+' lights'+(z.slot===showingZone?' · showing on the house…':'')+'</small></div>'+
+ $('zoneList').innerHTML=s.zones.map((z,i)=>'<div class="zoneRow click'+(z.slot===showingZone?' showing':'')+'" data-show="'+z.slot+'" title="Click to light this zone white for 10 seconds"><div>'+esc(z.name)+
+  '<small>'+esc(z.ranges)+' · '+z.length+' lights'+(z.hidden?' · <b>never lit</b>':'')+(z.slot===showingZone?' · showing on the house…':'')+'</small></div>'+
+  '<button class="btn" data-mv="'+z.slot+'" data-dir="-1" title="Move up"'+(i?'':' disabled')+'>↑</button>'+
+  '<button class="btn" data-mv="'+z.slot+'" data-dir="1" title="Move down"'+(i<s.zones.length-1?'':' disabled')+'>↓</button>'+
   '<button class="btn" data-edit="'+z.slot+'">Edit</button><button class="btn danger" data-del="'+z.slot+'">Delete</button></div>').join('');
  $('noZones').hidden=s.zones.length>0;
+ $('zoneList').querySelectorAll('[data-mv]').forEach(b=>b.onclick=async e=>{e.stopPropagation();
+  const j=await post('/api/zones',{action:'move',id:b.dataset.mv,dir:b.dataset.dir});if(j.error)showErr('zoneErr',j.error);else show(j);});
  $('zoneList').querySelectorAll('[data-edit]').forEach(b=>b.onclick=e=>{e.stopPropagation();startEdit(+b.dataset.edit);});
  $('zoneList').querySelectorAll('[data-del]').forEach(b=>b.onclick=e=>{e.stopPropagation();delZone(+b.dataset.del);});
  $('zoneList').querySelectorAll('[data-show]').forEach(r=>r.onclick=()=>showZone(+r.dataset.show));
@@ -862,8 +869,8 @@ async function showZone(slot){clearTimeout(showTimer);
  const j=await post('/api/locate',{ranges:z.ranges,seconds:SHOW_SECONDS,white:1});
  if(j.error){showingZone=-1;showErr('zoneErr',j.error);}else{showErr('zoneErr');show(j);}
  showTimer=setTimeout(async()=>{showingZone=-1;try{show(await (await fetch('/api/state')).json());}catch(e){}},SHOW_SECONDS*1000+300);}
-function resetZoneForm(){editZone=-1;$('zoneName').value='';$('zoneRanges').value='';$('zoneFormTitle').textContent='New zone';$('zoneCancel').hidden=true;showErr('zoneErr');}
-function startEdit(slot){const z=zoneBySlot(slot);editZone=slot;$('zoneName').value=z.name;$('zoneRanges').value=z.ranges;
+function resetZoneForm(){editZone=-1;$('zoneName').value='';$('zoneRanges').value='';$('zoneHidden').checked=false;$('zoneFormTitle').textContent='New zone';$('zoneCancel').hidden=true;showErr('zoneErr');}
+function startEdit(slot){const z=zoneBySlot(slot);editZone=slot;$('zoneName').value=z.name;$('zoneRanges').value=z.ranges;$('zoneHidden').checked=!!z.hidden;
  $('zoneFormTitle').textContent='Edit zone: '+z.name;$('zoneCancel').hidden=false;showErr('zoneErr');$('zoneName').focus();}
 async function delZone(slot){const z=zoneBySlot(slot);if(!confirm('Delete zone "'+z.name+'"?'))return;
  const j=await post('/api/zones',{action:'delete',id:slot});if(j.error)showErr('zoneErr',j.error);else{if(editZone===slot)resetZoneForm();show(j);unlinkZoneFromLayout(slot,z.name);}}
@@ -876,7 +883,7 @@ async function unlinkZoneFromLayout(slot,name){try{
  await fetch('/api/layout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(lay)});
  if(editorFrame.src)editorFrame.src='/editor?embed=1';loadLayout();}catch(e){}}
 $('zoneShow').onclick=async()=>{const j=await locate($('zoneRanges').value.trim());showErr('zoneErr',j.error);};
-$('zoneSave').onclick=async()=>{const p={action:'save',name:$('zoneName').value,ranges:$('zoneRanges').value};if(editZone>=0)p.id=editZone;
+$('zoneSave').onclick=async()=>{const p={action:'save',name:$('zoneName').value,ranges:$('zoneRanges').value,hidden:$('zoneHidden').checked?1:0};if(editZone>=0)p.id=editZone;
  const j=await post('/api/zones',p);if(j.error){showErr('zoneErr',j.error);return;}
  if(j.locate.active)await locate('');resetZoneForm();show(j);};
 $('zoneCancel').onclick=resetZoneForm;

@@ -230,7 +230,7 @@ void drawCenter(int ch, uint32_t dtMs) {
   int len = lineLength(ch);
   if (len == 0) return;
   // Whole house: the controller sits between B1 and A1; otherwise the middle of the line.
-  int32_t center = (ch == CH_HOUSE) ? (int32_t)ledCount[1] * 256 - 128 : (int32_t)(len - 1) * 128;
+  int32_t center = (ch == CH_HOUSE) ? (int32_t)strandLen[1] * 256 - 128 : (int32_t)(len - 1) * 128;
   int32_t width = (int32_t)s.size * 256;
   int32_t spacing = max((int32_t)s.size * 3, (int32_t)6) * 256;
   int32_t p = advanceMotion(ch, dtMs, spacing / 256);

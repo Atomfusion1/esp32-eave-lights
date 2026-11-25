@@ -130,7 +130,9 @@ ESP32_Eave_Lights/              folder name must equal the main sketch name
   files.ino                     photo upload, layout.json save, /files static serving
   wifi.ino                      home Wi-Fi, hotspot fallback, mDNS eavelights.local
   zones.ino                     zones (name + light ranges + settings) in /zones.bin,
-                                range text parser ("A1-12, B30-65")
+                                range text parser ("A1-12, B30-65"); "never light" flag
+                                and list order per zone in /zonemeta.bin (hidden lights
+                                are left out of strand lines via strandMap[] and Whole house)
   secrets.h                     Wi-Fi passwords, gitignored (copy from secrets.example.h)
   <task>.ino                    add new tasks the same way
   Docs/                         handoff and notes (ignored by the compiler)

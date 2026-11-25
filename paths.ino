@@ -16,11 +16,19 @@ const char*    PATHS_FILE    = "/paths.bin";
 const uint32_t PATHS_MAGIC   = 0x48544150;  // "PATH"
 const uint16_t PATHS_VERSION = 2;   // v1 (before 0.15.0): settings without the color list
 
-// Builds the Whole house path from the current strand lengths.
+// Builds the strand lines and the Whole house path from the current strand lengths,
+// leaving out lights in "never light" zones (zones.ino). Called again whenever a zone
+// or a strand length changes.
 void initPaths() {
+  rebuildHiddenLights();
+  for (int o = 0; o < NUM_OUTPUTS; o++) {
+    uint16_t n = 0;
+    for (int i = 0; i < ledCount[o]; i++) if (!lightHidden[o][i]) strandMap[o][n++] = i;
+    strandLen[o] = n;
+  }
   int p = 0;
-  for (int i = ledCount[1] - 1; i >= 0; i--) housePath[p++] = { 1, (uint16_t)i };  // last B -> B1
-  for (int i = 0; i < ledCount[0]; i++)      housePath[p++] = { 0, (uint16_t)i };  // A1 -> last A
+  for (int k = strandLen[1] - 1; k >= 0; k--) housePath[p++] = { 1, strandMap[1][k] };  // last B -> B1
+  for (int k = 0; k < strandLen[0]; k++)      housePath[p++] = { 0, strandMap[0][k] };  // A1 -> last A
   houseLen = p;
 }
 
