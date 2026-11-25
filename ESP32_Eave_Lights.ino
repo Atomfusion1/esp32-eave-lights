@@ -53,7 +53,7 @@
 #define OTA_PASSWORD AP_PASSWORD
 #endif
 
-#define FW_VERSION "0.26.2"
+#define FW_VERSION "0.26.3"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
@@ -201,7 +201,7 @@ struct ZoneDef {
 };
 
 ZoneDef   zones[MAX_ZONES];
-PathPoint zonePoints[MAX_ZONES][MAX_TOTAL_LEDS];  // each zone's lights in line order
+PathPoint (*zonePoints)[MAX_TOTAL_LEDS] = nullptr;  // [MAX_ZONES]: each zone's lights in line order (PSRAM)
 uint16_t  zoneLen[MAX_ZONES];                     // lights in each zone (0 if unused)
 
 // Zone extras, kept in /zonemeta.bin so zones.bin's format didn't change:
@@ -238,7 +238,7 @@ struct PathDef {
 };
 
 PathDef   pathDefs[MAX_PATHS];
-PathPoint pathPoints[MAX_PATHS][MAX_PATH_LEN];   // each path's positions in order
+PathPoint (*pathPoints)[MAX_PATH_LEN] = nullptr;    // [MAX_PATHS]: each path's positions in order (PSRAM)
 uint16_t  pathLen[MAX_PATHS];                    // positions in each path, gaps included
 
 // ---------- Channels ----------
@@ -319,7 +319,7 @@ struct Scene {
   LightState states[NUM_CHANNELS];
 };
 
-Scene scenes[MAX_SCENES];
+Scene* scenes = nullptr;   // [MAX_SCENES], in PSRAM (allocBigTables)
 
 // ---------- Playlists & calendar ----------
 // A playlist ("program") is a list of scenes, each shown for a number of seconds, looping.
@@ -409,6 +409,25 @@ struct FileHeader {
   uint16_t count;
 };
 
+// Big tables go in PSRAM (8 MB) to leave internal RAM for Wi-Fi and the web server
+// (about 100 KB). Zeroed like normal globals. Falls back to internal RAM without PSRAM.
+void* bigAlloc(size_t bytes) {
+  void* p = ps_calloc(1, bytes);
+  if (!p) p = calloc(1, bytes);
+  if (!p) {
+    Serial.printf("Out of memory allocating %u bytes, restarting\n", (unsigned)bytes);
+    delay(2000);
+    ESP.restart();
+  }
+  return p;
+}
+
+void allocBigTables() {
+  zonePoints = (PathPoint(*)[MAX_TOTAL_LEDS])bigAlloc(sizeof(PathPoint) * MAX_ZONES * MAX_TOTAL_LEDS);
+  pathPoints = (PathPoint(*)[MAX_PATH_LEN])bigAlloc(sizeof(PathPoint) * MAX_PATHS * MAX_PATH_LEN);
+  scenes     = (Scene*)bigAlloc(sizeof(Scene) * MAX_SCENES);
+}
+
 void setup() {
   // Send OFF before anything else so the power-up white ends as soon as possible.
   initOutputs();
@@ -421,6 +440,9 @@ void setup() {
   Serial.printf("Flash: %u MB, PSRAM: %u MB\n",
                 ESP.getFlashChipSize() / (1024 * 1024),
                 ESP.getPsramSize() / (1024 * 1024));
+  allocBigTables();   // before anything uses zones, paths or scenes
+  Serial.printf("Free internal RAM: %u bytes, free PSRAM: %u bytes\n",
+                (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL), (unsigned)ESP.getFreePsram());
 
   initZones();
   initZonePaths();
