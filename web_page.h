@@ -444,10 +444,33 @@ function renderPicker(s){const onOff=o=>o.on?'  ● on':'  ○ off';
  const lit=s.zones.filter(z=>!z.hidden);   // "never light" zones can't be picked
  if(lit.length)h+='<optgroup label="Zones">'+lit.map(z=>'<option value="'+(ZONE+z.slot)+'">'+esc(z.name)+onOff(z)+'</option>').join('')+'</optgroup>';
  $('picker').innerHTML=h;$('picker').value=String(sel);}
-$('picker').onchange=async e=>{const next=+e.target.value;
- if(hasPending()){if(confirm('Apply your changes to '+pendingName+' first?\n\nOK = apply them, Cancel = throw them away.'))await applyPending();
+$('picker').onchange=e=>choosePart(+e.target.value);
+async function choosePart(next){
+ if(hasPending()&&next!==sel){if(confirm('Apply your changes to '+pendingName+' first?\n\nOK = apply them, Cancel = throw them away.'))await applyPending();
   else{pending={};pendingTarget=null;stopPreview();await discardPaint();updateApplyBar();}}
- sel=next;store.set('eaveSel',sel);show(st);};
+ sel=next;store.set('eaveSel',sel);show(st);}
+
+// Tapping a light on the live photo/strip: picks what is lighting it, in the board's
+// drawing order (strands, Whole house, paths, zones; a higher slot draws over a lower one).
+// Nothing on there: the zone/strand drawn there in the House editor. Never-lit: nothing.
+function partLighting(o,i,item){if(!st)return null;
+ const has=r=>parseRanges(r).some(l=>l[0]===o&&l[1]===i);
+ if(st.zones.some(z=>z.hidden&&has(z.ranges)))return null;
+ const zs=st.zones.filter(z=>!z.hidden&&has(z.ranges)),slots=zs.map(z=>z.slot);
+ let best=-1;zs.forEach(z=>{if(z.on&&z.slot>best)best=z.slot;});if(best>=0)return ZONE+best;
+ st.paths.forEach(p=>{if(p.on&&p.slot>best&&p.steps.some(s=>slots.includes(s.zone)))best=p.slot;});if(best>=0)return PATH+best;
+ if(st.house.on)return HOUSE;
+ if(st.outputs[o]&&st.outputs[o].on)return o;
+ if(item&&item[0]==='z'){const z=zoneBySlot(+item.slice(1));if(z&&!z.hidden)return ZONE+z.slot;}
+ if(item==='A'||item==='B')return item==='A'?0:1;
+ return zs.length?ZONE+zs[0].slot:o;}
+const tapAt={};
+[['photo',$('photoBox')],['strip',$('stripBox')]].forEach(([box,el])=>{
+ el.addEventListener('pointerdown',e=>{tapAt[box]={x:e.clientX,y:e.clientY};},true);   // capture: pan/zoom stops it bubbling
+ el.addEventListener('click',e=>{if(painting||!st)return;const d0=tapAt[box];
+  if(!d0||Math.hypot(e.clientX-d0.x,e.clientY-d0.y)>6)return;   // a pan or pinch, not a tap
+  const d=nearestDot(box,e);if(!d)return;const next=partLighting(d.o,d.i,d.item);if(next===null)return;
+  if(tab!=='lights')setTab('lights');choosePart(next);});});
 
 function show(s){st=s;
  if((zoneSel()&&(!zoneBySlot(sel-ZONE)||zoneBySlot(sel-ZONE).hidden))||(pathSel()&&!pathBySlot(sel-PATH))||(sel>=0&&sel<ZONE&&sel>=s.outputs.length)||(sel<HOUSE))sel=0;
@@ -1320,7 +1343,7 @@ function drawPhoto(fi){const v=layout.views[photoView];let im=imgs[v.image];
   const hid=p.hidden||[],sp=spacingPx(pos,w,h),pset=p.look?Object.assign({},set,{style:p.look}):set;
   pos.forEach((q,i)=>{if(hid.includes(q.seg))return;   // behind something on this photo
    const c=lightRGB(fi,ls[i][0],ls[i][1]),x=q.x*w,y=q.y*h;
-   dots.push({box:'photo',o:ls[i][0],i:ls[i][1],x:x*Z+pz.x,y:y*Z+pz.y,r:Math.max(Math.min(sp*0.5,R)*Z,7)});
+   dots.push({box:'photo',o:ls[i][0],i:ls[i][1],item:p.item,x:x*Z+pz.x,y:y*Z+pz.y,r:Math.max(Math.min(sp*0.5,R)*Z,7)});
    // off: a faint ring, so the layout still shows with everything off (brighter while painting)
    if(!c){pctx.globalCompositeOperation='source-over';pctx.strokeStyle=painting?'rgba(255,255,255,0.35)':'rgba(255,255,255,0.18)';pctx.lineWidth=1/Z;
      pctx.beginPath();pctx.arc(x,y,Math.max(2.5,sp*0.08),0,7);pctx.stroke();pctx.globalCompositeOperation='lighter';return;}
@@ -1364,7 +1387,7 @@ function drawLive(){const hasPhoto=!!(layout&&layout.views&&layout.views.length)
  $('liveMode').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',b.dataset.lm===(usePhoto?'photo':'strip')));
  $('photoBox').hidden=!usePhoto;$('stripBox').hidden=usePhoto;$('photoViews').hidden=!usePhoto;
  $('liveHint').textContent=liveMode==='photo'&&!hasPhoto?'No house photos yet: add them in the House tab. Showing the strip for now.':
-  usePhoto?'':'As seen from the street. Screen brightness is approximate.';
+  (usePhoto?'':'As seen from the street. Screen brightness is approximate. ')+'Tap a light to edit what is lighting it.';
  // while painting: the controlled lights show the painting, everything else stays live
  const src=painting&&patternFrame?paintComposite():frame;
  $('paintBadge').hidden=!painting;$('paintBadge').textContent='PAINTING PATTERN '+paintPattern;

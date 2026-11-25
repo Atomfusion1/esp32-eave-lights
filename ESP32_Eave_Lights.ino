@@ -53,7 +53,7 @@
 #define OTA_PASSWORD AP_PASSWORD
 #endif
 
-#define FW_VERSION "0.26.1"
+#define FW_VERSION "0.26.2"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
