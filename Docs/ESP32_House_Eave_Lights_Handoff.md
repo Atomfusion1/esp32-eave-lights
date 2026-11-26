@@ -1,36 +1,37 @@
 # ESP32-S3 House Eave Lighting — Project Handoff
 
-**Date:** 2026-11-23 (updated end of day)  
-**Status:** Firmware **v0.25.2** written and compiling. The board is installed outside on strand A (67 lights, GPIO 8) and updated over Wi-Fi. Strand B (GPIO 9) not yet connected. See **§0** for what works, what's untested and what's next.  
+**Date:** 2026-11-26  
+**Status:** Firmware **v0.41.1** on the board (eaves on strands A and B), hub **1.1.0** tested by radio. Yard lights (palm tree, oak floods) planned. See **§0**.  
 **Purpose:** Give a new VS Code/Codex coding session the hardware facts, target architecture, safety constraints and current state without requiring the conversation history. How to build, upload and lay out code: [AGENTS.md](../AGENTS.md).
 
-## 0. Current state & next steps (end of 2026-11-23)
+## 0. Current state & next steps (2026-11-26)
 
-**Running on the board and confirmed by the user** (up to about v0.14):
-Wi-Fi control page at `http://eavelights.local` (192.168.1.25), saved settings, live view (~9.4 updates/s), strand A/B/Both, Whole house path, solid/fade/chase/comet with background, zones (7 mapped right→left: Right Side B65-40, Front House B41-19, Porch B18-1, Porch 2 A1-5, Front Garage A6-12, Street Garage A13-23, Left Side A24-67), paths with jumps, Find a light, saved looks, strand lengths, wireless updates (IDE network port), house-photo editor with 3 photos, 4-tab page, click-a-zone-to-show.
+**Running on the board** (user uploads over Wi-Fi): v0.41.1. What the system does and the page layout are summarised in [README.md](../README.md); code rules in [AGENTS.md](../AGENTS.md). Earlier milestones (v0.15–v0.25: effects, Apply/preview, playlists and calendar, paintings, animations, timer, scene groups) are in the git log.
 
-**Written and compiling, not yet confirmed on hardware/browser** (v0.15–v0.25):
-- v0.15: 21 effects (+ rainbow, gradient, stripes, twinkle, fire, lightning, strobe…), 1–5 color list; saved-file converters.
-- v0.16: Apply/Discard for look changes; All lights off → All lights on (as before).
-- v0.17: playlists of scenes with minutes, yearly date ranges, Follow the calendar (NTP clock, US Eastern); live preview of unapplied changes.
-- v0.18–v0.19: Custom effect: hand-painted "paintings" (8, named), saved colors (swatches) also offered in every color picker, painting limited to the controlled lights.
-- v0.19: editor bends (drag the line), remove bend (double-click), hidden parts (behind the garage).
-- v0.20: house view draws lights as downlight scallops like the real pucks (Throw/Spread), per-section look (Points only for side eaves going up the roof line).
-- v0.21: on/off timer (sunset/sunrise ± minutes or set times, location default central Ohio); timer + calendar included in backups.
-- v0.22: Animation effect (Custom group): 8 animations of up to 16 looping steps (move ± lights with smooth glide + wrap, fade / switch to a painting or the colors, hold), in `animations.ino`, `/anims.bin`, `/api/anims`; editor under Lights → ✎ Edit steps.
-- v0.22.1: painting follows Apply/Discard (in "on Apply" mode paint goes to a draft on the board, `paintDraft`, shown only in the preview until Apply); eyedropper (Shift/Ctrl + click or the Pick tool) and brush brightness (per-light level; Pick copies it).
-- v0.23: paintings and animations are libraries (up to 30 each: New, Copy, Rename, Delete). One used by a saved scene or look is locked (🔒): editing makes a copy, so saved scenes never change; one in use can't be deleted. Deleting a zone/path/scene cleans up references (path steps, scenes' slot settings, "All on", playlist steps, house-photo sections unlinked) so reused slot numbers don't inherit them. Calendar fallback for dates no playlist covers: keep / lights off / an everyday playlist.
-- v0.24: scenes in a grouped drop-down (Everyday, New Year's, Valentine's … Christmas, Other; group guessed from the name until set), built-in read-only "Blank" (all off, plain warm white, stops playlists, clears All on), up to 40 scenes. Groups in /scenegroups.bin.
-- v0.25: Sway effect (MODE_SWAY 23): stripes of N lights per color glide one stripe over and back with smooth blending; speed 0.1-10 lights/s.
+**Since v0.25** (git log has the details):
+- v0.26–v0.30: never-lit zones and zone list order, up to 64 scenes, tap a light to control what lights it, big tables in PSRAM, lightning upgrade, multicolor bulb effects (Twinkling bulbs, Glitter, Blink & shift), up to 30 scenes per playlist, shuffle, Copy/Paste look, "what's lit" list under the live view.
+- v0.31–v0.35: Randomness (pace wanders by up to N %), Drifting leaves, timer override (Play or lights on outside the timer's hours = 2 h on), scene and playlist shown in the live card, Random direction (comet/meteor per pass, line effects switch now and then).
+- v0.36: **strands A–F** (name, up to 400 lights, off/wired/radio, pin, color order), board LED test light. Scenes and paintings converted from the 2-strand layout.
+- v0.37–v0.38: **radio strands by ESP-NOW** (radio.ino) and the **EaveHub** sketch for a second board; sent to each hub's address with re-sends (unicast) plus a broadcast once a second. Tested 2026-11-26 indoors, 50 ft through walls from the garage: −80 dBm, 100 % of frames (broadcast only had given 44–84 %).
+- v0.37.1 / v0.38.1: showing a scene by hand stops the playlist for the day (it used to be replaced by the calendar's playlist).
+- v0.39: **power limits on the page**: global (start at the measured 240/400) and per strand (override).
+- v0.40: Setup reorganized: search box, groups (Lights & wiring, Layout, Colors, System), one fold-out per topic.
+- v0.41: zones can be a **mirror of** another zone (tree wound up and back down). v0.41.1: pages sent with `Cache-Control: no-cache` (a browser had kept the old page after an update).
+
+**Yard plan** (lights not bought yet when written):
+- Palm tree (7 ft, 3" trunk, 4 ft ball top) on strand C: ALITOVE 24 V WS2811 bullets, 250 lights, 8" spacing, X-Connect. Trunk spiral (~20–25) + top (~110–180). Wound up and back down: use a mirror zone.
+- Big oak in the drive island on strand D: 2–3 JIAANDA 30 W WS2811 pixel floods (1 pixel each, 120° beam, ~1,100–1,400 lm white, blue weak). Wires: brown +24 V, **blue GND**, yellow data. Narrow-beam (25–45°) spots later for the upper canopy.
+- Hub box at the palm (outlet there): 24 V 6 A supply (144 W), 24→5 V step-down for the hub, level shifter, 10 A fuse, common ground, outdoor box with drip loops.
+- Power: the floods want their own power limit (255/765); the palm's limit set for the 144 W supply.
 
 **Next steps:**
-1. Test v0.15–v0.25 on the house (effects, Apply/preview, a 2-scene playlist, the calendar after a power cycle, painting one zone, the timer, an animation).
-2. **Download a backup** (Setup → Backup & restore) and keep it on the PC.
-3. **Change the default passwords** in `secrets.h` (`AP_PASSWORD` is still `change-me-123`; add `OTA_PASSWORD`). Upload once using the old password.
-4. Hardware before long-term outdoor use: 74AHCT125 buffer + ~330 Ω per data line, connect and test strand B (count, colors), measure current with both strands at the brightest scene, fuses per branch, weatherproof enclosure, don't reuse the damaged Y-splitter.
-5. Optional: keep a copy of the repo off this PC (private GitHub or another drive). Never push without asking.
+1. When the lights arrive: set C/D (count, Radio), Test effect per strand to find the color order, Find a light to map the palm (trunk / fronds), zones and paths (Rocket: trunk → fronds), power limits per strand.
+2. Range test with the hub at the real palm spot (Setup → Radio hubs, with a moving effect on the strand).
+3. Eaves: measure current at full white after raising the global R+G+B limit (24 V 5 A supply: about 570 or less).
+4. Take a backup on v0.41.x, then remove the old file converters (≈ 200–250 lines; older backups then can't be restored).
+5. Optional: "Radio updates per second" setting; tree effects by position (2D/3D layout) if the existing effects aren't enough.
 
-**Known limits:** the page's JavaScript can't be test-run here (no Node.js). The house view preview needs the board (no offline simulation). Strand B's length is assumed to be 65.
+**Known limits:** page JavaScript is checked with headless Edge here (no Node.js); the hub updates over USB only.
 
 ## 1. Project goal
 

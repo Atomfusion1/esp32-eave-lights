@@ -1,6 +1,7 @@
 # AGENTS.md — ESP32 Eave Lights
 
 Instructions for coding agents (Claude Code, Codex, etc.) working in this repo.
+What the system does and the page layout (for the user): [README.md](README.md). Keep it up to date when features or settings change.
 Project background, hardware facts, decisions and **current state / next steps**: [Docs/ESP32_House_Eave_Lights_Handoff.md](Docs/ESP32_House_Eave_Lights_Handoff.md). Read it before changing firmware.
 
 **Working with this user:**
