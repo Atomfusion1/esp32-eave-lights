@@ -53,7 +53,7 @@
 #define OTA_PASSWORD AP_PASSWORD
 #endif
 
-#define FW_VERSION "0.29.0"
+#define FW_VERSION "0.30.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
@@ -346,6 +346,7 @@ struct Program {
   bool        useDates;              // false = only plays when started by hand
   uint8_t     fromMonth, fromDay;    // inclusive, every year
   uint8_t     toMonth, toDay;        // inclusive; before "from" = wraps over New Year
+  uint8_t     shuffle;               // 1 = random order each round (v0.30.0; fits in padding)
 };
 
 Program programs[MAX_PROGRAMS];

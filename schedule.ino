@@ -20,7 +20,8 @@
 
 const char*    PROGRAMS_FILE    = "/programs.bin";
 const uint32_t PROGRAMS_MAGIC   = 0x474F5250;  // "PROG"
-const uint16_t PROGRAMS_VERSION = 2;   // v1 (before 0.29.0): up to 10 scenes per playlist
+const uint16_t PROGRAMS_VERSION = 3;   // v1 (before 0.29.0): up to 10 scenes per playlist;
+                                       // v2 (0.29.x): same size, no shuffle flag (read as off)
 
 // Version 1 record (10 steps), only used to convert old files.
 struct ProgramV1 {
@@ -39,6 +40,53 @@ int      activeStep    = 0;
 uint32_t stepStartMs   = 0;
 int      stoppedYday   = -1;     // day of the year Stop was pressed (calendar paused)
 bool     scheduleForce = false;  // re-check right away (after Play/Stop/edits)
+
+// ---- Shuffle ----
+// A shuffled playlist plays every scene once per round in a random order, then
+// reshuffles; a new round never starts with the scene that just played.
+uint8_t playOrder[MAX_PROGRAM_STEPS];
+int     playPos = 0;
+
+void shuffleOrder(int prog, int avoid) {
+  const Program& pr = programs[prog];
+  int n = pr.stepCount;
+  for (int i = 0; i < n; i++) playOrder[i] = i;
+  for (int i = n - 1; i > 0; i--) {
+    int j = esp_random() % (i + 1);
+    uint8_t t = playOrder[i]; playOrder[i] = playOrder[j]; playOrder[j] = t;
+  }
+  if (n > 1 && playOrder[0] == avoid) {
+    int j = 1 + esp_random() % (n - 1);
+    uint8_t t = playOrder[0]; playOrder[0] = playOrder[j]; playOrder[j] = t;
+  }
+  playPos = 0;
+}
+
+// The step a playlist starts on: the first, or a random one when shuffled.
+int firstStep(int prog) {
+  const Program& pr = programs[prog];
+  if (!pr.shuffle || pr.stepCount < 2) return 0;
+  shuffleOrder(prog, -1);
+  return playOrder[0];
+}
+
+// The step after activeStep.
+int nextStep(int prog) {
+  const Program& pr = programs[prog];
+  int n = max((int)pr.stepCount, 1);
+  if (!pr.shuffle || n < 2) return (activeStep + 1) % n;
+  playPos++;
+  if (playPos >= n || playOrder[playPos] >= n) shuffleOrder(prog, activeStep);
+  return playOrder[playPos];
+}
+
+// For the page: the step that comes next, or -1 if it isn't decided yet (new round).
+int peekNextStep(int prog) {
+  const Program& pr = programs[prog];
+  int n = max((int)pr.stepCount, 1);
+  if (!pr.shuffle || n < 2) return (activeStep + 1) % n;
+  return (playPos + 1 < n && playOrder[playPos + 1] < n) ? playOrder[playPos + 1] : -1;
+}
 
 // True (and fills t) once the internet clock has been set.
 bool clockNow(struct tm& t) {
@@ -88,7 +136,7 @@ void startProgramStep() {
       Serial.printf("Playlist %s: step %d\n", pr.name, activeStep + 1);
       return;
     }
-    activeStep = (activeStep + 1) % pr.stepCount;
+    activeStep = nextStep(activeProgram);
   }
   Serial.printf("Playlist %s: none of its scenes exist any more\n", pr.name);
   activeProgram = -1;
@@ -216,7 +264,7 @@ void handleSchedule() {
 
   if (want != activeProgram) {
     activeProgram = want;
-    activeStep = 0;
+    activeStep = (want >= 0) ? firstStep(want) : 0;
     if (want >= 0 && programs[want].stepCount) startProgramStep();
     else { activeProgram = -1; Serial.println("Playlist: none playing"); }
     return;
@@ -227,7 +275,7 @@ void handleSchedule() {
   if (pr.stepCount <= 1) return;                                // one scene: just hold it
   if (activeStep >= pr.stepCount) activeStep = 0;
   if (millis() - stepStartMs >= pr.steps[activeStep].seconds * 1000UL) {
-    activeStep = (activeStep + 1) % pr.stepCount;
+    activeStep = nextStep(activeProgram);
     startProgramStep();
   }
 }
@@ -258,7 +306,7 @@ void stopProgram() {
 
 void nextProgramStep() {
   if (activeProgram < 0) return;
-  activeStep = (activeStep + 1) % max((int)programs[activeProgram].stepCount, 1);
+  activeStep = nextStep(activeProgram);
   startProgramStep();
 }
 
@@ -303,7 +351,7 @@ bool parseMonthDay(const String& s, uint8_t& m, uint8_t& d) {
 
 // steps text: "scene:seconds,..." e.g. "0:600,2:300". id < 0 = new playlist.
 const char* saveProgram(int id, const String& name, const String& stepsText,
-                        bool useDates, const String& from, const String& to) {
+                        bool useDates, const String& from, const String& to, bool shuffle) {
   char cleanName[NAME_LEN];
   if (!copyName(name, cleanName)) return "enter a name for the playlist";
 
@@ -311,6 +359,7 @@ const char* saveProgram(int id, const String& name, const String& stepsText,
   pr.used = true;
   strcpy(pr.name, cleanName);
   pr.useDates = useDates;
+  pr.shuffle = shuffle ? 1 : 0;
   if (useDates) {
     if (!parseMonthDay(from, pr.fromMonth, pr.fromDay) || !parseMonthDay(to, pr.toMonth, pr.toDay)) {
       return "pick valid dates";
@@ -399,7 +448,7 @@ String programsJson() {
       uint32_t el = millis() - stepStartMs, dur = pr.steps[activeStep].seconds * 1000UL;
       left = el >= dur ? 0 : (long)((dur - el) / 1000);
     }
-    j += "{\"id\":" + String(activeProgram) + ",\"step\":" + String(activeStep) +
+    j += "{\"id\":" + String(activeProgram) + ",\"step\":" + String(activeStep) + ",\"next\":" + String(peekNextStep(activeProgram)) +
          ",\"manual\":" + (manualProgram == activeProgram ? "true" : "false") +
          ",\"nextIn\":" + String(left) + "}";
   } else {
@@ -413,8 +462,9 @@ String programsJson() {
     if (!first) j += ",";
     first = false;
     char head[160];
-    snprintf(head, sizeof(head), "{\"id\":%d,\"name\":\"%s\",\"useDates\":%s,\"from\":\"%02u-%02u\",\"to\":\"%02u-%02u\",\"steps\":[",
-             p, pr.name, pr.useDates ? "true" : "false", pr.fromMonth, pr.fromDay, pr.toMonth, pr.toDay);
+    snprintf(head, sizeof(head), "{\"id\":%d,\"name\":\"%s\",\"useDates\":%s,\"shuffle\":%s,\"from\":\"%02u-%02u\",\"to\":\"%02u-%02u\",\"steps\":[",
+             p, pr.name, pr.useDates ? "true" : "false", pr.shuffle ? "true" : "false",
+             pr.fromMonth, pr.fromDay, pr.toMonth, pr.toDay);
     j += head;
     for (int s = 0; s < pr.stepCount; s++) {
       j += String(s ? "," : "") + "{\"scene\":" + String(pr.steps[s].scene) + ",\"seconds\":" + String(pr.steps[s].seconds) + "}";
@@ -435,7 +485,7 @@ void loadPrograms() {
   FileHeader h;
   bool okHeader = f.read((uint8_t*)&h, sizeof(h)) == sizeof(h) && h.magic == PROGRAMS_MAGIC;
   bool isV1 = okHeader && h.version == 1 && h.recordSize == sizeof(ProgramV1);
-  bool isV2 = okHeader && h.version == PROGRAMS_VERSION && h.recordSize == sizeof(Program);
+  bool isV2 = okHeader && (h.version == 2 || h.version == PROGRAMS_VERSION) && h.recordSize == sizeof(Program);
   if (!isV1 && !isV2) {
     Serial.println("Playlists: file is from a different firmware layout, starting empty");
     f.close();
@@ -460,6 +510,7 @@ void loadPrograms() {
     }
     pr.name[NAME_LEN - 1] = 0;
     if (pr.stepCount > MAX_PROGRAM_STEPS) pr.used = false;
+    pr.shuffle = (isV2 && h.version == PROGRAMS_VERSION && pr.shuffle) ? 1 : 0;   // older files: off
     if (pr.used) loaded++;
   }
   f.close();

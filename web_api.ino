@@ -540,7 +540,7 @@ void handleScenes() {
 }
 
 // Playlists & calendar:
-//   action=save [id] name steps=scene:seconds,... dates=0|1 from=MM-DD to=MM-DD
+//   action=save [id] name steps=scene:seconds,... dates=0|1 from=MM-DD to=MM-DD shuffle=0|1
 //   action=delete id | action=play id | action=stop | action=next | action=calendar on=0|1
 //   action=timer enabled onMode onClock onOffset offMode offClock offOffset lat lon (schedule.ino)
 // Every action returns the playlist JSON (same as GET).
@@ -550,7 +550,7 @@ void handlePrograms() {
   const char* err = nullptr;
   if (action == "save") {
     err = saveProgram(id, server.arg("name"), server.arg("steps"), argIsTrue("dates"),
-                      server.arg("from"), server.arg("to"));
+                      server.arg("from"), server.arg("to"), argIsTrue("shuffle"));
   } else if (action == "delete") {
     err = deleteProgram(id);
   } else if (action == "play") {

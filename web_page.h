@@ -171,6 +171,7 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <div class="row" id="progDateRow" style="flex-wrap:wrap">
 <select id="fromM"></select><select id="fromD"></select><span style="flex:0 0 auto">to</span><select id="toM"></select><select id="toD"></select>
 </div>
+<label style="display:flex;gap:8px;align-items:center;margin:12px 0 6px;color:var(--text);font-size:14px"><input type="checkbox" id="progShuffle" style="width:18px;height:18px;accent-color:var(--accent)"> Shuffle: play the scenes in a random order (new order each round)</label>
 <div class="stepHead" id="progStepHead"><span>Scene (in order)</span><span style="width:84px">Minutes</span><span style="width:84px"></span></div>
 <div id="progSteps"></div>
 <p class="hint" id="progNeedsScenes" hidden>Save some scenes first (above).</p>
@@ -795,13 +796,13 @@ function showPrograms(j){progData=j;renderTimer(j.timer);
  $('clockTxt').textContent=j.clock?'Clock: '+j.clock+(j.stoppedToday?' · calendar paused until tomorrow (Stop was pressed)':''):
   'Clock not set yet (needs internet). Playlists you start with ▶ still work.';
  const a=j.active,ap=a&&j.programs.find(p=>p.id===a.id);
- if(ap){const step=ap.steps[a.step],next=ap.steps[(a.step+1)%ap.steps.length];
-  $('progNow').textContent='▶ Playing '+ap.name+(a.manual?'':' (calendar)')+': '+sceneName(step.scene)+
-   (ap.steps.length>1?' · next '+sceneName(next.scene)+' in '+Math.ceil(a.nextIn/60)+' min':'');}
+ if(ap){const step=ap.steps[a.step],ni=a.next!=null?a.next:(a.step+1)%ap.steps.length,next=ni>=0?ap.steps[ni]:null;
+  $('progNow').textContent='▶ Playing '+ap.name+(a.manual?'':' (calendar)')+(ap.shuffle?' (shuffled)':'')+': '+sceneName(step.scene)+
+   (ap.steps.length>1?' · next '+(next?sceneName(next.scene):'a random scene')+' in '+Math.ceil(a.nextIn/60)+' min':'');}
  else $('progNow').textContent='No playlist playing.';
  $('progNowBtns').hidden=!ap;$('progNext').hidden=!ap||ap.steps.length<2;
  $('progList').innerHTML=j.programs.map(p=>'<div class="zoneRow"><div>'+(ap&&ap.id===p.id?'▶ ':'')+esc(p.name)+
-  '<small>'+(p.useDates?fmtDate(p.from)+' – '+fmtDate(p.to):'no dates (start with ▶)')+' · '+
+  '<small>'+(p.useDates?fmtDate(p.from)+' – '+fmtDate(p.to):'no dates (start with ▶)')+' · '+(p.shuffle?'🔀 shuffled · ':'')+
   p.steps.map(s=>esc(sceneName(s.scene))+' '+fmtMins(s.seconds)+' min').join(' → ')+'</small></div>'+
   '<button class="btn" data-play="'+p.id+'" title="Play now">▶</button><button class="btn" data-pe="'+p.id+'">Edit</button><button class="btn danger" data-pd="'+p.id+'">×</button></div>').join('');
  $('noProgs').hidden=j.programs.length>0;
@@ -853,9 +854,9 @@ function renderProgSteps(){$('progNeedsScenes').hidden=sceneList.length>0;$('pro
 function setDateSel(prefix,md){const [m,d]=md.split('-').map(Number);$(prefix+'M').value=m;$(prefix+'D').value=d;}
 function openProgForm(title){$('progForm').hidden=false;$('progNew').hidden=true;$('progFormTitle').textContent=title;showErr('progErr');renderProgSteps();}
 function closeProgForm(){$('progForm').hidden=true;$('progNew').hidden=false;editProg=-1;progSteps=[];}
-$('progNew').onclick=()=>{editProg=-1;$('progName').value='';$('progDates').checked=false;setDateSel('from','12-01');setDateSel('to','12-31');
+$('progNew').onclick=()=>{editProg=-1;$('progName').value='';$('progDates').checked=false;$('progShuffle').checked=false;setDateSel('from','12-01');setDateSel('to','12-31');
  progSteps=sceneList.length?[{scene:sceneList[0].id,minutes:10}]:[];openProgForm('New playlist');};
-function startProgEdit(id){const p=progData.programs.find(x=>x.id===id);editProg=id;$('progName').value=p.name;$('progDates').checked=p.useDates;
+function startProgEdit(id){const p=progData.programs.find(x=>x.id===id);editProg=id;$('progName').value=p.name;$('progDates').checked=p.useDates;$('progShuffle').checked=!!p.shuffle;
  setDateSel('from',p.from);setDateSel('to',p.to);progSteps=p.steps.map(s=>({scene:s.scene,minutes:+(s.seconds/60).toFixed(2)}));
  openProgForm('Edit playlist: '+p.name);$('progName').focus();}
 $('progDates').onchange=renderProgSteps;
@@ -864,7 +865,7 @@ $('progAddStep').onclick=()=>{if(!sceneList.length){showErr('progErr','Save some
  progSteps.push({scene:next.id,minutes:10});renderProgSteps();};
 $('progCancel').onclick=closeProgForm;
 $('progSave').onclick=async()=>{const md=p=>String($(p+'M').value).padStart(2,'0')+'-'+String($(p+'D').value).padStart(2,'0');
- const p={action:'save',name:$('progName').value,dates:$('progDates').checked?1:0,from:md('from'),to:md('to'),
+ const p={action:'save',name:$('progName').value,dates:$('progDates').checked?1:0,shuffle:$('progShuffle').checked?1:0,from:md('from'),to:md('to'),
   steps:progSteps.map(s=>s.scene+':'+Math.round(s.minutes*60)).join(',')};
  if(editProg>=0)p.id=editProg;if(await progAction(p))closeProgForm();};
 // While on Home, refresh what's playing (scenes change by themselves).
