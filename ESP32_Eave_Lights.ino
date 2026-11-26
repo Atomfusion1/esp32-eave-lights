@@ -18,6 +18,7 @@
 //   patterns.ino        custom painted patterns (a color per light), /patterns.bin
 //   animations.ino      animations: looping steps that move/fade paintings or colors, /anims.bin
 //   presets.ino         saved looks: named effect settings, stored in /presets.bin
+//   radio.ino           ESP-NOW: sends radio strands to hub boards (EaveHub/), hub reports
 //   scenes.ino          scenes: whole-house snapshots of every channel, /scenes.bin
 //   schedule.ino        playlists of scenes with times, yearly date ranges, internet clock
 //   settings_store.ino  strand/house settings in Preferences; mounts the FAT storage
@@ -40,6 +41,8 @@
 #include <FFat.h>
 #include <ArduinoOTA.h>
 #include <Update.h>
+#include <esp_now.h>
+#include <esp_wifi.h>
 
 #if __has_include("secrets.h")
 #include "secrets.h"
@@ -53,7 +56,7 @@
 #define OTA_PASSWORD AP_PASSWORD
 #endif
 
-#define FW_VERSION "0.36.1"
+#define FW_VERSION "0.37.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
@@ -521,6 +524,7 @@ void setup() {
   loadPatterns();
   loadAnims();
   startWifi();
+  startRadio();      // ESP-NOW for radio strands (after Wi-Fi is up)
   startWeb();
   startOta();
 }

@@ -358,6 +358,13 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <button class="btn primary" id="bledSave">Save</button>
 </div>
 </div>
+<div class="sub">
+<label>Radio hubs (ESP-NOW) <small id="radioSum"></small></label>
+<p class="hint" style="margin:0 0 8px">Radio strands are sent to hub boards near the lights (a second ESP32 running EaveHub). Each hub reports how well it hears this board, every second: a good place for a hub shows about −70 dBm or better and 95 % or more of the frames.</p>
+<div id="hubList"></div>
+<div class="row" style="align-items:end;margin-top:8px"><div><label>Radio speed</label><select id="radioRate">
+<option value="long">Long range (1 Mbps, up to 25 frames/s)</option><option value="fast">Fast (6 Mbps, up to 50 frames/s, shorter reach)</option></select></div></div>
+</div>
 <div class="sub" id="restartBox" hidden>
 <p class="hint" style="margin:0 0 8px">⚠ New pin settings start after a restart (the lights go dark for a few seconds).</p>
 <button class="btn primary" id="restartBtn">Restart now</button>
@@ -588,7 +595,7 @@ function show(s){st=s;
  else if(zoneSel())hint=o.length+' lights: '+o.ranges+'. While on, drawn on top of everything else.';
  else if(pathSel())hint='Path: '+o.summary+' ('+o.length+' positions incl. gaps). Zones that are on are drawn on top of it.';
  else if(!both()&&!o.enabled)hint='This strand is turned off (Setup → Strands).';
- else if(!both()&&o.type==='radio')hint='Radio strand: shown here; sending it to the second board comes in a later update.';
+ else if(!both()&&o.type==='radio')hint=(h=>h?'Radio strand, sent to hub '+(h.name||h.mac)+': signal '+h.rssi+' dBm ('+sigWord(h.rssi)+')'+(h.pct==null?'':', '+h.pct+' % of frames')+'.':'Radio strand: no hub has reported for it yet (Setup → Strands → Radio hubs).')(hubFor(o.id));
  else if(!both()&&o.type==='wired'&&!o.running)hint='This strand’s pin starts after a restart (Setup → Strands).';
  else if(coverStrands.length&&(both()||sel<2))hint='Drawn on top of the strands right now: '+coverStrands.join(', ')+'.';
  $('tabHint').textContent=hint;$('tabHint').hidden=!hint;
@@ -997,15 +1004,30 @@ setInterval(()=>{if((tab==='home'||tab==='lights')&&!document.hidden){loadProgra
 // ================= Setup: strands =================
 // One row per strand; tap a row to edit it. Pins and switching to Wired start after a restart.
 let editStrand=null,stTypeSel='off';
+// The hub that drives strand id (from its reports), or null.
+function hubFor(id){const r=st&&st.radio;return r?(r.hubs||[]).find(h=>h.strands.includes(id))||null:null;}
+const sigWord=d=>d>=-67?'good':d>=-75?'OK':d>=-85?'weak':'very weak';
+function hubText(h){return esc(h.name||h.mac)+' · signal '+h.rssi+' dBm ('+sigWord(h.rssi)+')'+(h.pct==null?'':' · '+h.pct+' % of frames')+(h.age>3?' · last heard '+h.age+' s ago':'');}
 function strandDesc(o){if(o.type==='off')return 'off';
- const where=o.type==='wired'?'pin '+o.pin+(o.running?'':' (after restart)'):'radio';
+ let where='pin '+o.pin+(o.running?'':' (after restart)');
+ if(o.type==='radio'){const h=hubFor(o.id);where='radio → '+(h?(h.name||'hub')+' '+h.rssi+' dBm'+(h.pct==null?'':' '+h.pct+'%'):'no hub heard yet');}
  return o.count+' lights · '+where+' · '+o.order;}
+function renderRadio(s){const r=s.radio||{hubs:[]},hs=r.hubs||[];
+ $('radioSum').textContent=r.ok?'channel '+r.channel+' · '+(hs.length?hs.length+' hub'+(hs.length>1?'s':''):'no hubs heard'):'radio off';
+ $('hubList').innerHTML=hs.length?hs.map(h=>'<div class="zoneRow"><div>'+hubText(h)+'<small>drives strand'+(h.strands.length>1?'s ':' ')+(h.strands.split('').join(', ')||'—')+
+   ' · '+esc(h.mac)+(h.fw?' · '+esc(h.fw):'')+'</small></div></div>').join('')
+  :'<p class="hint" style="margin:0">No hub heard yet. A hub only finds this board once at least one strand is set to Radio.</p>';
+ if(document.activeElement!==$('radioRate'))$('radioRate').value=r.rate||'long';}
+// While Setup > Strands is open, refresh every 3 s so the hubs' signal stays live (range test).
+setInterval(()=>{const f=document.querySelector('details[data-fold="strands"]');
+ if(tab==='setup'&&f&&f.open&&!document.hidden)fetch('/api/state').then(r=>r.json()).then(show).catch(()=>{});},3000);
+$('radioRate').onchange=async e=>{const j=await post('/api/strands',{radioRate:e.target.value});if(j.error)showErr('cntErr',j.error);else show(j);};
 function renderStrands(s){
  $('strandSum').textContent=s.outputs.filter(o=>o.enabled).map(o=>o.id+' '+o.count).join(' · ');
  $('strandList').innerHTML=s.outputs.map(o=>'<div class="zoneRow click'+(editStrand===o.id?' showing':'')+'" data-st="'+o.id+'"><div>'+esc(strandName(o))+
   '<small>'+esc(strandDesc(o))+(o.id==='A'||o.id==='B'?' · eave':'')+'</small></div><button class="btn" data-st2="'+o.id+'">Edit</button></div>').join('');
  $('strandList').querySelectorAll('[data-st]').forEach(r=>r.onclick=()=>openStrand(r.dataset.st));
- $('restartBox').hidden=!s.restartNeeded;
+ $('restartBox').hidden=!s.restartNeeded;renderRadio(s);
  const b=s.boardLed||{};
  if(document.activeElement!==$('bledStrand')){
   $('bledStrand').innerHTML='<option value="off">Off</option>'+s.outputs.map(o=>'<option value="'+o.id+'">'+esc(strandName(o))+'</option>').join('');
@@ -1016,7 +1038,7 @@ function setStType(t){stTypeSel=t;$('stType').querySelectorAll('button').forEach
  $('stPinBox').hidden=t!=='wired';
  $('stTypeHint').textContent=t==='off'?'Not drawn and nothing is sent. Zones on it keep their lights.'
   :t==='wired'?'Data wire from this board’s pin (directly, or through an RS485 / signal amplifier for long runs). A new pin starts after a restart.'
-  :'Sent by radio to a second board (the hub) near the lights. For now it is drawn and shown in the live view; sending comes in the next update.';}
+  :'Sent by radio (ESP-NOW) to a hub board near the lights, which drives the strand. The color order is applied here, before sending. The hub’s program says which strand letters it drives.';}
 function openStrand(id){const o=st.outputs.find(x=>x.id===id);if(!o)return;editStrand=id;
  $('strandFormTitle').textContent='Strand '+id+(id==='A'||id==='B'?' (eave)':'');
  $('stName').value=o.name||'';$('stCount').value=o.count;

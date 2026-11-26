@@ -4,7 +4,9 @@
 //   GET  /api/state     {"version", "storage", "outputs":[A..F] (each with "name", "type"
 //                        off|wired|radio, "pin", "order", "running", "enabled" = drawn,
 //                        "count"), "restartNeeded", "pins":[allowed GPIOs],
-//                        "boardLed":{"strand","light","pin","running"}, "house":{...},
+//                        "boardLed":{"strand","light","pin","running"},
+//                        "radio":{"ok","channel","rate","hubs":[{"mac","name","fw","strands",
+//                        "rssi" (hub hears us), "rssiHere","pct","uptime","age"}]}, "house":{...},
 //                        "zones":[{"id":"z0","name","ranges","length",...}],
 //                        "paths":[{"id":"p0","name","summary","steps":[...],"length",...}],
 //                        "locate":{...}}
@@ -126,6 +128,7 @@ String stateJson() {
   json += boardLed.strand >= 0 ? String("\"") + OUTPUT_LETTERS[boardLed.strand] + "\"" : String("null");
   json += ",\"light\":" + String(boardLed.light) + ",\"pin\":" + String(boardLed.pin) +
           ",\"running\":" + (boardLedBootPin && boardLedBootPin == boardLed.pin ? "true" : "false") + "}";
+  json += ",\"radio\":" + radioJson();
   json += ",\"house\":{\"id\":\"house\",\"name\":\"Whole house\",\"length\":";
   json += houseLen;
   json += ",";

@@ -110,6 +110,9 @@ ESP32_Eave_Lights/              folder name must equal the main sketch name
   paths.ino                     Whole house path (B65→B1, A1→A65) and paths made from
                                 zones (steps: zone, reverse, gap) in /paths.bin
   presets.ino                   saved looks (name + LightState) in /presets.bin
+  radio.ino                     ESP-NOW sender: radio strands broadcast to hub boards (changed or
+                                every 1 s; long range 1 Mbps/25 fps or fast 6 Mbps/50 fps, "rrate");
+                                hub reports (signal, % frames) -> "radio" in /api/state
   scenes.ino                    scenes: snapshot of every channel's LightState, /scenes.bin
   schedule.ino                  playlists (scenes + seconds, looping), yearly date ranges,
                                 internet clock (TIMEZONE in main tab), /programs.bin;
@@ -144,6 +147,10 @@ ESP32_Eave_Lights/              folder name must equal the main sketch name
                                 are left out of strand lines via strandMap[] and Whole house)
   secrets.h                     Wi-Fi passwords, gitignored (copy from secrets.example.h)
   <task>.ino                    add new tasks the same way
+  EaveHub/EaveHub.ino           the HUB: separate sketch for a second ESP32-S3 near yard lights.
+                                Receives radio strands, drives up to 2 (letters + pins at the top),
+                                reports back. Packet layout + RADIO_MAGIC/VERSION must match radio.ino.
+                                Compile it on its own (open EaveHub.ino); uploads over USB.
   Docs/                         handoff and notes (ignored by the compiler)
 ```
 
@@ -167,7 +174,7 @@ Standalone throwaway test sketches go in their own folder under `tests/<name>/<n
 Up to **6 strands, A–F** (`NUM_OUTPUTS` 6, `MAX_LEDS` 400 each). A and B are the eaves (`HOUSE_STRANDS` 2): only they make up the Whole house path, "Both strands" and `output=all`. Each strand's settings are set on the page (Setup → Strands, `POST /api/strands`, code in `led_output.ino`) and saved in Preferences: `strands` = `StrandCfg[6]` (name, type off/wired/radio, pin, color order), lengths `a_cnt`, `b_cnt`, `sc_cnt`…`sf_cnt`. Never use a fixed light count: loop to `ledCount[o]`; the Whole house path is `houseLen`. A strand set to Off has `strandLen` 0 (not drawn) and is sent dark.
 - Colors go `frame[]` (effects) → `out[]` (power caps, plain RGB; the live view and `/api/frame`) → `wire[]` (the strand's color order, `orderColor()`) → FastLED, registered as `RGB` on every pin. Allowed pins: `STRAND_PINS` (no strapping, USB, flash/PSRAM, UART0 or GPIO 48 pins). FastLED needs the pin at compile time, so `addStrandOnPin()` has a case per pin; a pin only starts at boot (`bootPin[]`), so changing it needs a restart (`restartNeeded`, page button, `action=restart`).
 - **Board LED:** the board's own WS2812 (GPIO 48, or 38) can copy one light of a strand at 25 % (`boardled` in Preferences) for testing without lights.
-- Radio strands are drawn and shown, but sending them by ESP-NOW comes in Stage 2.
+- Radio strands are sent by `radio.ino` (ESP-NOW broadcast on the board's Wi-Fi channel) to hubs running `EaveHub/EaveHub.ino`, which find the channel by scanning. Change the packet layout only together with the hub, and bump `RADIO_VERSION` in both.
 - At boot all `MAX_LEDS` are cleared on each wired pin, then trimmed with `setLeds()`.
 - Before v0.36.0 there were 2 strands of 300: `scenes.bin` (v2 → v3) and `patterns.bin` (v1 → v2) are converted on load, and the saved "All on" list (`chv` key) is moved to the new channel numbers (`legacyChannel()`).
 ## Firmware rules (from the handoff)

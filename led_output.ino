@@ -5,7 +5,7 @@
 //   "strands"  = StrandCfg[NUM_OUTPUTS] (name, type, pin, color order)
 //   "a_cnt", "b_cnt", "sc_cnt" .. "sf_cnt" = lengths (outputKey() in settings_store.ino)
 // Types: off (not drawn, nothing sent), wired (FastLED on a GPIO pin), radio (drawn and
-// shown in the live view; sent to a second board by ESP-NOW in a later version).
+// shown in the live view, and sent to hub boards by ESP-NOW: radio.ino).
 //
 // FastLED registers a pin once, so a wired strand's pin (or switching a strand to wired)
 // takes effect after a restart; the page offers a Restart button. Switching a strand off
@@ -273,6 +273,7 @@ void showFrame() {
     boardLedBuf[0] = orderColor(c, ORDER_GRB);   // WS2812: green, red, blue
   }
   FastLED.show();
+  radioAfterFrame();   // radio strands go to the hubs (radio.ino)
 }
 
 // ---- Restart (to start a new pin) ----
@@ -295,6 +296,7 @@ void handleRestartRequest() {
 //   a=67 b=65 [c=.. f=..]          lengths only (older pages, backup restore)
 //   strand=C [count=250] [name=Palm tree] [type=off|wired|radio] [pin=10] [order=RGB]
 //   boardLed=D|off [boardLedLight=1] [boardLedPin=48]   the board's RGB LED copies D1
+//   radioRate=long|fast            radio strands: 1 Mbps / 25 fps or 6 Mbps / 50 fps (radio.ino)
 //   action=restart                 restart now (starts new pins)
 // Returns the state ("outputs" has each strand's settings, "restartNeeded", "pins").
 void handleStrands() {
@@ -373,6 +375,7 @@ void handleStrands() {
     saveStrandCfg();
     if (activeChanged && !countChanged) strandsChanged();
   }
+  if (server.hasArg("radioRate") && !setRadioRate(server.arg("radioRate"))) return sendError("radioRate must be long or fast");
   // the board's own RGB LED
   if (server.hasArg("boardLed") || server.hasArg("boardLedLight") || server.hasArg("boardLedPin")) {
     BoardLedCfg b = boardLed;
