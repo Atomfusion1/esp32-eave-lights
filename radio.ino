@@ -1,10 +1,12 @@
 // radio — sends "radio" strands to hub boards by ESP-NOW, and collects their reports.
 //
 // A strand set to Radio (Setup > Strands) is drawn here like any other strand; its colors
-// (after the power caps, in the strand's color order) are broadcast to every hub on the
-// Wi-Fi channel this board is on (the home network's, or the hotspot's). No router is
-// involved and no pairing is needed: a hub drives the strand letters set in its sketch
-// (EaveHub/EaveHub.ino) and finds the channel by itself.
+// (after the power caps, in the strand's color order) go to the hubs on the Wi-Fi channel
+// this board is on (the home network's, or the hotspot's). No router is involved and no
+// pairing is needed: a hub drives the strand letters set in its sketch
+// (EaveHub/EaveHub.ino) and finds the channel by itself. Once a hub has reported, its
+// strands are sent to its address (confirmed, re-sent when lost: v0.38.0; broadcasts are
+// never re-sent), plus a broadcast once a second for hubs still looking.
 //
 // Sending: a strand is sent when it changes, and at least once a second (so a hub that
 // restarts gets the picture, and can find the channel). Long range = 1 Mbps, up to 25
@@ -118,18 +120,32 @@ void onRadioReceive(const esp_now_recv_info_t* info, const uint8_t* data, int le
 // The interface ESP-NOW sends on: the hotspot's while it runs, else the home network's.
 uint8_t wantedRadioIf() { return (WiFi.getMode() & WIFI_MODE_AP) ? WIFI_IF_AP : WIFI_IF_STA; }
 
-void applyRadioPeer() {
+// Adds (or updates) an ESP-NOW peer on the current interface, at the chosen speed.
+void setRadioPeer(const uint8_t* mac) {
   esp_now_peer_info_t peer = {};
-  memcpy(peer.peer_addr, RADIO_BROADCAST, 6);
+  memcpy(peer.peer_addr, mac, 6);
   peer.channel = 0;                     // whatever channel the interface is on
   peer.ifidx = (wifi_interface_t)radioIf;
   peer.encrypt = false;
-  if (esp_now_is_peer_exist(RADIO_BROADCAST)) esp_now_mod_peer(&peer);
+  if (esp_now_is_peer_exist(mac)) esp_now_mod_peer(&peer);
   else esp_now_add_peer(&peer);
   esp_now_rate_config_t rc = {};
   rc.phymode = radioRate ? WIFI_PHY_MODE_11G : WIFI_PHY_MODE_11B;
   rc.rate = radioRate ? WIFI_PHY_RATE_6M : WIFI_PHY_RATE_1M_L;
-  esp_now_set_peer_rate_config(RADIO_BROADCAST, &rc);
+  esp_now_set_peer_rate_config(mac, &rc);
+}
+
+// The broadcast peer plus every hub already sent to (after a speed or interface change).
+void applyRadioPeer() {
+  setRadioPeer(RADIO_BROADCAST);
+  for (int h = 0; h < MAX_HUBS; h++) {
+    uint8_t mac[6];
+    portENTER_CRITICAL(&hubsMux);
+    bool used = hubs[h].used;
+    memcpy(mac, hubs[h].mac, 6);
+    portEXIT_CRITICAL(&hubsMux);
+    if (used && esp_now_is_peer_exist(mac)) setRadioPeer(mac);
+  }
 }
 
 // After startWifi(): starts ESP-NOW (always, so hubs can be seen before any strand is Radio).
@@ -167,11 +183,27 @@ bool setRadioRate(const String& v) {
   return true;
 }
 
+uint32_t radioLastBroadcastMs[NUM_OUTPUTS] = { 0 };
+
 // Sends one strand (all its chunks). Colors from out[] in the strand's color order.
+// To each hub that reported this strand (in the last 10 s): sent to its address, so the
+// hub confirms it and lost packets are re-sent. Broadcast too while no hub has reported,
+// and once a second anyway, so a hub that restarts can find the channel.
 void sendRadioStrand(int o) {
   int count = ledCount[o];
   uint8_t order = strandCfg[o].order;
   uint16_t seq = ++radioSeq[o];
+  uint8_t to[MAX_HUBS][6];
+  int nTo = 0;
+  uint32_t now = millis();
+  portENTER_CRITICAL(&hubsMux);
+  for (int h = 0; h < MAX_HUBS; h++) {
+    if (hubs[h].used && (hubs[h].strandMask & (1 << o)) && now - hubs[h].lastMs < 10000) memcpy(to[nTo++], hubs[h].mac, 6);
+  }
+  portEXIT_CRITICAL(&hubsMux);
+  for (int k = 0; k < nTo; k++) if (!esp_now_is_peer_exist(to[k])) setRadioPeer(to[k]);
+  bool broadcast = nTo == 0 || now - radioLastBroadcastMs[o] >= RADIO_KEEPALIVE_MS;
+  if (broadcast) radioLastBroadcastMs[o] = now;
   for (int first = 0; first < count; first += RADIO_CHUNK_LIGHTS) {
     int n = min(RADIO_CHUNK_LIGHTS, count - first);
     RadioFrameHdr h = { RADIO_MAGIC, RADIO_VERSION, RADIO_TYPE_FRAME, (uint8_t)o,
@@ -182,8 +214,15 @@ void sendRadioStrand(int o) {
       CRGB c = orderColor(out[o][first + i], order);
       *p++ = c.r; *p++ = c.g; *p++ = c.b;
     }
-    if (esp_now_send(RADIO_BROADCAST, radioPkt, sizeof(h) + n * 3) == ESP_OK) radioSent++;
-    else radioSendFails++;
+    size_t len = sizeof(h) + n * 3;
+    for (int k = 0; k < nTo; k++) {
+      if (esp_now_send(to[k], radioPkt, len) == ESP_OK) radioSent++;
+      else radioSendFails++;
+    }
+    if (broadcast) {
+      if (esp_now_send(RADIO_BROADCAST, radioPkt, len) == ESP_OK) radioSent++;
+      else radioSendFails++;
+    }
   }
 }
 

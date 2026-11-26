@@ -30,7 +30,7 @@
 
 // ===================== Settings for this hub =====================
 #define HUB_NAME        "Palm box"   // shown on the eave board's page (up to 19 characters)
-#define HUB_FW          "hub 1.0.3"
+#define HUB_FW          "hub 1.1.0"
 
 // Up to two strands. Strand letter as set on the eave board, and the GPIO it is wired to.
 // Set OUT2_STRAND to 0 if only one strand is connected.
@@ -155,7 +155,9 @@ void onRecv(const esp_now_recv_info_t* info, const uint8_t* data, int len) {
     stagedCount[k] = min((int)h.count, MAX_LIGHTS);
     stagedDirty[k] = true;
     lastFrameMs[k] = now;
-    if (h.flags & 1) {   // a whole frame arrived (its last chunk)
+    // A whole frame arrived (its last chunk). The eave board sends to this hub's address
+    // and also broadcasts once a second: the same frame twice counts once.
+    if ((h.flags & 1) && !(seqKnown[k] && h.seq == lastSeq[k])) {
       framesGot[k]++;
       if (seqKnown[k]) {
         uint16_t d = h.seq - lastSeq[k];
