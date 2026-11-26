@@ -298,6 +298,8 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <div id="spdBox"><label style="margin-top:10px"><span id="spdName"></span>: <span id="spdVal"></span></label><input id="spd" type="range" min="1" max="100"></div>
 <div id="sizeBox"><label style="margin-top:14px"><span id="sizeName"></span>: <span id="sizeVal"></span></label><input id="size" type="range" min="1" max="30"></div>
 <div id="fsecBox"><label style="margin-top:14px"><span id="fsecName"></span>: <span id="fsecVal"></span></label><input id="fsec" type="range" min="2" max="60"></div>
+<div id="rndBox"><label style="margin-top:14px">Randomness: <span id="rndVal"></span></label><input id="rnd" type="range" min="0" max="100" step="5">
+<p class="hint" id="rndHint"></p></div>
 <div id="fminBox"><label style="margin-top:14px">Lowest level: <span id="fminVal"></span></label><input id="fmin" type="range" min="0" max="230">
 <p class="hint">Below about 20% the dim end may show steps.</p></div>
 <div id="dirBox"><label style="margin-top:14px">Direction</label>
@@ -515,7 +517,7 @@ function renderOnDisplay(){const box=$('onDisplay'),cov=$('onCover');if(!box||!s
 function partObj(v){return v===HOUSE?st.house:v>=PATH?pathBySlot(v-PATH):v>=ZONE?zoneBySlot(v-ZONE):st.outputs[v===BOTH?0:v];}
 function partName(v){const o=partObj(v);return v===HOUSE?'Whole house':v===BOTH?'Both strands':v>=ZONE?(o?o.name:'?'):'Strand '+o.id;}
 function lookOf(o){const h=c=>String(c||'#000000').replace('#','').toUpperCase();
- const l={color:h(o.color),brightness:o.brightness,mode:o.mode,fadeSeconds:o.fadeSeconds,fadeMin:o.fadeMin,speed:o.speed,size:o.size,
+ const l={color:h(o.color),brightness:o.brightness,mode:o.mode,fadeSeconds:o.fadeSeconds,fadeMin:o.fadeMin,speed:o.speed,size:o.size,random:o.random||0,
   reverse:o.reverse?1:0,bgOn:o.bgOn?1:0,bgColor:h(o.bgColor),colorCount:o.colorCount};
  (o.colors||[]).slice(0,4).forEach((c,i)=>l['color'+(i+2)]=h(c));return l;}
 // Loads a look into what you're controlling: unapplied (preview + Apply/Discard), or at once in instant mode.
@@ -587,7 +589,7 @@ async function post(url,p){const r=await fetch(url,{method:'POST',body:new URLSe
 // ---- Apply mode: look changes wait on the page until Apply (on/off stays instant) ----
 // paintPending: a painting has unapplied paint (a draft on the board, see markPaintPending).
 let applyMode=store.get('eaveApplyMode','apply'),pending={},pendingTarget=null,pendingName='',paintPending=false;
-const LOOK_KEYS=['color','brightness','mode','fadeSeconds','fadeMin','speed','size','reverse','bgOn','bgColor','colorCount','color2','color3','color4','color5'];
+const LOOK_KEYS=['color','brightness','mode','fadeSeconds','fadeMin','speed','size','reverse','random','bgOn','bgColor','colorCount','color2','color3','color4','color5'];
 const hasPending=()=>Object.keys(pending).length>0||paintPending;
 // Shows pending values on the page's copy of the settings (the lights don't change yet).
 function applyPendingTo(o,p){if(!o)return;
@@ -635,7 +637,9 @@ $('allOff').onclick=async()=>{const on=onNames(st).length>0;
 $('color').oninput=$('color').onchange=e=>sendSoon({color:e.target.value.slice(1)});
 $('bri').oninput=e=>{$('briVal').textContent=pct(e.target.value);sendSoon({brightness:e.target.value});};
 $('modeSel').onchange=e=>send({mode:e.target.value});
-$('fsec').oninput=e=>{$('fsecVal').textContent=e.target.value+' s';sendSoon({fadeSeconds:e.target.value});};
+$('fsec').oninput=e=>{const m=modeById(cur().mode),v=+e.target.value;$('fsecVal').textContent=m.fsecFmt?m.fsecFmt(v):v+' s';sendSoon({fadeSeconds:v});};
+$('rnd').oninput=e=>{$('rndVal').textContent=rndFmt(+e.target.value);sendSoon({random:+e.target.value});};
+const rndFmt=v=>v?v+'%':'off';
 $('fmin').oninput=e=>{$('fminVal').textContent=pct(e.target.value);sendSoon({fadeMin:e.target.value});};
 $('spd').oninput=e=>{const m=modeById(cur().mode),v=+e.target.value;$('spdVal').textContent=m.fmt?m.fmt(v):v;sendSoon({speed:v});};
 $('size').oninput=e=>{const m=modeById(cur().mode),v=+e.target.value;$('sizeVal').textContent=m.sizeFmt?m.sizeFmt(v):v+(v===1?' light':' lights');sendSoon({size:v});};
@@ -660,6 +664,7 @@ const MODES=[
  {g:'Motion',id:'bounce',name:'Bounce (scanner)',colors:1,spd:'Speed',fmt:lps,size:'Tail length',bg:1,hint:'A comet sweeping back and forth.'},
  {g:'Motion',id:'center',name:'Center out / in',colors:'multi',spd:'Speed',fmt:lps,size:'Ripple width',dir:['Outward','Inward'],bg:1,hint:'Ripples from the middle (the controller, on Whole house) to the ends, or back in. Colors alternate per ripple.'},
  {g:'Motion',id:'meteor',name:'Meteor',colors:1,spd:'Speed',fmt:lps,size:'Tail length',dir:true,bg:1,hint:'A comet with a broken, sparkly trail.'},
+ {g:'Motion',id:'leaves',name:'Drifting leaves',colors:'multi',min:1,spd:'Drift speed',fmt:v=>(v/10).toFixed(1)+' lights/s',size:'Leaves',sizeFmt:v=>v,fsec:'Swings back',fsecFmt:v=>(v/2)+(v===2?' light':' lights'),dir:true,bg:1,rndHint:'Each swing back varies (from none to double), and each leaf drifts at its own changing pace. 0% = every flutter the same.',hint:'Leaves drift along the line: forward a few lights, a swing back, forward again, like leaves falling. One color per leaf, in list order. Direction picks which end they start from.'},
  {g:'Motion',id:'running',name:'Running lights',colors:1,spd:'Speed',fmt:lps,size:'Wave length',dir:true,bg:1,hint:'A smooth wave of brightness rolling along.'},
  {g:'Motion',id:'wipe',name:'Color wipe',colors:'multi',min:1,spd:'Speed',fmt:lps,dir:true,hint:'Fills light by light with each color in turn. One color: fills, then wipes off.'},
  {g:'Color',id:'rainbow',name:'Rainbow wave',colors:0,spd:'Speed',fmt:lps,size:'Rainbow length (×5 lights)',dir:true,hint:'A rainbow scrolling along the lights.'},
@@ -727,7 +732,10 @@ function renderLook(o){const m=modeById(o.mode);
  const parts=[];
  $('spdBox').hidden=!m.spd;if(m.spd){$('spdName').textContent=m.spd;$('spd').value=o.speed;$('spdVal').textContent=m.fmt(o.speed);parts.push(m.spd.toLowerCase()+' '+m.fmt(o.speed));}
  $('sizeBox').hidden=!m.size;if(m.size){$('sizeName').textContent=m.size;$('size').value=o.size;const sv=m.sizeFmt?m.sizeFmt(o.size):o.size+(o.size===1?' light':' lights');$('sizeVal').textContent=sv;parts.push(m.size.toLowerCase().split(' (')[0]+' '+sv);}
- $('fsecBox').hidden=!m.fsec;if(m.fsec){$('fsecName').textContent=m.fsec;$('fsec').value=o.fadeSeconds;$('fsecVal').textContent=o.fadeSeconds+' s';parts.push(o.fadeSeconds+' s');}
+ $('fsecBox').hidden=!m.fsec;if(m.fsec){$('fsecName').textContent=m.fsec;$('fsec').value=o.fadeSeconds;const fv=m.fsecFmt?m.fsecFmt(o.fadeSeconds):o.fadeSeconds+' s';$('fsecVal').textContent=fv;parts.push(m.fsecFmt?m.fsec.toLowerCase()+' '+fv:fv);}
+ const rndOk=!!(m.spd||m.fsec),rv=o.random||0;$('rndBox').hidden=!rndOk;
+ if(rndOk){$('rnd').value=rv;$('rndVal').textContent=rndFmt(rv);if(rv)parts.push('random '+rv+'%');
+  $('rndHint').textContent=m.rndHint||'The pace drifts faster and slower by up to this much, so it looks less mechanical. Each section wanders on its own.';}
  $('fminBox').hidden=!m.fmin;if(m.fmin){$('fmin').value=o.fadeMin;$('fminVal').textContent=pct(o.fadeMin);parts.push('lowest '+pct(o.fadeMin));}
  $('dirBox').hidden=!m.dir;if(m.dir)parts.push((o.reverse?rev:fwd).split(' (')[0]);
  $('bgBox').hidden=!m.bg;if(m.bg)parts.push('background '+(o.bgOn?'on':'off'));

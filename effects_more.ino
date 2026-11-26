@@ -23,6 +23,8 @@
 //   Twinkling bulbs colors repeated (size = lights per color), speed, fadeMin = lowest level
 //   Glitter bulbs   colors one per light, size = glints, speed = glint quickness
 //   Blink & shift   colors repeated (size = lights per color), speed = blink rate, direction
+//   Leaves          colors (one per leaf), size = leaves, fadeSeconds/2 = swing back, speed/10
+//                   lights/s drift, direction, background; randomness varies the swings
 //
 // Everything is calculated from settings and elapsed time; "random" looks come from
 // hash32(), so the same settings always give the same pattern.
@@ -480,4 +482,62 @@ void drawBlinkShift(int ch) {
   if (!level) { fillLine(ch, CRGB(0, 0, 0)); return; }
   int shift = (int)(n % 840);   // 840 divides evenly by every color count
   for (int i = 0; i < len; i++) putLight(ch, i, litColor(bulbColor(s, i, s.size, shift), s, level));
+}
+
+// ---------- Leaves (v0.31.0) ----------
+// `size` leaves drift along the line. Each flutter a leaf glides forward, then swings
+// back fadeSeconds/2 lights (slow at each turn, dimming a little as it turns over),
+// gaining back+1 lights per flutter. speed/10 = average drift in lights per second;
+// direction = which end they start from. Randomness (jitter) also varies each swing
+// (from none to double), the forward/back timing, and each leaf's own pace.
+// Leaves leave the far end and drift in again at the start. Colors: leaf k = color k.
+float hashUnit(uint32_t h) { return (h & 0xFFFF) / 65535.0f; }   // 0..1
+float smoothUnit(float x) { return x * x * (3.0f - 2.0f * x); }
+
+#define MAX_LEAVES SIZE_MAX
+void drawLeaves(int ch) {
+  const LightState& s = states[ch];
+  int len = lineLength(ch);
+  int n = constrain((int)s.size, 1, MAX_LEAVES);
+  float r     = s.jitter / 100.0f;
+  float back  = s.fadeSeconds / 2.0f;              // lights it swings back
+  float net   = back + 1.0f;                       // lights gained per flutter
+  float span  = len + 4.0f;                        // 2 lights off each end before wrapping
+  float flutterMs = net * 10000.0f / max((int)s.speed, 1);   // speed/10 lights per second
+
+  float pos[MAX_LEAVES], lvl[MAX_LEAVES];
+  for (int k = 0; k < n; k++) {
+    uint32_t h = hash32(k * 0x632BE5ABUL + 0x51);
+    uint32_t T = (uint32_t)max(200.0f, flutterMs * (1.0f + r * 0.35f * (hashUnit(h) * 2 - 1)));
+    uint32_t tt = effectMs[ch] + h % T;            // each leaf at its own point in a flutter
+    uint32_t c = tt / T;
+    float u = (tt % T) / (float)T;
+    uint32_t hc = hash32(c * 0x9E3779B1UL ^ h);
+    float b = back * (1.0f + r * (hashUnit(hc) * 2 - 1));          // this swing's size
+    float f = 0.62f + 0.2f * r * (hashUnit(hash32(hc)) * 2 - 1);   // part of the time going forward
+    float x, e;
+    if (u < f) { e = u / f;              x = (net + b) * smoothUnit(e); }
+    else       { e = (u - f) / (1 - f);  x = net + b - b * smoothUnit(e); }
+    lvl[k] = 0.55f + 0.45f * sinf(PI * e);         // brightest mid-swing, dimmer as it turns
+    double p = (double)k * span / n + (double)c * net + x;
+    pos[k] = (float)fmod(p, (double)span) - 2.0f;
+  }
+
+  CRGB bg = bgOrOff(s);
+  for (int i = 0; i < len; i++) {
+    float ar = 0, ag = 0, ab = 0, cover = 0;
+    for (int k = 0; k < n; k++) {
+      float d = fabsf(i - pos[k]);
+      if (d >= 1.5f) continue;
+      float w = (1.0f - d / 1.5f) * lvl[k];
+      CRGB lc = palColor(s, k);
+      ar += lc.r * w; ag += lc.g * w; ab += lc.b * w; cover += w;
+    }
+    if (cover <= 0) { putLight(ch, i, bg); continue; }
+    CRGB leaf((uint8_t)min(ar, 255.0f), (uint8_t)min(ag, 255.0f), (uint8_t)min(ab, 255.0f));
+    leaf = litColor(leaf, s, 255);
+    CRGB under = bg;
+    under.nscale8((uint8_t)(255 * (1.0f - min(cover, 1.0f))));
+    putLight(ch, i, under + leaf);
+  }
 }

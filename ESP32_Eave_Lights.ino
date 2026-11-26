@@ -53,7 +53,7 @@
 #define OTA_PASSWORD AP_PASSWORD
 #endif
 
-#define FW_VERSION "0.30.2"
+#define FW_VERSION "0.31.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
@@ -112,8 +112,9 @@ enum Mode : uint8_t {
   MODE_BULBS        = 24,  // multicolor bulbs (`size` lights per color), each gently twinkling
   MODE_GLITTER      = 25,  // multicolor bulbs, steady, with quick white glints (size = how many)
   MODE_BLINKSHIFT   = 26,  // multicolor bulbs blink off, back on one color further along
+  MODE_LEAVES       = 27,  // leaves drifting along, swinging back a little now and then
 };
-#define MODE_COUNT 27
+#define MODE_COUNT 28
 
 // ---------- Custom patterns ----------
 // A color per physical light, painted on the page; a channel in MODE_CUSTOM shows
@@ -139,12 +140,15 @@ struct LightState {
   uint8_t fadeMin;      // fade mode: lowest level 0-255 (64 = 25%)
   uint8_t speed;        // moving effects: speed (SPEED_MIN-SPEED_MAX), meaning per effect
   uint8_t size;         // moving effects: length/width/density (SIZE_MIN-SIZE_MAX)
-  bool    reverse;      // direction (center: true = inward)
+  uint8_t reverse : 1;  // direction (center: 1 = inward)
+  uint8_t jitter  : 7;  // randomness 0-100 %: speed wanders up and down by this much (v0.31.0;
+                        // shares the old reverse byte, so saved files keep their layout)
   bool    bgOn;         // true = unlit lights show bgColor instead of off
   CRGB    bgColor;      // background, also scaled by brightness
   uint8_t colorCount;   // colors used by multi-color effects (1-MAX_COLORS): color + extra
   CRGB    extra[MAX_COLORS - 1];  // colors 2-5
 };
+static_assert(sizeof(LightState) == 28, "LightState size is part of every saved .bin file");
 
 // LightState before v0.15.0 (no color list). Only used to convert old saved files.
 struct LightStateV1 {
@@ -257,16 +261,16 @@ uint16_t  pathLen[MAX_PATHS];                    // positions in each path, gaps
 
 // Defaults used on first boot (nothing saved yet). Zone states are set in initZones().
 LightState states[NUM_CHANNELS] = {
-  { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64, 10, 5, false, false, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS },  // strand A
-  { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64, 10, 5, false, false, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS },  // strand B
-  { false, CRGB(255, 140, 40), 128, MODE_COMET, 5, 64, 20, 8, false, false, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS },  // Whole house
+  { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64, 10, 5, false, 0, false, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS },  // strand A
+  { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64, 10, 5, false, 0, false, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS },  // strand B
+  { false, CRGB(255, 140, 40), 128, MODE_COMET, 5, 64, 20, 8, false, 0, false, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS },  // Whole house
 };
 // A new zone starts as steady warm white, off.
 const LightState ZONE_DEFAULT_STATE =
-  { false, CRGB(255, 160, 60), 160, MODE_SOLID, 5, 64, 10, 5, false, false, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS };
+  { false, CRGB(255, 160, 60), 160, MODE_SOLID, 5, 64, 10, 5, false, 0, false, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS };
 // A new zone path starts as an orange comet, off.
 const LightState PATH_DEFAULT_STATE =
-  { false, CRGB(255, 140, 40), 128, MODE_COMET, 5, 64, 20, 8, false, false, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS };
+  { false, CRGB(255, 140, 40), 128, MODE_COMET, 5, 64, 20, 8, false, 0, false, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS };
 
 // ---------- Animations ----------
 // A looping list of steps applied to a "frame": the channel's colors as bands, or a

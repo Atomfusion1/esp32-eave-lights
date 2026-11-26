@@ -7,6 +7,7 @@
 // Every effect depends only on its settings and elapsed time (no randomness), so a
 // browser simulation can reproduce it exactly later. Effects that look random (twinkle,
 // sparkle, meteor, lightning) use hash32() of light number and time slot instead.
+// Randomness (jitter) also comes from hash32(): see jitterDt().
 // The basic effects are here; the rest are in effects_more.ino.
 
 const uint32_t FRAME_MS = 20;      // 50 frames per second
@@ -153,6 +154,31 @@ void drawComet(int ch, uint32_t dtMs) {
   }
 }
 
+// Randomness (LightState.jitter, 0-100 %): the channel's clock runs faster and slower by
+// up to that much, wandering smoothly to a new pace every 2.5 s. Every effect is driven
+// by dtMs/effectMs, so they all get it. Seeded by channel (strands A and B share one,
+// so "Both strands" stays in step); repeatable because the pace comes from hash32().
+uint8_t jitterFrac[NUM_CHANNELS] = { 0 };   // leftover 1/256 ms per channel
+
+float jitterPace(int ch, uint32_t k) {      // -1..1 for 2.5-s step k
+  uint32_t seed = (ch < NUM_OUTPUTS) ? 0 : (uint32_t)ch * 0x85EBCA6BUL + 11;
+  return (hash32(k * 0x9E3779B1UL ^ seed) & 0xFFFF) / 32767.5f - 1.0f;
+}
+
+uint32_t jitterDt(int ch, uint32_t dtMs) {
+  const LightState& s = states[ch];
+  if (!s.jitter) return dtMs;
+  const uint32_t STEP_MS = 2500;
+  uint32_t t = effectMs[ch], k = t / STEP_MS;
+  float u = (t % STEP_MS) / (float)STEP_MS;
+  u = u * u * (3.0f - 2.0f * u);                                  // smooth between steps
+  float a = jitterPace(ch, k), b = jitterPace(ch, k + 1);
+  float rate = 1.0f + (a + (b - a) * u) * s.jitter * 0.009f;     // 100 % = 0.1x to 1.9x
+  uint32_t total = (uint32_t)(dtMs * rate * 256.0f + 0.5f) + jitterFrac[ch];
+  jitterFrac[ch] = total & 255;
+  return total >> 8;
+}
+
 void drawChannel(int ch, uint32_t dtMs) {
   const LightState& s = states[ch];
   if (!s.on) {
@@ -160,6 +186,7 @@ void drawChannel(int ch, uint32_t dtMs) {
     return;
   }
 
+  dtMs = jitterDt(ch, dtMs);   // randomness: this channel's pace wanders
   effectMs[ch] += dtMs;
 
   CRGB c;
@@ -207,6 +234,7 @@ void drawChannel(int ch, uint32_t dtMs) {
     case MODE_BULBS:        drawBulbs(ch);              break;
     case MODE_GLITTER:      drawGlitter(ch);            break;
     case MODE_BLINKSHIFT:   drawBlinkShift(ch);         break;
+    case MODE_LEAVES:       drawLeaves(ch);             break;
   }
 }
 

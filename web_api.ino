@@ -16,7 +16,7 @@
 //                              meteor|running|sparkle|fire|lightning|strobe
 //                              (what speed/size mean per mode: top of effects_more.ino)
 //                         fadeSeconds=2-60  fadeMin=0-255
-//                         speed=1-100  size=1-30  reverse=0|1
+//                         speed=1-100  size=1-30  reverse=0|1  random=0-100 (%)
 //                         bgOn=0|1  bgColor=RRGGBB   (background)
 //                         colorCount=1-5  color2..color5=RRGGBB   (color list)
 //                       Invalid values change nothing and return 400. Returns the new state.
@@ -58,7 +58,7 @@ const char* MODE_NAMES[MODE_COUNT] = {
   "solid", "fade", "test", "chase", "comet",
   "rainbow", "rainbowcycle", "wipe", "gradient", "stripes", "alternate", "colorcycle",
   "twinkle", "bounce", "center", "meteor", "running", "sparkle", "fire", "lightning", "strobe",
-  "custom", "anim", "sway", "bulbs", "glitter", "blinkshift"
+  "custom", "anim", "sway", "bulbs", "glitter", "blinkshift", "leaves"
 };
 
 // "colorCount":N,"colors":["#RRGGBB",x4] (colors 2-5), without braces.
@@ -83,11 +83,11 @@ String channelFieldsJson(int ch) {
   char buf[300];
   snprintf(buf, sizeof(buf),
            "\"on\":%s,\"color\":\"#%02X%02X%02X\",\"brightness\":%u,\"mode\":\"%s\","
-           "\"fadeSeconds\":%u,\"fadeMin\":%u,\"speed\":%u,\"size\":%u,\"reverse\":%s,"
+           "\"fadeSeconds\":%u,\"fadeMin\":%u,\"speed\":%u,\"size\":%u,\"reverse\":%s,\"random\":%u,"
            "\"bgOn\":%s,\"bgColor\":\"#%02X%02X%02X\"",
            s.on ? "true" : "false", s.color.r, s.color.g, s.color.b, s.brightness,
            MODE_NAMES[s.mode], s.fadeSeconds, s.fadeMin, s.speed, s.size,
-           s.reverse ? "true" : "false",
+           s.reverse ? "true" : "false", (unsigned)s.jitter,
            s.bgOn ? "true" : "false", s.bgColor.r, s.bgColor.g, s.bgColor.b);
   return String(buf) + "," + colorListJson(s);
 }
@@ -306,6 +306,10 @@ const char* applyLookArgs(LightState& s, bool& changed) {
       changed = true;
     }
     if (server.hasArg("reverse")) { s.reverse = argIsTrue("reverse"); changed = true; }
+    if (server.hasArg("random")) {
+      s.jitter = (uint8_t)constrain(server.arg("random").toInt(), 0, 100);
+      changed = true;
+    }
     if (server.hasArg("bgOn"))    { s.bgOn = argIsTrue("bgOn"); changed = true; }
     if (hasBgColor) { s.bgColor = newBgColor; changed = true; }
     if (server.hasArg("colorCount")) {
