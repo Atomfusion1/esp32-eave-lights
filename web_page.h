@@ -860,7 +860,7 @@ $('sceneShow').onclick=async()=>{const blank=sceneSelId==='blank';
  if(blank&&!confirm('Start from Blank? Everything turns off and every strand, zone and path goes back to plain warm white (a playlist that is playing stops). Saved scenes and looks are not changed.'))return;
  if(hasPending())stopPreview();pending={};pendingTarget=null;await discardPaint();   // a scene replaces any unapplied changes
  const j=await post('/api/scenes',blank?{action:'blank'}:{action:'apply',id:sceneSelId});
- if(j.error)showErr('sceneErr',j.error);else{showErr('sceneErr');show(j);if(blank)loadPrograms();}};
+ if(j.error)showErr('sceneErr',j.error);else{showErr('sceneErr');show(j);loadPrograms();}};   // a playlist that was playing has stopped
 $('sceneGroupSel').onchange=async e=>{const j=await post('/api/scenes',{action:'group',id:sceneSelId,group:e.target.value});
  if(j.error)showErr('sceneErr',j.error);else{showErr('sceneErr');showScenes(j.scenes);}};
 $('sceneDel').onclick=async()=>{const s=sceneList.find(x=>String(x.id)===String(sceneSelId));if(!s||!confirm('Delete scene "'+s.name+'"? Playlists that use it drop it.'))return;

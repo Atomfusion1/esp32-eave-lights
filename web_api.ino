@@ -561,6 +561,9 @@ void handleScenes() {
   }
   else if (action == "delete") err = deleteScene(id);
   else if (action == "apply") {
+    // Shown by hand: it stays. A playlist that is playing stops (the calendar waits until
+    // tomorrow), as with Stop; Play starts one again.
+    if (id >= 0 && id < MAX_SCENES && scenes[id].used) stopProgram();
     err = applyScene(id, true);
     if (err) return sendError(err);
     return sendState();
