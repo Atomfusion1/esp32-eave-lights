@@ -7,15 +7,18 @@
 // Also mounts the FAT storage area (the 9.9 MB "ffat" partition) used for zones and
 // saved looks.
 //
-// Keys per channel: "<a|b|c>_on", "_col", "_bri", "_mode", "_fsec", "_fmin", "_spd",
-// "_size", "_rev", "_bgon", "_bgc" (a = strand A, b = strand B, c = Whole house).
-// Strand lengths: "a_cnt", "b_cnt". Color list (v0.15.0+): "_ncol" and colors 2-5 "_x0".."_x3".
+// Keys per channel: "<prefix>_on", "_col", "_bri", "_mode", "_fsec", "_fmin", "_spd",
+// "_size", "_rev", "_bgon", "_bgc"; prefix a = strand A, b = strand B, c = Whole house,
+// sc..sf = strands C-F (v0.36.0; the older prefixes stay as they were).
+// Strand lengths: "<prefix>_cnt". Color list (v0.15.0+): "_ncol" and colors 2-5 "_x0".."_x3".
+// "chv" = channel layout of the saved "allon" list (missing = before v0.36.0, 2 strands).
 // Versions before 0.4.0 used one set of keys without a prefix ("on", "color", ...);
 // those are used as the defaults, so both strands start from the old saved state.
+// PREFS_NAMESPACE is in the main tab (led_output.ino uses it too).
 
 Preferences prefs;
-const char*    PREFS_NAMESPACE = "eave";
 const uint32_t SAVE_DELAY_MS   = 2000;
+#define CHANNEL_LAYOUT 2   // "chv": 2 = strands A-F (v0.36.0)
 
 // Channels kept in Preferences: strands and Whole house (zones live in /zones.bin).
 #define PREFS_CHANNELS CH_ZONE0
@@ -44,18 +47,21 @@ uint32_t colorToRgb(CRGB c) {
   return ((uint32_t)c.r << 16) | ((uint32_t)c.g << 8) | c.b;
 }
 
-// "A", "B", "House", or the zone's / path's name — for Serial messages.
+// "A".."F", "House", or the zone's / path's name — for Serial messages.
 const char* channelName(int ch) {
-  static const char* names[CH_ZONE0] = { "A", "B", "House" };
+  static const char* names[CH_ZONE0] = { "A", "B", "C", "D", "E", "F", "House" };
   if (ch < CH_ZONE0) return names[ch];
   if (ch < CH_PATH0) return zones[ch - CH_ZONE0].name;
   return pathDefs[ch - CH_PATH0].name;
 }
 
-// Builds "a_on" etc. for channel o ('a' = strand A, 'b' = strand B, 'c' = Whole house).
+// Builds "a_on" etc. for channel o: 'a' = strand A, 'b' = strand B, 'c' = Whole house
+// (as before v0.36.0), "sc".."sf" = strands C-F.
 const char* outputKey(int o, const char* name) {
   static char key[16];
-  snprintf(key, sizeof(key), "%c_%s", 'a' + o, name);
+  if (o == CH_HOUSE)          snprintf(key, sizeof(key), "c_%s", name);
+  else if (o < HOUSE_STRANDS) snprintf(key, sizeof(key), "%c_%s", 'a' + o, name);
+  else                        snprintf(key, sizeof(key), "s%c_%s", 'a' + o, name);
   return key;
 }
 
@@ -86,8 +92,8 @@ void loadState() {
 
   for (int o = 0; o < PREFS_CHANNELS; o++) {
     LightState& s = states[o];
-    // The house path is newer than the single-state keys: use its own defaults.
-    if (o >= NUM_OUTPUTS) old = s;
+    // Strands C-F and the house path are newer than the single-state keys: own defaults.
+    if (o >= HOUSE_STRANDS) old = s;
     s.on          = prefs.getBool(outputKey(o, "on"), old.on);
     s.color       = CRGB(prefs.getUInt(outputKey(o, "col"), colorToRgb(old.color)));
     s.brightness  = prefs.getUChar(outputKey(o, "bri"), old.brightness);
@@ -116,6 +122,12 @@ void loadState() {
     ledCount[o] = constrain(prefs.getUShort(outputKey(o, "cnt"), ledCount[o]), 1, MAX_LEDS);
   }
   allOnMask = prefs.getUInt("allon", 0);   // what "All lights on" brings back
+  if (prefs.getUChar("chv", 0) < CHANNEL_LAYOUT) {
+    // saved before v0.36.0: Whole house, zones and paths moved up by 4 channels
+    uint32_t m = 0;
+    for (int ch = 0; ch < LEGACY_CHANNELS; ch++) if (allOnMask & (1UL << ch)) m |= 1UL << legacyChannel(ch);
+    allOnMask = m;
+  }
   scheduleOn = prefs.getBool("sched", false);
   {
     LightTimer t;
@@ -141,6 +153,12 @@ void loadState() {
 void markStateChanged() {
   stateDirty = true;
   stateDirtyMs = millis();
+}
+
+// Saves a pending change now (e.g. before a restart).
+void handleStateSaveNow() {
+  if (stateDirty) stateDirtyMs = millis() - SAVE_DELAY_MS;
+  handleStateSave();
 }
 
 void handleStateSave() {
@@ -173,6 +191,7 @@ void handleStateSave() {
   }
   for (int o = 0; o < NUM_OUTPUTS; o++) prefs.putUShort(outputKey(o, "cnt"), ledCount[o]);
   prefs.putUInt("allon", allOnMask);
+  prefs.putUChar("chv", CHANNEL_LAYOUT);
   prefs.putBool("sched", scheduleOn);
   prefs.putBytes("timer", &lightTimer, sizeof(lightTimer));
   prefs.putChar("mprog", manualProgram);

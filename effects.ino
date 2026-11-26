@@ -31,7 +31,7 @@ bool     flipNow[NUM_CHANNELS] = { false };
 // Makes both strands' fade and movement line up with strand A
 // (used when both strands are changed together).
 void syncPhases() {
-  for (int o = 1; o < NUM_OUTPUTS; o++) {
+  for (int o = 1; o < HOUSE_STRANDS; o++) {
     fadePhase[o] = fadePhase[0];
     motionPos[o] = motionPos[0];
     effectMs[o]  = effectMs[0];
@@ -111,7 +111,7 @@ bool lineFlips(uint8_t m) {
 }
 bool passFlips(uint8_t m) { return m == MODE_COMET || m == MODE_METEOR; }
 
-uint32_t flipSeed(int ch) { return (ch < NUM_OUTPUTS) ? 0 : (uint32_t)ch * 0x85EBCA6BUL + 29; }
+uint32_t flipSeed(int ch) { return (ch < HOUSE_STRANDS) ? 0 : (uint32_t)ch * 0x85EBCA6BUL + 29; }
 
 // Comet/meteor: which way the current pass runs.
 void updatePassFlip(int ch) {
@@ -208,7 +208,7 @@ void drawComet(int ch, uint32_t dtMs) {
 uint8_t jitterFrac[NUM_CHANNELS] = { 0 };   // leftover 1/256 ms per channel
 
 float jitterPace(int ch, uint32_t k) {      // -1..1 for 2.5-s step k
-  uint32_t seed = (ch < NUM_OUTPUTS) ? 0 : (uint32_t)ch * 0x85EBCA6BUL + 11;
+  uint32_t seed = (ch < HOUSE_STRANDS) ? 0 : (uint32_t)ch * 0x85EBCA6BUL + 11;
   return (hash32(k * 0x9E3779B1UL ^ seed) & 0xFFFF) / 32767.5f - 1.0f;
 }
 

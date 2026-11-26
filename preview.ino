@@ -27,7 +27,7 @@ uint16_t pvSavedPass[NUM_CHANNELS], pvAfterPass[NUM_CHANNELS], pvPass[NUM_CHANNE
 uint32_t pvSavedEffect[NUM_CHANNELS], pvAfterEffect[NUM_CHANNELS], pvEffect[NUM_CHANNELS];
 
 bool previewCovers(int ch) {
-  return previewTarget < 0 ? ch < NUM_OUTPUTS : ch == previewTarget;
+  return previewTarget < 0 ? ch < HOUSE_STRANDS : ch == previewTarget;   // -1 = Both strands (A, B)
 }
 
 // Called by renderFrame() before the normal render.
@@ -58,10 +58,10 @@ void previewAfterFrame(uint32_t dtMs) {
   memcpy(effectMs, pvSavedEffect, sizeof(effectMs));
 
   // swap in the preview settings and the preview's own positions
-  LightState realStates[NUM_OUTPUTS > 1 ? NUM_OUTPUTS : 1];
+  LightState realStates[HOUSE_STRANDS];
   LightState realOne = states[0];
   if (previewTarget < 0) {
-    for (int o = 0; o < NUM_OUTPUTS; o++) realStates[o] = states[o];
+    for (int o = 0; o < HOUSE_STRANDS; o++) realStates[o] = states[o];
   } else {
     realOne = states[previewTarget];
   }
@@ -79,7 +79,7 @@ void previewAfterFrame(uint32_t dtMs) {
   drawLayers(dtMs);
   previewPass = false;
   for (int o = 0; o < NUM_OUTPUTS; o++) {
-    for (int i = 0; i < ledCount[o]; i++) previewOut[o][i] = capPixel(frame[o][i]);
+    for (int i = 0; i < ledCount[o]; i++) previewOut[o][i] = strandActive(o) ? capPixel(frame[o][i]) : CRGB(0, 0, 0);
   }
 
   // keep the preview's positions, put everything real back
@@ -92,7 +92,7 @@ void previewAfterFrame(uint32_t dtMs) {
     pvEffect[ch] = effectMs[ch];
   }
   if (previewTarget < 0) {
-    for (int o = 0; o < NUM_OUTPUTS; o++) states[o] = realStates[o];
+    for (int o = 0; o < HOUSE_STRANDS; o++) states[o] = realStates[o];
   } else {
     states[previewTarget] = realOne;
   }

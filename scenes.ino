@@ -9,13 +9,19 @@
 
 const char*    SCENES_FILE    = "/scenes.bin";
 const uint32_t SCENES_MAGIC   = 0x4E454353;  // "SCEN"
-const uint16_t SCENES_VERSION = 2;   // v1 (before 0.15.0): settings without the color list
+const uint16_t SCENES_VERSION = 3;   // v1 (before 0.15.0): settings without the color list
+                                     // v2 (before 0.36.0): 2 strands (LEGACY_CHANNELS)
 
-// Version 1 record, only used to convert old files.
+// Older records, only used to convert old files. Both have the pre-0.36.0 channel layout.
 struct SceneV1 {
   bool         used;
   char         name[NAME_LEN];
-  LightStateV1 states[NUM_CHANNELS];
+  LightStateV1 states[LEGACY_CHANNELS];
+};
+struct SceneV2 {
+  bool       used;
+  char       name[NAME_LEN];
+  LightState states[LEGACY_CHANNELS];
 };
 
 bool channelInUse(int ch) {
@@ -288,24 +294,41 @@ void loadScenes() {
   FileHeader h;
   bool okHeader = f.read((uint8_t*)&h, sizeof(h)) == sizeof(h) && h.magic == SCENES_MAGIC;
   bool isV1 = okHeader && h.version == 1 && h.recordSize == sizeof(SceneV1);
-  bool isV2 = okHeader && h.version == SCENES_VERSION && h.recordSize == sizeof(Scene);
-  if (!isV1 && !isV2) {
+  bool isV2 = okHeader && h.version == 2 && h.recordSize == sizeof(SceneV2);
+  bool isV3 = okHeader && h.version == SCENES_VERSION && h.recordSize == sizeof(Scene);
+  if (!isV1 && !isV2 && !isV3) {
     Serial.println("Scenes: file is from a different firmware layout, starting empty");
     f.close();
     return;
   }
+  bool converted = isV1 || isV2;
   int loaded = 0;
   for (int s = 0; s < h.count && s < MAX_SCENES; s++) {
-    if (isV1) {
-      // Read one old scene at a time (heap, it's ~360 bytes) and convert it.
-      SceneV1* old = new SceneV1;
-      bool ok = f.read((uint8_t*)old, sizeof(SceneV1)) == sizeof(SceneV1);
-      if (ok) {
-        scenes[s].used = old->used;
-        memcpy(scenes[s].name, old->name, NAME_LEN);
-        for (int ch = 0; ch < NUM_CHANNELS; ch++) scenes[s].states[ch] = upgradeState(old->states[ch]);
+    if (converted) {
+      // Read one old scene at a time (heap, under 700 bytes) and convert it: channels move
+      // to their new numbers, the new strands C-F are off.
+      Scene& sc = scenes[s];
+      for (int ch = 0; ch < NUM_CHANNELS; ch++) sc.states[ch] = STRAND_DEFAULT;
+      bool ok;
+      if (isV1) {
+        SceneV1* old = new SceneV1;
+        ok = f.read((uint8_t*)old, sizeof(SceneV1)) == sizeof(SceneV1);
+        if (ok) {
+          sc.used = old->used;
+          memcpy(sc.name, old->name, NAME_LEN);
+          for (int ch = 0; ch < LEGACY_CHANNELS; ch++) sc.states[legacyChannel(ch)] = upgradeState(old->states[ch]);
+        }
+        delete old;
+      } else {
+        SceneV2* old = new SceneV2;
+        ok = f.read((uint8_t*)old, sizeof(SceneV2)) == sizeof(SceneV2);
+        if (ok) {
+          sc.used = old->used;
+          memcpy(sc.name, old->name, NAME_LEN);
+          for (int ch = 0; ch < LEGACY_CHANNELS; ch++) sc.states[legacyChannel(ch)] = old->states[ch];
+        }
+        delete old;
       }
-      delete old;
       if (!ok) break;
     } else {
       if (f.read((uint8_t*)&scenes[s], sizeof(Scene)) != sizeof(Scene)) break;
@@ -315,8 +338,8 @@ void loadScenes() {
     if (scenes[s].used) loaded++;
   }
   f.close();
-  Serial.printf("Scenes: %d loaded%s\n", loaded, isV1 ? " (converted from the old format)" : "");
-  if (isV1) saveScenesFile();   // write it back in the new format
+  Serial.printf("Scenes: %d loaded%s\n", loaded, converted ? " (converted from the old format)" : "");
+  if (converted) saveScenesFile();   // write it back in the new format
 }
 
 void saveScenesFile() {

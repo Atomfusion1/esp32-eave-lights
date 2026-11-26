@@ -26,7 +26,8 @@
 
 const char*    PATTERNS_FILE    = "/patterns.bin";
 const uint32_t PATTERNS_MAGIC   = 0x4E545450;  // "PTTN"
-const uint16_t PATTERNS_VERSION = 1;           // record = one painting; count grew 8 -> 30
+const uint16_t PATTERNS_VERSION = 2;           // record = one painting; count grew 8 -> 30
+                                               // v1 (before 0.36.0): 2 strands x 300 lights
 const uint32_t PATTERN_SAVE_MS  = 2000;
 
 // Painting names, which slots exist, and saved brush colors (swatches), in /paintmeta.bin.
@@ -279,7 +280,7 @@ int paintLights(int p, bool draft, const String& list, CRGB color) {
 void handleGetCustom() {
   int p = constrain(server.arg("pattern").toInt(), 1, MAX_PATTERNS) - 1;
   CRGB (*src)[MAX_LEDS] = (server.arg("draft") == "1" && draftPattern == p) ? paintDraft : patterns[p];
-  static uint8_t buf[1 + NUM_OUTPUTS * 2 + MAX_TOTAL_LEDS * 3];
+  uint8_t* buf = frameBytes;   // shared reply buffer (PSRAM)
   size_t n = 0;
   buf[n++] = NUM_OUTPUTS;
   for (int o = 0; o < NUM_OUTPUTS; o++) {
@@ -356,17 +357,28 @@ void loadPatterns() {
   File f = FFat.open(PATTERNS_FILE, "r");
   if (!f) return;
   FileHeader h;
-  if (f.read((uint8_t*)&h, sizeof(h)) != sizeof(h) || h.magic != PATTERNS_MAGIC ||
-      h.version != PATTERNS_VERSION || h.recordSize != sizeof(patterns[0])) {
+  const size_t oldRec = (size_t)LEGACY_OUTPUTS * LEGACY_MAX_LEDS * sizeof(CRGB);
+  bool okHeader = f.read((uint8_t*)&h, sizeof(h)) == sizeof(h) && h.magic == PATTERNS_MAGIC;
+  bool isV1 = okHeader && h.version == 1 && h.recordSize == oldRec;
+  bool isV2 = okHeader && h.version == PATTERNS_VERSION && h.recordSize == sizeof(patterns[0]);
+  if (!isV1 && !isV2) {
     Serial.println("Paintings: file is from a different firmware layout, starting empty");
     f.close();
     return;
   }
   int loaded = 0;
+  CRGB* old = isV1 ? (CRGB*)malloc(oldRec) : nullptr;   // one old painting (1.8 KB)
   for (int p = 0; p < h.count && p < MAX_PATTERNS; p++) {
-    if (f.read((uint8_t*)patterns[p], sizeof(patterns[0])) != sizeof(patterns[0])) break;
+    if (isV1) {
+      // before v0.36.0: strands A and B of up to 300 lights; C-F stay unpainted
+      if (!old || f.read((uint8_t*)old, oldRec) != oldRec) break;
+      for (int o = 0; o < LEGACY_OUTPUTS; o++) memcpy(patterns[p][o], old + o * LEGACY_MAX_LEDS, LEGACY_MAX_LEDS * sizeof(CRGB));
+    } else if (f.read((uint8_t*)patterns[p], sizeof(patterns[0])) != sizeof(patterns[0])) {
+      break;
+    }
     loaded++;
   }
+  free(old);
   f.close();
   // Older firmware with no names file: every painting that has paint in it exists.
   if (!paintMetaLoaded) {
@@ -376,9 +388,10 @@ void loadPatterns() {
           if (patterns[p][o][i].r | patterns[p][o][i].g | patterns[p][o][i].b) { paintMeta.exists[p] = 1; break; }
     }
   }
-  // An old file with fewer records: rewrite it at full size so single paintings can be saved.
-  if (h.count != MAX_PATTERNS) savePatternsFile(true);
-  Serial.printf("Paintings: loaded %d\n", loaded);
+  // An old file with fewer records or the old layout: rewrite it at full size, so
+  // single paintings can be saved.
+  if (h.count != MAX_PATTERNS || isV1) savePatternsFile(true);
+  Serial.printf("Paintings: loaded %d%s\n", loaded, isV1 ? " (converted from the old format)" : "");
 }
 
 // Saves the paintings that changed (all = every painting, rewriting the file).

@@ -11,7 +11,7 @@
 //   backup.ino          backup (file list, raw file access) and restore of the whole setup
 //   effects.ino        draws each channel's mode into frame[] each frame, layers, locate
 //   files.ino           house photos + layout.json for the House view editor (/files)
-//   led_output.ino      strand setup, power caps, showFrame()
+//   led_output.ino      strands A-F: settings, pins, color order; power caps, showFrame()
 //   locate.ino          "Find a light": lights chosen lights only, auto-off
 //   ota.ino             wireless firmware updates (Arduino IDE network port + web upload)
 //   paths.ino           Whole house path, and paths made from zones (/paths.bin)
@@ -53,19 +53,26 @@
 #define OTA_PASSWORD AP_PASSWORD
 #endif
 
-#define FW_VERSION "0.35.0"
+#define FW_VERSION "0.36.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
-// Each strand's length is set on the page (Setup > Strand lengths) and saved;
-// arrays are sized for MAX_LEDS so lengths can change without new firmware.
-#define MAX_LEDS        300   // per strand
+// Up to NUM_OUTPUTS strands, A-F. Each strand's settings are set on the page (Setup >
+// Strands) and saved (led_output.ino): name, length, type (off / wired to a pin / radio
+// to a second board), pin and color order. A and B are the eaves: only they make up the
+// Whole house path and "Both strands". Arrays are sized for MAX_LEDS per strand.
+#define MAX_LEDS        400   // per strand (300 before v0.36.0)
+#define NUM_OUTPUTS     6     // strands A-F (2 before v0.36.0)
+#define HOUSE_STRANDS   2     // A and B: the eaves (Whole house, "Both strands")
 #define DEFAULT_LEDS_A  67    // user, 2026-11-23: strand A has 67 lights
 #define DEFAULT_LEDS_B  65
-#define PIN_OUTPUT_A    8   // tested
-#define PIN_OUTPUT_B    9   // pin tested 2026-11-23 with strand A moved over; strand B itself untested
-#define ENABLE_OUTPUT_B 1   // 1 = drive GPIO 9 too
-#define NUM_OUTPUTS     2
+#define DEFAULT_LEDS    50    // strands C-F until set on the page
+#define PIN_OUTPUT_A    8     // tested
+#define PIN_OUTPUT_B    9     // pin tested 2026-11-23 with strand A moved over; strand B itself untested
+
+// The layout before v0.36.0 (2 strands of up to 300), only used to convert old files.
+#define LEGACY_OUTPUTS  2
+#define LEGACY_MAX_LEDS 300
 
 // ---------- Power caps (from one-strand measurements at 24 V) ----------
 #define CAP_RED         240
@@ -74,13 +81,35 @@
 #define CAP_CHANNEL_SUM 400  // white ~133 each = measured 1.26 A per strand
 
 // Lights on each strand right now (1..MAX_LEDS).
-uint16_t ledCount[NUM_OUTPUTS] = { DEFAULT_LEDS_A, DEFAULT_LEDS_B };
+uint16_t ledCount[NUM_OUTPUTS] = { DEFAULT_LEDS_A, DEFAULT_LEDS_B, DEFAULT_LEDS, DEFAULT_LEDS, DEFAULT_LEDS, DEFAULT_LEDS };
 #define MAX_TOTAL_LEDS (NUM_OUTPUTS * MAX_LEDS)
 
 // What effects draw into (full range, uncapped).
 CRGB frame[NUM_OUTPUTS][MAX_LEDS];
-// What actually gets sent to the LEDs (after power caps).
+// After the power caps, in plain RGB order (the live view shows this).
 CRGB out[NUM_OUTPUTS][MAX_LEDS];
+// What FastLED actually sends: out[] in each strand's color order (led_output.ino).
+CRGB wire[NUM_OUTPUTS][MAX_LEDS];
+
+// Strand settings (Setup > Strands), saved in Preferences "strands" (led_output.ino).
+enum StrandType : uint8_t { STRAND_OFF = 0, STRAND_WIRED = 1, STRAND_RADIO = 2 };
+// Color order of the lights: which color each byte goes to. The eaves are RBG.
+enum ColorOrder : uint8_t { ORDER_RGB = 0, ORDER_RBG = 1, ORDER_GRB = 2, ORDER_GBR = 3, ORDER_BRG = 4, ORDER_BGR = 5 };
+#define STRAND_NAME_LEN 20
+struct StrandCfg {
+  char    name[STRAND_NAME_LEN];   // e.g. "Palm tree" ("" = just the letter)
+  uint8_t type;                    // StrandType
+  uint8_t pin;                     // GPIO for a wired strand
+  uint8_t order;                   // ColorOrder
+  uint8_t spare;
+};
+StrandCfg strandCfg[NUM_OUTPUTS];
+// A wired strand's pin only takes effect at start-up (FastLED registers it once), so
+// what runs now is kept apart: bootPin[o] = the pin registered at start-up, 0 = none.
+uint8_t bootPin[NUM_OUTPUTS] = { 0 };
+
+// Preferences (NVS) namespace for settings (settings_store.ino, led_output.ino).
+const char* PREFS_NAMESPACE = "eave";
 
 // ---------- Light state (set from the web page, saved in flash) ----------
 // Numbers are stored in saved files: only ever add new modes at the end.
@@ -175,9 +204,7 @@ struct LightStateV1 {
 #define SIZE_MIN  1
 #define SIZE_MAX  30
 
-const char  OUTPUT_LETTERS[NUM_OUTPUTS] = { 'A', 'B' };
-const int   OUTPUT_PINS[NUM_OUTPUTS]    = { PIN_OUTPUT_A, PIN_OUTPUT_B };
-const bool  OUTPUT_ENABLED[NUM_OUTPUTS] = { true, ENABLE_OUTPUT_B };
+const char  OUTPUT_LETTERS[NUM_OUTPUTS] = { 'A', 'B', 'C', 'D', 'E', 'F' };
 
 // ---------- Paths ----------
 // A path is an ordered list of physical lights. An effect on a path draws along it as
@@ -188,7 +215,7 @@ struct PathPoint {
 };
 
 // "Whole house": last B light -> B1, then A1 -> last A light (built in paths.ino).
-PathPoint housePath[MAX_TOTAL_LEDS];
+PathPoint housePath[HOUSE_STRANDS * MAX_LEDS];
 uint16_t  houseLen = 0;
 
 // ---------- Zones ----------
@@ -254,21 +281,33 @@ uint16_t  pathLen[MAX_PATHS];                    // positions in each path, gaps
 
 // ---------- Channels ----------
 // A channel is anything with its own LightState that draws effects:
-//   0 = strand A, 1 = strand B, CH_HOUSE = Whole house path, CH_ZONE0 + z = zone z,
+//   0-5 = strands A-F, CH_HOUSE = Whole house path, CH_ZONE0 + z = zone z,
 //   CH_PATH0 + p = zone path p.
 // Drawing order (later covers earlier): strands, Whole house, zone paths, zones
 // (each only while on).
+// Before v0.36.0 there were 2 strands, so Whole house was channel 2 (LEGACY_CHANNELS in
+// all): old scenes.bin files and the saved "All on" list are converted with legacyChannel().
 #define CH_HOUSE     NUM_OUTPUTS
 #define CH_ZONE0     (NUM_OUTPUTS + 1)
 #define CH_PATH0     (CH_ZONE0 + MAX_ZONES)
 #define NUM_CHANNELS (CH_PATH0 + MAX_PATHS)
+#define LEGACY_CHANNELS (LEGACY_OUTPUTS + 1 + MAX_ZONES + MAX_PATHS)
+static_assert(NUM_CHANNELS <= 32, "allOnMask has one bit per channel");
+
+// The channel number now for a channel number in the pre-0.36.0 layout.
+// (A macro: a function here would make the IDE put its prototypes above the types below.)
+#define legacyChannel(oldCh) ((oldCh) < LEGACY_OUTPUTS ? (oldCh) : (oldCh) + (NUM_OUTPUTS - LEGACY_OUTPUTS))
 
 // Defaults used on first boot (nothing saved yet). Zone states are set in initZones().
+#define STRAND_DEFAULT_STATE { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64, 10, 5, false, 0, false, 0, 0, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS }
 LightState states[NUM_CHANNELS] = {
-  { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64, 10, 5, false, 0, false, 0, 0, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS },  // strand A
-  { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64, 10, 5, false, 0, false, 0, 0, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS },  // strand B
+  STRAND_DEFAULT_STATE, STRAND_DEFAULT_STATE, STRAND_DEFAULT_STATE,   // strands A, B, C
+  STRAND_DEFAULT_STATE, STRAND_DEFAULT_STATE, STRAND_DEFAULT_STATE,   // strands D, E, F
   { false, CRGB(255, 140, 40), 128, MODE_COMET, 5, 64, 20, 8, false, 0, false, 0, 0, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS },  // Whole house
 };
+static_assert(CH_HOUSE == 6, "update the states[] initializer above");
+// A strand's settings in scenes converted from before v0.36.0 (strands C-F didn't exist).
+const LightState STRAND_DEFAULT = STRAND_DEFAULT_STATE;
 // A new zone starts as steady warm white, off.
 const LightState ZONE_DEFAULT_STATE =
   { false, CRGB(255, 160, 60), 160, MODE_SOLID, 5, 64, 10, 5, false, 0, false, 0, 0, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS };
@@ -439,7 +478,12 @@ void* bigAlloc(size_t bytes) {
   return p;
 }
 
+// Shared reply buffer for /api/frame and /api/custom (the web server answers one at a time).
+#define FRAME_BYTES_MAX (1 + NUM_OUTPUTS * 2 + MAX_TOTAL_LEDS * 3)
+uint8_t* frameBytes = nullptr;
+
 void allocBigTables() {
+  frameBytes = (uint8_t*)bigAlloc(FRAME_BYTES_MAX);
   zonePoints = (PathPoint(*)[MAX_TOTAL_LEDS])bigAlloc(sizeof(PathPoint) * MAX_ZONES * MAX_TOTAL_LEDS);
   pathPoints = (PathPoint(*)[MAX_PATH_LEN])bigAlloc(sizeof(PathPoint) * MAX_PATHS * MAX_PATH_LEN);
   scenes     = (Scene*)bigAlloc(sizeof(Scene) * MAX_SCENES);
@@ -466,12 +510,7 @@ void setup() {
   loadState();          // includes the strand lengths
   applyLedCounts();     // strands to their saved lengths
   initPaths();          // Whole house path follows the lengths
-  Serial.printf("Output A: GPIO %d, %u lights\n", PIN_OUTPUT_A, ledCount[0]);
-#if ENABLE_OUTPUT_B
-  Serial.printf("Output B: GPIO %d, %u lights\n", PIN_OUTPUT_B, ledCount[1]);
-#else
-  Serial.println("Output B: disabled");
-#endif
+  printStrands();
   startStorage();
   startFiles();
   loadZones();
@@ -495,4 +534,5 @@ void loop() {
   renderFrame();
   handleStateSave();
   handlePatternSave();
+  handleRestartRequest();
 }

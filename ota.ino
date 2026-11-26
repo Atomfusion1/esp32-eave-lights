@@ -17,7 +17,7 @@ size_t fwBytes = 0;
 
 void lightsOffForUpdate() {
   stopLocate();
-  for (int o = 0; o < NUM_OUTPUTS; o++) fill_solid(out[o], MAX_LEDS, CRGB(0, 0, 0));
+  sendAllDark();
   FastLED.show();
 }
 

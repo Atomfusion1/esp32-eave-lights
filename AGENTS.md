@@ -91,7 +91,9 @@ ESP32_Eave_Lights/              folder name must equal the main sketch name
   effects.ino                   draws each channel (solid/fade/test/chase/comet) at 50 fps;
                                 drawLayers(): strands → Whole house → paths → zones → Find-a-light;
                                 renderFrame() also runs the preview pass (preview.ino)
-  led_output.ino                strand setup, power caps, showFrame()
+  led_output.ino                strands A-F (Setup > Strands: name, length, off/wired/radio,
+                                pin, color order), board LED test light, power caps,
+                                showFrame(), restart for new pins; POST /api/strands
   locate.ino                    Find a light: show only chosen ranges, 5-min auto-off
   ota.ino                       wireless updates: ArduinoOTA (IDE network port) + web .bin upload
   patterns.ino                  custom "paintings" (library of up to 30, a color per physical
@@ -153,14 +155,18 @@ How the IDE handles tabs:
 
 Standalone throwaway test sketches go in their own folder under `tests/<name>/<name>.ino`, so they never get compiled into the main sketch.
 
-## Strand lengths
+## Strands (v0.36.0+)
 
-Strand lengths are **not fixed in code**: `ledCount[]` is set on the page (Setup → Strand lengths, `POST /api/strands`) and saved (`a_cnt`, `b_cnt`). Arrays are sized for `MAX_LEDS` (300) per strand. Never use a fixed light count. Loop to `ledCount[o]`; the Whole house path is `houseLen`. `/api/frame` sends each strand's count. At boot all `MAX_LEDS` are cleared, then the controllers are trimmed with `setLeds()`.
-
+Up to **6 strands, A–F** (`NUM_OUTPUTS` 6, `MAX_LEDS` 400 each). A and B are the eaves (`HOUSE_STRANDS` 2): only they make up the Whole house path, "Both strands" and `output=all`. Each strand's settings are set on the page (Setup → Strands, `POST /api/strands`, code in `led_output.ino`) and saved in Preferences: `strands` = `StrandCfg[6]` (name, type off/wired/radio, pin, color order), lengths `a_cnt`, `b_cnt`, `sc_cnt`…`sf_cnt`. Never use a fixed light count: loop to `ledCount[o]`; the Whole house path is `houseLen`. A strand set to Off has `strandLen` 0 (not drawn) and is sent dark.
+- Colors go `frame[]` (effects) → `out[]` (power caps, plain RGB; the live view and `/api/frame`) → `wire[]` (the strand's color order, `orderColor()`) → FastLED, registered as `RGB` on every pin. Allowed pins: `STRAND_PINS` (no strapping, USB, flash/PSRAM, UART0 or GPIO 48 pins). FastLED needs the pin at compile time, so `addStrandOnPin()` has a case per pin; a pin only starts at boot (`bootPin[]`), so changing it needs a restart (`restartNeeded`, page button, `action=restart`).
+- **Board LED:** the board's own WS2812 (GPIO 48, or 38) can copy one light of a strand at 25 % (`boardled` in Preferences) for testing without lights.
+- Radio strands are drawn and shown, but sending them by ESP-NOW comes in Stage 2.
+- At boot all `MAX_LEDS` are cleared on each wired pin, then trimmed with `setLeds()`.
+- Before v0.36.0 there were 2 strands of 300: `scenes.bin` (v2 → v3) and `patterns.bin` (v1 → v2) are converted on load, and the saved "All on" list (`chv` key) is moved to the new channel numbers (`legacyChannel()`).
 ## Firmware rules (from the handoff)
 
 - LED color order is **`RBG`**, chipset `WS2811`. Never change it to `GRB`.
-- Output A = GPIO 8 (tested). Output B = GPIO 9 (`ENABLE_OUTPUT_B 1`; pin verified with strand A in v0.3.0, the installed strand B not yet connected). Each **channel** has its own `LightState` in `states[]`: 0 = strand A, 1 = strand B, `CH_HOUSE` = Whole house path, `CH_ZONE0 + slot`, `CH_PATH0 + slot` (23 channels; `allOnMask` is a 32-bit mask over them). Effects draw on a channel's "line" through `lineLength()`/`lineLight()`, so they work the same on strands and paths. Drawing order while on: strands → Whole house → zone paths (`CH_PATH0 + slot`, up to 8) → zones (`CH_ZONE0 + slot`, up to 12). Zone-path gap positions use `VIRTUAL_OUTPUT` and draw to a hidden `gapSink`. Paths are rebuilt whenever a zone changes. Zones and saved looks are stored on the FFat partition, so the **16M Flash (3MB APP/9.9MB FATFS)** partition scheme is required. The API's `output=all` changes both strands (not paths) and lines up their phases.
+- Output A = GPIO 8 (tested). Output B = GPIO 9 (pin verified with strand A in v0.3.0). Each **channel** has its own `LightState` in `states[]`: 0-5 = strands A-F, `CH_HOUSE` (6) = Whole house path, `CH_ZONE0 + slot`, `CH_PATH0 + slot` (27 channels; `allOnMask` is a 32-bit mask over them). Effects draw on a channel's "line" through `lineLength()`/`lineLight()`, so they work the same on strands and paths. Drawing order while on: strands → Whole house → zone paths (`CH_PATH0 + slot`, up to 8) → zones (`CH_ZONE0 + slot`, up to 12). Zone-path gap positions use `VIRTUAL_OUTPUT` and draw to a hidden `gapSink`. Paths are rebuilt whenever a zone changes. Zones and saved looks are stored on the FFat partition, so the **16M Flash (3MB APP/9.9MB FATFS)** partition scheme is required. The API's `output=all` changes both eave strands A+B (not C-F or paths) and lines up their phases.
 - `scenes`, `zonePoints` and `pathPoints` are pointers into PSRAM, allocated by `allocBigTables()` at the start of `setup()` (v0.26.3, saves ~100 KB of internal RAM). Index them as before, but never use `sizeof()` on them. Put new big tables there too.
 - Every frame goes through `showFrame()` so the power caps are always applied. Never call `FastLED.show()` on raw colors.
 - `initOutputs()` stays the first line of `setup()` (sends OFF).

@@ -329,14 +329,39 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 
 <!-- ===== Setup ===== -->
 <section data-tab="setup">
-<details class="fold" data-fold="strands"><summary>Strand lengths <small id="strandSum"></small></summary><div class="body">
-<p class="hint" style="margin:0 0 8px">How many lights are on each strand (1–300). Zones, paths and the house view follow these numbers.</p>
+<details class="fold" data-fold="strands"><summary>Strands <small id="strandSum"></small></summary><div class="body">
+<p class="hint" style="margin:0 0 8px">Up to 6 strands, A–F. A and B are the eaves (Whole house, Both strands). Tap a strand to change its name, number of lights (1–400), type, pin and color order. Zones, paths and the house view follow these settings.</p>
+<div id="strandList"></div>
+<div class="sub" id="strandForm" hidden>
+<label id="strandFormTitle">Strand</label>
 <div class="row" style="align-items:end">
-<div><label>Strand A (left)</label><input id="cntA" type="number" min="1" max="300"></div>
-<div><label>Strand B (right)</label><input id="cntB" type="number" min="1" max="300"></div>
-<button class="btn primary" id="cntSave">Save</button>
+<div style="flex:2"><label>Name</label><input id="stName" type="text" maxlength="19" placeholder="e.g. Palm tree"></div>
+<div><label>Lights</label><input id="stCount" type="number" min="1" max="400"></div>
+</div>
+<label style="margin-top:8px">Type</label>
+<div class="seg" id="stType"><button data-t="off">Off</button><button data-t="wired">Wired (pin)</button><button data-t="radio">Radio (ESP-NOW)</button></div>
+<p class="hint" id="stTypeHint" style="margin:6px 0 0"></p>
+<div class="row" style="align-items:end;margin-top:8px">
+<div id="stPinBox"><label>Pin (GPIO)</label><select id="stPin"></select></div>
+<div><label>Color order</label><select id="stOrder"><option>RGB</option><option>RBG</option><option>GRB</option><option>GBR</option><option>BRG</option><option>BGR</option></select></div>
+</div>
+<div class="row" style="margin-top:10px"><button class="btn primary" id="stSave">Save</button><button class="btn" id="stCancel">Cancel</button></div>
 </div>
 <p class="err" id="cntErr" hidden></p>
+<div class="sub">
+<label>Board LED (test light)</label>
+<p class="hint" style="margin:0 0 8px">The board's own small RGB LED can copy one light, e.g. a flood light, so you can try effects before the real lights are connected. The strand's pin keeps sending as normal. Shown at 25 % (it is very bright up close).</p>
+<div class="row" style="align-items:end">
+<div><label>Copies strand</label><select id="bledStrand"></select></div>
+<div><label>Light</label><input id="bledLight" type="number" min="1" max="400"></div>
+<div><label>LED pin</label><select id="bledPin"><option value="48">GPIO 48</option><option value="38">GPIO 38</option></select></div>
+<button class="btn primary" id="bledSave">Save</button>
+</div>
+</div>
+<div class="sub" id="restartBox" hidden>
+<p class="hint" style="margin:0 0 8px">⚠ New pin settings start after a restart (the lights go dark for a few seconds).</p>
+<button class="btn primary" id="restartBtn">Restart now</button>
+</div>
 </div></details>
 
 <details class="fold" data-fold="colors"><summary>Saved colors <small id="savedSum"></small></summary><div class="body">
@@ -347,7 +372,7 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 
 <details class="fold" data-fold="find"><summary>Find a light</summary><div class="body">
 <p class="hint" style="margin:0 0 10px">Lights only the chosen light (green) so you can see where it is. Turns itself off after 5 minutes.</p>
-<div class="seg" id="findStrand"><button data-s="A">Strand A (left)</button><button data-s="B">Strand B (right)</button></div>
+<div class="seg" id="findStrand"></div>
 <div class="row" style="margin-top:10px">
 <button class="btn" id="findMinus">−</button><input id="findNum" type="number" min="1" value="1"><button class="btn" id="findPlus">+</button>
 </div>
@@ -447,15 +472,19 @@ const both=()=>sel===BOTH,house=()=>sel===HOUSE,pathSel=()=>sel>=PATH,zoneSel=()
 const zoneBySlot=n=>st.zones.find(z=>z.slot===n),pathBySlot=n=>st.paths.find(p=>p.slot===n);
 function cur(){return house()?st.house:pathSel()?pathBySlot(sel-PATH):zoneSel()?zoneBySlot(sel-ZONE):st.outputs[both()?0:sel];}
 function target(){return house()?'house':both()?'all':pathSel()?'p'+(sel-PATH):zoneSel()?'z'+(sel-ZONE):st.outputs[sel].id;}
-function curName(){return house()?'Whole house':both()?'Both strands':(zoneSel()||pathSel())?cur().name:'Strand '+cur().id;}
-function anyStrandOn(){return st.outputs.some(o=>o.on);}
+function curName(){return house()?'Whole house':both()?'Both strands':(zoneSel()||pathSel())?cur().name:strandName(cur());}
+// Strands: A and B are the eaves (Whole house, Both strands); C-F are extra (trees, floods...).
+// o.enabled = drawn (wired or radio); a strand set to Off is left out of the lists.
+const strandName=o=>'Strand '+o.id+(o.name?' ('+o.name+')':'');
+const eaves=()=>st.outputs.slice(0,2);
+function anyStrandOn(){return eaves().some(o=>o.on);}
 // everything that is on, by name
-function onNames(s){const n=[];s.outputs.forEach(o=>o.on&&n.push('Strand '+o.id));if(s.house.on)n.push('Whole house');
+function onNames(s){const n=[];s.outputs.forEach(o=>o.on&&o.enabled&&n.push(strandName(o)));if(s.house.on)n.push('Whole house');
  s.paths.forEach(p=>p.on&&n.push(p.name));s.zones.forEach(z=>z.on&&!z.hidden&&n.push(z.name));return n;}
 
 function renderPicker(s){const onOff=o=>o.on?'  ● on':'  ○ off';
- let h='<optgroup label="Strands">'+s.outputs.map((o,i)=>'<option value="'+i+'">Strand '+o.id+(o.id==='A'?' (left)':' (right)')+onOff(o)+'</option>').join('')+
-  '<option value="'+BOTH+'">Both strands'+(s.outputs.every(o=>o.on)?'  ● on':anyStrandOn()?'  ◐ some on':'  ○ off')+'</option></optgroup>'+
+ let h='<optgroup label="Strands">'+s.outputs.map((o,i)=>o.enabled?'<option value="'+i+'">'+esc(strandName(o))+onOff(o)+'</option>':'').join('')+
+  '<option value="'+BOTH+'">Both strands (A+B)'+(s.outputs.slice(0,2).every(o=>o.on)?'  ● on':s.outputs.slice(0,2).some(o=>o.on)?'  ◐ some on':'  ○ off')+'</option></optgroup>'+
   '<optgroup label="Whole house"><option value="'+HOUSE+'">Whole house'+onOff(s.house)+'</option></optgroup>';
  if(s.paths.length)h+='<optgroup label="Paths">'+s.paths.map(p=>'<option value="'+(PATH+p.slot)+'">'+esc(p.name)+onOff(p)+'</option>').join('')+'</optgroup>';
  const lit=s.zones.filter(z=>!z.hidden);   // "never light" zones can't be picked
@@ -476,10 +505,10 @@ function partLighting(o,i,item){if(!st)return null;
  const zs=st.zones.filter(z=>!z.hidden&&has(z.ranges)),slots=zs.map(z=>z.slot);
  let best=-1;zs.forEach(z=>{if(z.on&&z.slot>best)best=z.slot;});if(best>=0)return ZONE+best;
  st.paths.forEach(p=>{if(p.on&&p.slot>best&&p.steps.some(s=>slots.includes(s.zone)))best=p.slot;});if(best>=0)return PATH+best;
- if(st.house.on)return HOUSE;
+ if(st.house.on&&o<2)return HOUSE;   // Whole house = strands A and B
  if(st.outputs[o]&&st.outputs[o].on)return o;
  if(item&&item[0]==='z'){const z=zoneBySlot(+item.slice(1));if(z&&!z.hidden)return ZONE+z.slot;}
- if(item==='A'||item==='B')return item==='A'?0:1;
+ const k=item?st.outputs.findIndex(x=>x.id===item):-1;if(k>=0)return k;
  return zs.length?ZONE+zs[0].slot:o;}
 const tapAt={};
 [['photo',$('photoBox')],['strip',$('stripBox')]].forEach(([box,el])=>{
@@ -498,7 +527,7 @@ function topOnPart(o,i,zl){const key=o*1000+i,slots=[];let best=-1,hid=false;
  zl.forEach(x=>{if(!x.s.has(key))return;if(x.z.hidden){hid=true;return;}slots.push(x.z.slot);if(x.z.on&&x.z.slot>best)best=x.z.slot;});
  if(hid)return null;if(best>=0)return ZONE+best;
  st.paths.forEach(p=>{if(p.on&&p.slot>best&&p.steps.some(s=>slots.includes(s.zone)))best=p.slot;});if(best>=0)return PATH+best;
- if(st.house.on)return HOUSE;
+ if(st.house.on&&o<2)return HOUSE;
  return st.outputs[o]&&st.outputs[o].on?o:null;}
 function renderOnDisplay(){const box=$('onDisplay'),cov=$('onCover');if(!box||!st)return;
  // the scene showing (from the board) and the playlist, if one is playing
@@ -509,10 +538,10 @@ function renderOnDisplay(){const box=$('onDisplay'),cov=$('onCover');if(!box||!s
  $('sceneLine').textContent=line;$('sceneLine').hidden=false;
  const zl=st.zones.map(z=>({z,s:new Set(parseRanges(z.ranges).map(l=>l[0]*1000+l[1]))}));
  const count=new Map();
- st.outputs.forEach((out,o)=>{for(let i=0;i<out.count;i++){const v=topOnPart(o,i,zl);if(v!==null)count.set(v,(count.get(v)||0)+1);}});
- const order=[0,1,HOUSE].concat(st.paths.map(p=>PATH+p.slot),st.zones.map(z=>ZONE+z.slot));
+ st.outputs.forEach((out,o)=>{if(!out.enabled)return;for(let i=0;i<out.count;i++){const v=topOnPart(o,i,zl);if(v!==null)count.set(v,(count.get(v)||0)+1);}});
+ const order=st.outputs.map((_,i)=>i).concat([HOUSE],st.paths.map(p=>PATH+p.slot),st.zones.map(z=>ZONE+z.slot));
  const shown=order.filter(v=>count.has(v));
- const covered=order.filter(v=>{const o=partObj(v);return o&&o.on&&!(v>=ZONE&&v<PATH&&o.hidden)&&!count.has(v);});
+ const covered=order.filter(v=>{const o=partObj(v);return o&&o.on&&!(v>=ZONE&&v<PATH&&o.hidden)&&!(v>=0&&v<ZONE&&!o.enabled)&&!count.has(v);});
  box.innerHTML=shown.length?shown.map(v=>{const o=partObj(v),m=modeById(o.mode);
    const cols=m.colors===0?[]:[o.color].concat((o.colors||[]).slice(0,Math.max(0,(o.colorCount||1)-1))).slice(0,m.colors==='multi'?5:1);
    return '<button class="chip'+(tab==='lights'&&v===sel?' sel':'')+'" data-v="'+v+'" title="'+count.get(v)+' lights · brightness '+pct(o.brightness)+' · tap to control it">'+
@@ -526,7 +555,7 @@ function renderOnDisplay(){const box=$('onDisplay'),cov=$('onCover');if(!box||!s
 
 // ---- Copy / paste a look (everything except on/off) ----
 function partObj(v){return v===HOUSE?st.house:v>=PATH?pathBySlot(v-PATH):v>=ZONE?zoneBySlot(v-ZONE):st.outputs[v===BOTH?0:v];}
-function partName(v){const o=partObj(v);return v===HOUSE?'Whole house':v===BOTH?'Both strands':v>=ZONE?(o?o.name:'?'):'Strand '+o.id;}
+function partName(v){const o=partObj(v);return v===HOUSE?'Whole house':v===BOTH?'Both strands':v>=ZONE?(o?o.name:'?'):strandName(o);}
 function lookOf(o){const h=c=>String(c||'#000000').replace('#','').toUpperCase();
  const l={color:h(o.color),brightness:o.brightness,mode:o.mode,fadeSeconds:o.fadeSeconds,fadeMin:o.fadeMin,speed:o.speed,size:o.size,random:o.random||0,
   reverse:o.reverse?1:0,bothWays:o.bothWays?1:0,flipEvery:o.flipEvery||6,bgOn:o.bgOn?1:0,bgColor:h(o.bgColor),colorCount:o.colorCount};
@@ -544,7 +573,7 @@ $('pasteLook').onclick=()=>{if(lookClip)pasteLook(lookClip.look,lookClip.name);}
 renderClip();
 
 function show(s){st=s;
- if((zoneSel()&&(!zoneBySlot(sel-ZONE)||zoneBySlot(sel-ZONE).hidden))||(pathSel()&&!pathBySlot(sel-PATH))||(sel>=0&&sel<ZONE&&sel>=s.outputs.length)||(sel<HOUSE))sel=0;
+ if((zoneSel()&&(!zoneBySlot(sel-ZONE)||zoneBySlot(sel-ZONE).hidden))||(pathSel()&&!pathBySlot(sel-PATH))||(sel>=0&&sel<ZONE&&(sel>=s.outputs.length||!s.outputs[sel].enabled))||(sel<HOUSE))sel=0;
  const names=onNames(s);
  $('onPill').textContent=names.length?names.length+' on':'all off';$('onPill').classList.toggle('on',names.length>0);
  $('onList').textContent=names.length?names.join(' · '):'Everything is off.';
@@ -558,8 +587,10 @@ function show(s){st=s;
  if(house())hint='One '+h.length+'-light line across the front: '+lastB+' (far right) → controller → '+lastA+' (far left). While on, it covers Strand A and B'+(zonesOn.length?'; zones that are on ('+zonesOn.map(z=>z.name).join(', ')+') are drawn on top':'')+'.';
  else if(zoneSel())hint=o.length+' lights: '+o.ranges+'. While on, drawn on top of everything else.';
  else if(pathSel())hint='Path: '+o.summary+' ('+o.length+' positions incl. gaps). Zones that are on are drawn on top of it.';
- else if(coverStrands.length)hint='Drawn on top of the strands right now: '+coverStrands.join(', ')+'.';
- else if(!both()&&!o.enabled)hint='This strand is turned off in the firmware (ENABLE_OUTPUT_B).';
+ else if(!both()&&!o.enabled)hint='This strand is turned off (Setup → Strands).';
+ else if(!both()&&o.type==='radio')hint='Radio strand: shown here; sending it to the second board comes in a later update.';
+ else if(!both()&&o.type==='wired'&&!o.running)hint='This strand’s pin starts after a restart (Setup → Strands).';
+ else if(coverStrands.length&&(both()||sel<2))hint='Drawn on top of the strands right now: '+coverStrands.join(', ')+'.';
  $('tabHint').textContent=hint;$('tabHint').hidden=!hint;
  const isOn=both()?anyStrandOn():o.on;
  $('power').textContent=curName()+' — '+(isOn?'ON':'OFF');$('power').classList.toggle('on',isOn);
@@ -567,7 +598,7 @@ function show(s){st=s;
  if(hasPending()&&pendingTarget===target())applyPendingTo(o,pending);   // keep showing unapplied changes
  renderLook(o);updateApplyBar();
  // setup
- $('strandSum').textContent='A '+s.outputs[0].count+(s.outputs[1]?' · B '+s.outputs[1].count:'');
+ renderStrands(s);
  $('zoneSum').textContent=s.zones.length+' of 12';$('pathSum').textContent=s.paths.length+' of 8';$('fwSum').textContent='v'+s.version;
  $('zoneList').innerHTML=s.zones.map((z,i)=>'<div class="zoneRow click'+(z.slot===showingZone?' showing':'')+'" data-show="'+z.slot+'" title="Click to light this zone white for 10 seconds"><div>'+esc(z.name)+
   '<small>'+esc(z.ranges)+' · '+z.length+' lights'+(z.hidden?' · <b>never lit</b>':'')+(z.slot===showingZone?' · showing on the house…':'')+'</small></div>'+
@@ -586,10 +617,11 @@ function show(s){st=s;
  $('pathList').querySelectorAll('[data-pedit]').forEach(b=>b.onclick=()=>startPathEdit(+b.dataset.pedit));
  $('pathList').querySelectorAll('[data-pdel]').forEach(b=>b.onclick=()=>delPath(+b.dataset.pdel));
  renderSteps();
- if(document.activeElement!==$('cntA'))$('cntA').value=s.outputs[0].count;
- if(s.outputs[1]&&document.activeElement!==$('cntB'))$('cntB').value=s.outputs[1].count;
- $('fwVer').textContent=s.version;$('findNum').max=findMax();
- $('findStrand').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',b.dataset.s===findStrand));
+ $('fwVer').textContent=s.version;
+ if(!s.outputs.some(o=>o.enabled&&o.id===findStrand))findStrand='A';
+ $('findStrand').innerHTML=s.outputs.filter(o=>o.enabled).map(o=>'<button data-s="'+o.id+'" class="'+(o.id===findStrand?'sel':'')+'">'+esc(strandName(o))+'</button>').join('');
+ $('findStrand').querySelectorAll('button').forEach(b=>b.onclick=()=>{findStrand=b.dataset.s;show(st);if(st.locate.active)findShow();});
+ $('findNum').max=findMax();
  $('storageWarn').hidden=s.storage;
  $('locateBanner').hidden=!s.locate.active;
  $('locateBanner').textContent=s.locate.active?'Find a light is on: showing only '+s.locate.ranges+'. Stop it in Setup → Find a light.':'';
@@ -740,7 +772,8 @@ function renderLook(o){const m=modeById(o.mode);
  // settings: show only what this effect uses
  const [fwd,rev]=Array.isArray(m.dir)?m.dir:house()?['Right → left','Left → right']:zoneSel()?['As listed','Reversed']:pathSel()?['In path order','Reversed']
   :o.id==='A'?['Light 1 → '+o.count+' (outward, left)','Light '+o.count+' → 1 (inward)']
-  :o.id==='B'?['Light 1 → '+o.count+' (outward, right)','Light '+o.count+' → 1 (inward)']:['Outward','Inward'];
+  :o.id==='B'?['Light 1 → '+o.count+' (outward, right)','Light '+o.count+' → 1 (inward)']
+  :o.count?['Light 1 → '+o.count,'Light '+o.count+' → 1']:['Outward','Inward'];
  $('dir').children[0].textContent=fwd;$('dir').children[1].textContent=rev;
  const parts=[];
  $('spdBox').hidden=!m.spd;if(m.spd){$('spdName').textContent=m.spd;$('spd').value=o.speed;$('spdVal').textContent=m.fmt(o.speed);parts.push(m.spd.toLowerCase()+' '+m.fmt(o.speed));}
@@ -961,9 +994,49 @@ setInterval(()=>{if((tab==='home'||tab==='lights')&&!document.hidden){loadProgra
  fetch('/api/state').then(r=>r.json()).then(s=>{   // Lights: don't redraw the controls under unapplied changes
   if(tab==='lights'&&hasPending()){st.scene=s.scene;renderOnDisplay();}else show(s);}).catch(()=>{});}},10000);
 
-// ================= Setup: strand lengths =================
-$('cntSave').onclick=async()=>{const j=await post('/api/strands',{a:$('cntA').value,b:$('cntB').value});
+// ================= Setup: strands =================
+// One row per strand; tap a row to edit it. Pins and switching to Wired start after a restart.
+let editStrand=null,stTypeSel='off';
+function strandDesc(o){if(o.type==='off')return 'off';
+ const where=o.type==='wired'?'pin '+o.pin+(o.running?'':' (after restart)'):'radio';
+ return o.count+' lights · '+where+' · '+o.order;}
+function renderStrands(s){
+ $('strandSum').textContent=s.outputs.filter(o=>o.enabled).map(o=>o.id+' '+o.count).join(' · ');
+ $('strandList').innerHTML=s.outputs.map(o=>'<div class="zoneRow click'+(editStrand===o.id?' showing':'')+'" data-st="'+o.id+'"><div>'+esc(strandName(o))+
+  '<small>'+esc(strandDesc(o))+(o.id==='A'||o.id==='B'?' · eave':'')+'</small></div><button class="btn" data-st2="'+o.id+'">Edit</button></div>').join('');
+ $('strandList').querySelectorAll('[data-st]').forEach(r=>r.onclick=()=>openStrand(r.dataset.st));
+ $('restartBox').hidden=!s.restartNeeded;
+ const b=s.boardLed||{};
+ if(document.activeElement!==$('bledStrand')){
+  $('bledStrand').innerHTML='<option value="off">Off</option>'+s.outputs.map(o=>'<option value="'+o.id+'">'+esc(strandName(o))+'</option>').join('');
+  $('bledStrand').value=b.strand||'off';}
+ if(document.activeElement!==$('bledLight'))$('bledLight').value=b.light||1;
+ if(document.activeElement!==$('bledPin'))$('bledPin').value=String(b.pin||48);}
+function setStType(t){stTypeSel=t;$('stType').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',b.dataset.t===t));
+ $('stPinBox').hidden=t!=='wired';
+ $('stTypeHint').textContent=t==='off'?'Not drawn and nothing is sent. Zones on it keep their lights.'
+  :t==='wired'?'Data wire from this board’s pin (directly, or through an RS485 / signal amplifier for long runs). A new pin starts after a restart.'
+  :'Sent by radio to a second board (the hub) near the lights. For now it is drawn and shown in the live view; sending comes in the next update.';}
+function openStrand(id){const o=st.outputs.find(x=>x.id===id);if(!o)return;editStrand=id;
+ $('strandFormTitle').textContent='Strand '+id+(id==='A'||id==='B'?' (eave)':'');
+ $('stName').value=o.name||'';$('stCount').value=o.count;
+ const used=st.outputs.filter(x=>x.id!==id&&x.type==='wired').map(x=>x.pin);
+ $('stPin').innerHTML=(st.pins||[]).map(p=>'<option value="'+p+'"'+(used.includes(p)?' disabled':'')+'>GPIO '+p+(used.includes(p)?' (in use)':'')+'</option>').join('');
+ $('stPin').value=String(o.pin);$('stOrder').value=o.order||'RGB';setStType(o.type||'off');
+ $('strandForm').hidden=false;showErr('cntErr');renderStrands(st);$('stName').focus();}
+function closeStrand(){editStrand=null;$('strandForm').hidden=true;showErr('cntErr');if(st)renderStrands(st);}
+$('stType').querySelectorAll('button').forEach(b=>b.onclick=()=>setStType(b.dataset.t));
+$('stCancel').onclick=closeStrand;
+$('stSave').onclick=async()=>{if(!editStrand)return;
+ const p={strand:editStrand,name:$('stName').value,count:$('stCount').value,type:stTypeSel,order:$('stOrder').value};
+ if(stTypeSel==='wired')p.pin=$('stPin').value;
+ const j=await post('/api/strands',p);if(j.error){showErr('cntErr',j.error);return;}
+ editStrand=null;$('strandForm').hidden=true;showErr('cntErr');show(j);};
+$('bledSave').onclick=async()=>{const j=await post('/api/strands',{boardLed:$('bledStrand').value,boardLedLight:$('bledLight').value,boardLedPin:$('bledPin').value});
  if(j.error)showErr('cntErr',j.error);else{showErr('cntErr');show(j);}};
+$('restartBtn').onclick=async()=>{if(!confirm('Restart the board now? The lights go dark for a few seconds.'))return;
+ try{await post('/api/strands',{action:'restart'});}catch(e){}
+ $('status').textContent='Restarting… this page reloads in 15 seconds.';setTimeout(()=>location.reload(),15000);};
 
 // ================= Setup: find a light =================
 let findStrand='A';
@@ -971,7 +1044,6 @@ function findMax(){const o=st.outputs.find(x=>x.id===findStrand);return o?o.coun
 function findNum(){return Math.min(findMax(),Math.max(1,parseInt($('findNum').value)||1));}
 async function locate(ranges){const j=await post('/api/locate',ranges?{ranges}:{stop:1});if(j.error)$('status').textContent=j.error;else show(j);return j;}
 function findShow(){$('findNum').value=findNum();locate(findStrand+findNum());}
-$('findStrand').querySelectorAll('button').forEach(b=>b.onclick=()=>{findStrand=b.dataset.s;show(st);if(st.locate.active)findShow();});
 $('findMinus').onclick=()=>{$('findNum').value=Math.max(1,findNum()-1);findShow();};
 $('findPlus').onclick=()=>{$('findNum').value=Math.min(findMax(),findNum()+1);findShow();};
 $('findNum').onchange=findShow;$('findShow').onclick=findShow;$('findStop').onclick=()=>locate('');
@@ -1049,7 +1121,7 @@ $('backupBtn').onclick=async()=>{const say=t=>$('backupStatus').textContent=t;
   for(const f of list){say('Reading '+f.path+'…');const r=await fetch('/fs'+f.path,{cache:'no-store'});if(!r.ok)throw new Error('could not read '+f.path);
    files.push({path:f.path,data:toB64(new Uint8Array(await r.arrayBuffer()))});}
   const backup={format:'eave-lights-backup',version:1,created:new Date().toISOString(),firmware:s.version,
-   strands:s.outputs.map(o=>({id:o.id,count:o.count})),
+   strands:s.outputs.map(o=>({id:o.id,count:o.count,name:o.name,type:o.type,pin:o.pin,order:o.order})),boardLed:s.boardLed||null,
    channels:Object.assign({house:chanFields(s.house)},...s.outputs.map(o=>({[o.id.toLowerCase()]:chanFields(o)}))),
    timer:progData&&progData.timer?(({enabled,onMode,onClock,onOffset,offMode,offClock,offOffset,lat,lon})=>({enabled:enabled?1:0,onMode,onClock,onOffset,offMode,offClock,offOffset,lat,lon}))(progData.timer):null,
    calendar:progData?(progData.scheduleOn?1:0):null,fallback:progData?progData.fallback:null,files};
@@ -1071,6 +1143,10 @@ $('restoreFile').onchange=async e=>{const f=e.target.files[0];e.target.value='';
  try{say('Reloading…');await post('/api/restore-finish',{});
   const cnt={};(b.strands||[]).forEach(s=>cnt[s.id.toLowerCase()]=s.count);
   if(cnt.a||cnt.b)await post('/api/strands',cnt);
+  // strand settings (backups from v0.36.0 on); a wired strand on a new pin needs a restart
+  for(const s of b.strands||[])if(s.type){const p={strand:s.id,name:s.name||'',type:s.type,order:s.order||'RGB'};if(s.type==='wired')p.pin=s.pin;
+   const j=await post('/api/strands',p);if(j.error)failed+='strand '+s.id+' ('+j.error+') ';}
+  if(b.boardLed)await post('/api/strands',{boardLed:b.boardLed.strand||'off',boardLedLight:b.boardLed.light||1,boardLedPin:b.boardLed.pin||48});
   for(const [id,fields] of Object.entries(b.channels||{}))await post('/api/state',Object.assign({output:id},fields));
   if(b.timer)await post('/api/programs',Object.assign({action:'timer'},b.timer));
   if(b.calendar!==null&&b.calendar!==undefined)await post('/api/programs',{action:'calendar',on:b.calendar});
@@ -1109,7 +1185,7 @@ function lightRGB(fi,o,i){if(o>=fi.outs||i>=fi.cnt[o])return null;const k=fi.sta
 let painting=false,paintPattern=1,patternFrame=null,paintTool='paint',paintDown=false,strokeLights=new Set(),strokeTimer=null;
 // The lights of what's being controlled, as range text ("A1-67", a zone's ranges, a path's zones).
 function targetRangesText(){if(!st)return '';
- const all=()=>st.outputs.map(o=>o.id+'1-'+o.count).join(',');
+ const all=()=>eaves().map(o=>o.id+'1-'+o.count).join(',');   // Both strands / Whole house = A and B
  if(both()||house())return all();
  if(zoneSel()){const z=cur();return z?z.ranges:'';}
  if(pathSel()){const p=cur();return p?p.steps.map(s=>{const z=zoneBySlot(s.zone);return z?z.ranges:'';}).filter(Boolean).join(','):'';}
@@ -1167,7 +1243,7 @@ function pickAt(box,e){const best=nearestDot(box,e);if(!best)return;
  const own=patternFrame&&paintTargetSet().has(best.o+':'+best.i),buf=own?patternFrame:(frame||patternFrame);if(!buf)return;
  const fi=frameInfo(buf);if(best.o>=fi.outs||best.i>=fi.cnt[best.o])return;
  const k=fi.start[best.o]+best.i*3,rgb=[buf[k],buf[k+1],buf[k+2]],m=Math.max(...rgb);
- flushStroke();const name=(best.o===0?'A':'B')+(best.i+1);
+ flushStroke();const name=st.outputs[best.o].id+(best.i+1);
  if(!m){setPaintTool('erase');$('status').textContent='Picked '+name+': off (Erase)';return;}
  // split into a full-strength color + its brightness, so painting with it matches exactly
  const lvl=Math.max(5,Math.round(m/255*100)),hex='#'+rgb.map(v=>Math.min(255,Math.round(v*255/m)).toString(16).padStart(2,'0')).join('');
@@ -1178,7 +1254,7 @@ function paintAt(box,e){if(!painting||!patternFrame)return;
  if(!best||!paintTargetSet().has(best.o+':'+best.i))return;   // only the controlled lights
  const fi=frameInfo(patternFrame),k=fi.start[best.o]+best.i*3,hex=brushHex();
  patternFrame[k]=parseInt(hex.slice(0,2),16);patternFrame[k+1]=parseInt(hex.slice(2,4),16);patternFrame[k+2]=parseInt(hex.slice(4,6),16);
- strokeLights.add((best.o===0?'A':'B')+(best.i+1));drawLive();
+ strokeLights.add(st.outputs[best.o].id+(best.i+1));drawLive();
  clearTimeout(strokeTimer);strokeTimer=setTimeout(flushStroke,150);}
 [['photo',$('photoBox')],['strip',$('stripBox')]].forEach(([box,el])=>{
  el.addEventListener('pointerdown',e=>{if(!painting)return;
@@ -1350,20 +1426,28 @@ let liveMode=store.get('eaveLiveMode','photo'),photoView=store.get('eavePhotoVie
 $('liveMode').querySelectorAll('button').forEach(b=>b.onclick=()=>{liveMode=b.dataset.lm;store.set('eaveLiveMode',liveMode);drawLive();});
 
 // --- strip: as seen from the street, A runs left from the controller, B right ---
-const GAP=3;let stripCv=null,stripKey='';
-function drawStrip(fi){const cA=fi.cnt[0],cB=fi.outs>1?fi.cnt[1]:0,key=cA+'/'+cB;
- if(!stripCv||stripKey!==key){stripKey=key;$('stripBox').innerHTML='<div class="liveRow"><canvas></canvas></div>'+
+// Other strands that are on (C-F: trees, floods...) get a row each underneath, light 1 at the left.
+const GAP=3,ROW=26,XROW=22,XLABEL=70;let stripCv=null,stripKey='';
+function drawStrip(fi){const cA=fi.cnt[0],cB=fi.outs>1?fi.cnt[1]:0;
+ const extra=st?st.outputs.map((o,k)=>k).filter(k=>k>=2&&k<fi.outs&&st.outputs[k].enabled):[];
+ const key=cA+'/'+cB+'/'+extra.map(k=>k+':'+fi.cnt[k]+':'+st.outputs[k].name).join(',');
+ if(!stripCv||stripKey!==key){stripKey=key;$('stripBox').innerHTML='<div class="liveRow"><canvas style="height:'+(ROW+extra.length*XROW)+'px"></canvas></div>'+
   '<div class="liveLabels"><span>A'+cA+' · left</span><span>controller</span><span>right · B'+cB+'</span></div>';
   stripCv=$('stripBox').querySelector('canvas');}
  const dpr=window.devicePixelRatio||1,w=stripCv.clientWidth,h=stripCv.clientHeight;if(!w)return;
- if(stripCv.width!==Math.round(w*dpr)){stripCv.width=Math.round(w*dpr);stripCv.height=Math.round(h*dpr);}
+ if(stripCv.width!==Math.round(w*dpr)||stripCv.height!==Math.round(h*dpr)){stripCv.width=Math.round(w*dpr);stripCv.height=Math.round(h*dpr);}
  const g=stripCv.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,w,h);
- const step=w/(cA+GAP+cB),r=Math.max(1,Math.min(step*0.4,6));
- g.shadowBlur=0;g.fillStyle='#55554f';g.fillRect(step*(cA+GAP/2)-1,h*0.2,2,h*0.6);
- for(let o=0;o<Math.min(fi.outs,2);o++)for(let i=0;i<fi.cnt[o];i++){const c=lightRGB(fi,o,i);
+ const dot=(o,i,x,y,r,hit)=>{const c=lightRGB(fi,o,i);
   g.fillStyle=c?'rgb('+c.join(',')+')':'#2a2a27';g.shadowBlur=c?r*3:0;g.shadowColor=g.fillStyle;
-  const slot=o===0?cA-1-i:cA+GAP+i,x=step*(slot+0.5);g.beginPath();g.arc(x,h/2,r,0,Math.PI*2);g.fill();
-  dots.push({box:'strip',o,i,x,y:h/2,r:Math.max(step*0.6,4)});}}
+  g.beginPath();g.arc(x,y,r,0,Math.PI*2);g.fill();dots.push({box:'strip',o,i,x,y,r:hit});};
+ const step=w/(cA+GAP+cB),r=Math.max(1,Math.min(step*0.4,6)),y0=ROW/2;
+ g.shadowBlur=0;g.fillStyle='#55554f';g.fillRect(step*(cA+GAP/2)-1,ROW*0.2,2,ROW*0.6);
+ for(let o=0;o<Math.min(fi.outs,2);o++)for(let i=0;i<fi.cnt[o];i++)
+  dot(o,i,step*((o===0?cA-1-i:cA+GAP+i)+0.5),y0,r,Math.max(step*0.6,4));
+ extra.forEach((o,k)=>{const y=ROW+k*XROW+XROW/2,n=fi.cnt[o],s=(w-XLABEL)/Math.max(n,1),rr=Math.max(1,Math.min(s*0.4,6));
+  g.shadowBlur=0;g.fillStyle='#8a8a84';g.font='10px sans-serif';g.textBaseline='middle';
+  const nm=st.outputs[o].id+(st.outputs[o].name?' '+st.outputs[o].name:'');g.fillText(nm.length>12?nm.slice(0,11)+'…':nm,2,y);
+  for(let i=0;i<n;i++)dot(o,i,XLABEL+s*(i+0.5),y,rr,Math.max(s*0.6,4));});}
 
 // --- house photo: same placement maths as the House editor ---
 const imgs={};
@@ -1372,8 +1456,8 @@ function renderPhotoViews(){const vs=layout?layout.views:[];if(photoView>=vs.len
  $('photoViews').innerHTML=vs.length>1?vs.map((v,i)=>'<button data-v="'+i+'" class="'+(i===photoView?'sel':'')+'">'+esc(v.name)+'</button>').join(''):'';
  $('photoViews').querySelectorAll('button').forEach(b=>b.onclick=()=>{photoView=+b.dataset.v;store.set('eavePhotoView',photoView);renderPhotoViews();drawLive();});}
 function parseRanges(t){const out=[];
- for(const part of String(t).split(',')){const m=part.trim().match(/^([AB])(\d+)(?:\s*-\s*[AB]?(\d+))?$/i);if(!m)continue;
-  const o=m[1].toUpperCase()==='A'?0:1,a=+m[2]-1,b=(m[3]?+m[3]:+m[2])-1,s=a<=b?1:-1;
+ for(const part of String(t).split(',')){const m=part.trim().match(/^([A-F])(\d+)(?:\s*-\s*[A-F]?(\d+))?$/i);if(!m)continue;
+  const o='ABCDEF'.indexOf(m[1].toUpperCase()),a=+m[2]-1,b=(m[3]?+m[3]:+m[2])-1,s=a<=b?1:-1;
   for(let i=a;;i+=s){out.push([o,i]);if(i===b)break;}}
  return out;}
 function itemLights(id){if(!st)return [];

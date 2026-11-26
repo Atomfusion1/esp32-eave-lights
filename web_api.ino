@@ -1,13 +1,16 @@
 // web_api — JSON API on port 80 (the page itself is in web_page.ino).
 //
 //   GET  /              control page
-//   GET  /api/state     {"version", "storage", "outputs":[A,B], "house":{...},
+//   GET  /api/state     {"version", "storage", "outputs":[A..F] (each with "name", "type"
+//                        off|wired|radio, "pin", "order", "running", "enabled" = drawn,
+//                        "count"), "restartNeeded", "pins":[allowed GPIOs],
+//                        "boardLed":{"strand","light","pin","running"}, "house":{...},
 //                        "zones":[{"id":"z0","name","ranges","length",...}],
 //                        "paths":[{"id":"p0","name","summary","steps":[...],"length",...}],
 //                        "locate":{...}}
 //   POST /api/state     form-encoded body or URL query, any of:
-//                         output=all|a|b|house|z<N>|p<N>  what to change (default all =
-//                                both strands; "all" also lines up their fades/movement).
+//                         output=all|a..f|house|z<N>|p<N>  what to change (default all =
+//                                both eave strands A+B; "all" also lines up their fades/movement).
 //                                house = Whole house path, z<N> = zone slot N,
 //                                p<N> = zone path slot N.
 //                         on=0|1  color=RRGGBB  brightness=0-255
@@ -23,7 +26,9 @@
 //   GET  /api/frame     exact colors being sent right now (after power caps), binary:
 //                       [outputs], per output [count low][count high], then R,G,B per
 //                       light, A's lights first.
-//   POST /api/strands   a=67 b=65   strand lengths (1-300), saved. Returns the state.
+//   POST /api/strands   a=67 b=65 (lengths 1-400) | strand=C name= count= type= pin= order=
+//                       | boardLed=D|off boardLedLight= boardLedPin= | action=restart
+//                       (led_output.ino). Returns the state.
 //   POST /api/all-off   turns off every strand, Whole house, zone and path, remembering
 //                       what was on. Returns the state.
 //   POST /api/all-on    turns back on what was on before the last all-off ("canAllOn").
@@ -99,15 +104,29 @@ String stateJson() {
   json += allOnMask ? "true" : "false";
   json += ",\"outputs\":[";
   for (int o = 0; o < NUM_OUTPUTS; o++) {
-    char buf[80];
-    snprintf(buf, sizeof(buf), "%s{\"id\":\"%c\",\"gpio\":%d,\"enabled\":%s,\"count\":%u,",
-             o ? "," : "", OUTPUT_LETTERS[o], OUTPUT_PINS[o],
-             OUTPUT_ENABLED[o] ? "true" : "false", ledCount[o]);
+    const StrandCfg& c = strandCfg[o];
+    char buf[200];
+    snprintf(buf, sizeof(buf), "%s{\"id\":\"%c\",\"name\":\"%s\",\"type\":\"%s\",\"pin\":%u,\"running\":%s,"
+             "\"order\":\"%s\",\"gpio\":%u,\"enabled\":%s,\"count\":%u,",
+             o ? "," : "", OUTPUT_LETTERS[o], c.name, TYPE_NAMES[c.type], c.pin,
+             (c.type == STRAND_WIRED ? bootPin[o] == c.pin : c.type == STRAND_RADIO) ? "true" : "false",
+             ORDER_NAMES[c.order], bootPin[o], strandActive(o) ? "true" : "false", ledCount[o]);
     json += buf;
     json += channelFieldsJson(o);
     json += "}";
   }
-  json += "],\"house\":{\"id\":\"house\",\"name\":\"Whole house\",\"length\":";
+  json += "],\"restartNeeded\":";
+  json += restartNeeded() ? "true" : "false";
+  json += ",\"pins\":[";
+  for (unsigned int k = 0; k < sizeof(STRAND_PINS); k++) {
+    if (k) json += ",";
+    json += STRAND_PINS[k];
+  }
+  json += "],\"boardLed\":{\"strand\":";
+  json += boardLed.strand >= 0 ? String("\"") + OUTPUT_LETTERS[boardLed.strand] + "\"" : String("null");
+  json += ",\"light\":" + String(boardLed.light) + ",\"pin\":" + String(boardLed.pin) +
+          ",\"running\":" + (boardLedBootPin && boardLedBootPin == boardLed.pin ? "true" : "false") + "}";
+  json += ",\"house\":{\"id\":\"house\",\"name\":\"Whole house\",\"length\":";
   json += houseLen;
   json += ",";
   json += channelFieldsJson(CH_HOUSE);
@@ -234,8 +253,11 @@ bool parseTarget(int& target) {
   String v = server.arg("output");
   v.toLowerCase();
   if (v == "all")                        { target = -1; return true; }
-  if (v == "a" || v == "0")              { target = 0; return true; }
-  if (v == "b" || v == "1")              { target = 1; return true; }
+  if (v == "0") { target = 0; return true; }
+  if (v == "1") { target = 1; return true; }
+  for (int o = 0; o < NUM_OUTPUTS; o++) {
+    if (v.length() == 1 && v[0] == (char)tolower(OUTPUT_LETTERS[o])) { target = o; return true; }
+  }
   if (v == "house" || v == "path")       { target = CH_HOUSE; return true; }
   if (v.length() >= 2 && v[0] == 'z') {
     int z = v.substring(1).toInt();
@@ -349,7 +371,7 @@ void handleSetState() {
 
   bool changed = false;
   for (int o = 0; o < NUM_CHANNELS; o++) {
-    if (target < 0 && o >= NUM_OUTPUTS) continue;   // "all" = the strands only
+    if (target < 0 && o >= HOUSE_STRANDS) continue;   // "all" = both eave strands (A, B)
     if (target >= 0 && o != target) continue;
     LightState& s = states[o];
     if (server.hasArg("on")) {
@@ -378,7 +400,7 @@ void handleSetState() {
 // ?preview=1 returns the preview of unapplied changes instead, while one is active
 // (header "X-Preview: 1" says which one was sent).
 void handleGetFrame() {
-  static uint8_t buf[1 + NUM_OUTPUTS * 2 + MAX_TOTAL_LEDS * 3];
+  uint8_t* buf = frameBytes;   // shared reply buffer (PSRAM)
   bool pv = previewActive && server.hasArg("preview");
   CRGB (*src)[MAX_LEDS] = pv ? previewOut : out;
   size_t n = 0;
@@ -433,16 +455,6 @@ void handleAllOff() {
 
 void handleAllOn() {
   if (!allLightsOn()) return sendError("nothing to turn back on yet");
-  sendState();
-}
-
-// Sets strand lengths: a=<lights on A> b=<lights on B> (1-MAX_LEDS each).
-void handleStrands() {
-  int a = server.hasArg("a") ? server.arg("a").toInt() : ledCount[0];
-  int b = server.hasArg("b") ? server.arg("b").toInt() : ledCount[1];
-  if (a < 1 || a > MAX_LEDS || b < 1 || b > MAX_LEDS) return sendError("each strand needs 1 to 300 lights");
-  stopLocate();
-  setLedCounts(a, b);
   sendState();
 }
 

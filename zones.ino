@@ -66,7 +66,7 @@ const char* parseRanges(const String& text, ZoneRange* outRanges, uint8_t& count
     char strand = toupper(text[pos++]);
     int out = -1;
     for (int o = 0; o < NUM_OUTPUTS; o++) if (OUTPUT_LETTERS[o] == strand) out = o;
-    if (out < 0) return "each range must start with A or B, e.g. A1-12";
+    if (out < 0) return "each range must start with a strand letter A-F, e.g. A1-12";
 
     int first = 0, digits = 0;
     while (pos < len && isdigit((unsigned char)text[pos])) { first = first * 10 + (text[pos++] - '0'); digits++; }

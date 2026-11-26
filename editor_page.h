@@ -15,7 +15,7 @@
 //              "placements":[{"item":"z0","itemName":"Right Side","from":1,"to":26,
 //                             "points":[[x,y],...]}]}]     x, y = 0-1 across the photo
 // }
-// item: "z<slot>" = zone, "A"/"B" = whole strand. from/to: 1-based within the item's lights.
+// item: "z<slot>" = zone, "A".."F" = whole strand. from/to: 1-based within the item's lights.
 // Optional "look": "down" | "glow" | "point" overrides settings.style for this section.
 // Optional "hidden":[part numbers]: parts of the line (0 = first point to second) whose
 // lights are behind something on this photo: still spaced, not drawn.
@@ -169,19 +169,21 @@ function view(){return layout.views[vi];}
 
 // ---- Items: zones and whole strands, as lists of physical lights [output, index] ----
 function parseRanges(t){const out=[];
- for(const part of t.split(',')){const m=part.trim().match(/^([AB])(\d+)(?:\s*-\s*[AB]?(\d+))?$/i);if(!m)continue;
-  const o=m[1].toUpperCase()==='A'?0:1,a=+m[2]-1,b=(m[3]?+m[3]:+m[2])-1,s=a<=b?1:-1;
+ for(const part of t.split(',')){const m=part.trim().match(/^([A-F])(\d+)(?:\s*-\s*[A-F]?(\d+))?$/i);if(!m)continue;
+  const o='ABCDEF'.indexOf(m[1].toUpperCase()),a=+m[2]-1,b=(m[3]?+m[3]:+m[2])-1,s=a<=b?1:-1;
   for(let i=a;;i+=s){out.push([o,i]);if(i===b)break;}}
  return out;}
+// Strands switched off (Setup > Strands) aren't offered (enabled = false).
 function items(){const list=[];if(!st)return list;
  st.zones.forEach(z=>list.push({id:'z'+z.slot,name:z.name,desc:z.ranges,lights:parseRanges(z.ranges)}));
- st.outputs.forEach(o=>{const r=o.id+'1-'+o.count;list.push({id:o.id,name:'Strand '+o.id+' (all)',desc:r,lights:parseRanges(r)});});
+ st.outputs.forEach(o=>{if(o.enabled===false)return;const r=o.id+'1-'+o.count;
+  list.push({id:o.id,name:'Strand '+o.id+(o.name?' '+o.name:'')+' (all)',desc:r,lights:parseRanges(r)});});
  return list;}
-function totalLights(){return st?st.outputs.reduce((a,o)=>a+o.count,0):0;}
+function totalLights(){return st?st.outputs.reduce((a,o)=>a+(o.enabled===false?0:o.count),0):0;}
 function itemById(id){return items().find(i=>i.id===id);}
 function placementLights(p){const it=itemById(p.item);if(!it)return [];
  return it.lights.slice(Math.max(0,p.from-1),Math.min(it.lights.length,p.to));}
-function lightLabel(l){return (l[0]===0?'A':'B')+(l[1]+1);}
+function lightLabel(l){return 'ABCDEF'[l[0]]+(l[1]+1);}
 
 // ---- Even spacing along the line (in photo pixels, so it isn't stretched) ----
 // seg = which part of the line the light is on (parts can be hidden, e.g. behind the garage)
