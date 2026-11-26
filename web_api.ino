@@ -161,7 +161,14 @@ String stateJson() {
     json += channelFieldsJson(CH_PATH0 + p);
     json += "}";
   }
-  json += "],\"locate\":{\"active\":";
+  json += "],\"scene\":";
+  if (shownScene >= 0 && shownScene < MAX_SCENES && scenes[shownScene].used) {
+    json += "{\"id\":" + String(shownScene) + ",\"name\":\"" + String(scenes[shownScene].name) +
+            "\",\"edited\":" + (shownSceneEdited ? "true" : "false") + "}";
+  } else {
+    json += "null";
+  }
+  json += ",\"locate\":{\"active\":";
   json += locateActive ? "true" : "false";
   json += ",\"ranges\":\"";
   if (locateActive) json += rangesText(locateRanges, locateCount);
@@ -355,7 +362,7 @@ void handleSetState() {
     syncPhases();
   }
 
-  if (changed) markStateChanged();
+  if (changed) { markStateChanged(); shownSceneEdited = true; }
   sendState();
 }
 

@@ -171,6 +171,8 @@ const char* saveScene(const String& name, int group) {
   scenes[id].used = true;
   strcpy(scenes[id].name, cleanName);
   for (int ch = 0; ch < NUM_CHANNELS; ch++) scenes[id].states[ch] = states[ch];
+  shownScene = id;            // what is showing now is this scene
+  shownSceneEdited = false;
   saveScenesFile();
   if (group >= 0 && group < MAX_SCENE_GROUPS) sceneGroup[id] = group;
   else if (!replacing) sceneGroup[id] = 0;
@@ -190,6 +192,7 @@ void applyBlank() {
   }
   allOnMask = 0;
   markStateChanged();
+  shownScene = -1;
   Serial.println("Scene: blank");
 }
 
@@ -204,6 +207,8 @@ const char* applyScene(int id, bool save) {
     resetPhase(ch);
   }
   if (save) markStateChanged();
+  shownScene = id;
+  shownSceneEdited = false;
   Serial.printf("Scene: %s\n", scenes[id].name);
   return nullptr;
 }
@@ -211,6 +216,7 @@ const char* applyScene(int id, bool save) {
 const char* deleteScene(int id) {
   if (id < 0 || id >= MAX_SCENES || !scenes[id].used) return "scene not found";
   scenes[id].used = false;
+  if (shownScene == id) shownScene = -1;
   scenes[id].name[0] = 0;
   sceneGroup[id] = 0;
   saveSceneGroups();

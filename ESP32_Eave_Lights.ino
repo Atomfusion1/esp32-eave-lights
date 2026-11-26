@@ -53,7 +53,7 @@
 #define OTA_PASSWORD AP_PASSWORD
 #endif
 
-#define FW_VERSION "0.32.0"
+#define FW_VERSION "0.33.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
@@ -385,6 +385,11 @@ uint32_t allOnMask = 0;
 // ---------- Restore ----------
 // While a backup is being restored, nothing is saved, so the files being uploaded
 // aren't overwritten from memory. Cleared by /api/restore-finish or after a timeout.
+// The scene last shown or saved (-1 = none, e.g. after Blank or a restart) and whether
+// anything was changed by hand since: shown on the page as "Scene: …".
+int  shownScene       = -1;
+bool shownSceneEdited = false;
+
 bool     savesBlocked   = false;
 uint32_t savesBlockedMs = 0;
 

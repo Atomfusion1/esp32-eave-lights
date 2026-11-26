@@ -135,6 +135,7 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <div class="photo" id="photoBox"><canvas id="photoCv"></canvas><button class="zoomReset" id="zoomReset" hidden title="Scroll the mouse wheel over the photo to zoom">Reset zoom</button></div>
 <div class="live" id="stripBox"></div>
 <p class="hint" id="liveHint"></p>
+<p class="onList" id="sceneLine" style="margin-top:10px" hidden></p>
 <div class="chips" id="onDisplay"></div>
 <p class="onCover" id="onCover" hidden></p>
 <p class="err" id="locateBanner" hidden></p>
@@ -498,6 +499,12 @@ function topOnPart(o,i,zl){const key=o*1000+i,slots=[];let best=-1,hid=false;
  if(st.house.on)return HOUSE;
  return st.outputs[o]&&st.outputs[o].on?o:null;}
 function renderOnDisplay(){const box=$('onDisplay'),cov=$('onCover');if(!box||!st)return;
+ // the scene showing (from the board) and the playlist, if one is playing
+ const sc=st.scene,a=progData&&progData.active,ap=a&&progData.programs.find(p=>p.id===a.id);
+ let line=sc?'🎬 Scene: '+sc.name+(sc.edited?' (changed since)':''):'🎬 No scene: set by hand';
+ if(ap){const left=a.nextIn>=0?Math.max(0,a.nextIn-Math.round((Date.now()-progAt)/1000)):-1;
+  line+=' · ▶ '+ap.name+(left>=0&&ap.steps.length>1?', next scene in '+Math.max(1,Math.ceil(left/60))+' min':'');}
+ $('sceneLine').textContent=line;$('sceneLine').hidden=false;
  const zl=st.zones.map(z=>({z,s:new Set(parseRanges(z.ranges).map(l=>l[0]*1000+l[1]))}));
  const count=new Map();
  st.outputs.forEach((out,o)=>{for(let i=0;i<out.count;i++){const v=topOnPart(o,i,zl);if(v!==null)count.set(v,(count.get(v)||0)+1);}});
@@ -843,14 +850,14 @@ function loadLooksAndScenes(){return fetch('/api/presets').then(r=>r.json()).the
 
 // ================= Playlists & calendar =================
 const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-let progData=null,editProg=-1,progSteps=[];   // progSteps: {scene, minutes} while editing
+let progAt=0,progData=null,editProg=-1,progSteps=[];   // progSteps: {scene, minutes} while editing
 const sceneName=id=>{const s=sceneList.find(x=>x.id===id);return s?s.name:'(deleted scene)';};
 const fmtDate=md=>{const [m,d]=md.split('-').map(Number);return MONTHS[m-1]+' '+d;};
 const fmtMins=s=>s%60?(s/60).toFixed(1).replace(/\.0$/,''):String(s/60);
 (function fillDateSelects(){const mo=MONTHS.map((n,i)=>'<option value="'+(i+1)+'">'+n+'</option>').join('');
  const dy=Array.from({length:31},(_,i)=>'<option value="'+(i+1)+'">'+(i+1)+'</option>').join('');
  ['fromM','toM'].forEach(id=>$(id).innerHTML=mo);['fromD','toD'].forEach(id=>$(id).innerHTML=dy);})();
-function showPrograms(j){progData=j;renderTimer(j.timer);
+function showPrograms(j){progData=j;progAt=Date.now();renderTimer(j.timer);renderOnDisplay();
  $('schedOn').checked=j.scheduleOn;
  // what plays on dates no playlist covers: -1 keep, -2 off, 0+ an everyday playlist
  $('fallbackBox').hidden=!j.scheduleOn;
@@ -944,8 +951,9 @@ $('progSave').onclick=async()=>{const md=p=>String($(p+'M').value).padStart(2,'0
   steps:progSteps.map(s=>s.scene+':'+Math.round(s.minutes*60)).join(',')};
  if(editProg>=0)p.id=editProg;if(await progAction(p))closeProgForm();};
 // While on Home, refresh what's playing (scenes change by themselves).
-setInterval(()=>{if(tab==='home'&&!document.hidden){loadPrograms();
- fetch('/api/state').then(r=>r.json()).then(show).catch(()=>{});}},10000);
+setInterval(()=>{if((tab==='home'||tab==='lights')&&!document.hidden){loadPrograms();
+ fetch('/api/state').then(r=>r.json()).then(s=>{   // Lights: don't redraw the controls under unapplied changes
+  if(tab==='lights'&&hasPending()){st.scene=s.scene;renderOnDisplay();}else show(s);}).catch(()=>{});}},10000);
 
 // ================= Setup: strand lengths =================
 $('cntSave').onclick=async()=>{const j=await post('/api/strands',{a:$('cntA').value,b:$('cntB').value});
