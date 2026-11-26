@@ -398,7 +398,7 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 </div></details>
 
 <h3 class="grp" data-grp="layout">Layout</h3>
-<details class="fold" data-fold="zones" data-grp="layout" data-keys="zone zones ranges never light hidden porch section"><summary>Zones <small id="zoneSum"></small></summary><div class="body">
+<details class="fold" data-fold="zones" data-grp="layout" data-keys="zone zones ranges never light hidden porch section mirror copy same twin"><summary>Zones <small id="zoneSum"></small></summary><div class="body">
 <p class="hint" style="margin:0 0 10px">A zone is a name plus lights, e.g. <b>A1-12</b> or <b>A1-12, B30-65</b>. <b>A12-1</b> runs backwards. <b>Click a zone</b> to light it white for 10 seconds. Zones that are on are drawn on top of everything else. <b>↑ ↓</b> set the order zones are listed in.</p>
 <div id="zoneList"></div>
 <p class="hint" id="noZones">No zones yet.</p>
@@ -408,6 +408,9 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <input id="zoneRanges" type="text" placeholder="Lights, e.g. A1-12, B30-65" style="margin-top:8px">
 <label style="display:flex;gap:8px;align-items:center;margin:10px 0 0;color:var(--text);font-size:14px"><input type="checkbox" id="zoneHidden" style="width:18px;height:18px;accent-color:var(--accent)"> Never light (e.g. the lead-in running down the wall)</label>
 <p class="hint" style="margin:4px 0 0">These lights always stay dark, and Strand A/B and Whole house effects skip them so they start at the eave.</p>
+<label style="margin-top:10px">Mirror of</label>
+<select id="zoneMirror"></select>
+<p class="hint" style="margin:4px 0 0">Shows exactly what another zone shows, light for light (1st = 1st…), even random effects. Strand effects skip its lights, and it isn't picked or set itself: set the zone it mirrors. E.g. a tree wound up and back down: <b>Trunk up</b> = C1-60, <b>Trunk down</b> = C120-61 mirror of Trunk up.</p>
 <div class="row" style="margin-top:10px">
 <button class="btn" id="zoneShow">Show on lights</button><button class="btn primary" id="zoneSave">Save zone</button><button class="btn" id="zoneCancel" hidden>Cancel</button>
 </div>
@@ -528,7 +531,7 @@ function renderPicker(s){const onOff=o=>o.on?'  ● on':'  ○ off';
   '<option value="'+BOTH+'">Both strands (A+B)'+(s.outputs.slice(0,2).every(o=>o.on)?'  ● on':s.outputs.slice(0,2).some(o=>o.on)?'  ◐ some on':'  ○ off')+'</option></optgroup>'+
   '<optgroup label="Whole house"><option value="'+HOUSE+'">Whole house'+onOff(s.house)+'</option></optgroup>';
  if(s.paths.length)h+='<optgroup label="Paths">'+s.paths.map(p=>'<option value="'+(PATH+p.slot)+'">'+esc(p.name)+onOff(p)+'</option>').join('')+'</optgroup>';
- const lit=s.zones.filter(z=>!z.hidden);   // "never light" zones can't be picked
+ const lit=s.zones.filter(z=>!z.hidden&&z.mirror==null);   // "never light" and mirror zones can't be picked
  if(lit.length)h+='<optgroup label="Zones">'+lit.map(z=>'<option value="'+(ZONE+z.slot)+'">'+esc(z.name)+onOff(z)+'</option>').join('')+'</optgroup>';
  $('picker').innerHTML=h;$('picker').value=String(sel);}
 $('picker').onchange=e=>choosePart(+e.target.value);
@@ -540,10 +543,17 @@ async function choosePart(next){
 // Tapping a light on the live photo/strip: picks what is lighting it, in the board's
 // drawing order (strands, Whole house, paths, zones; a higher slot draws over a lower one).
 // Nothing on there: the zone/strand drawn there in the House editor. Never-lit: nothing.
+// Mirror zones (zone.mirror = source slot): light "o*1000+i" -> [o,i] of the source light it copies.
+let mirrorCacheFor=null,mirrorCache=null;
+function mirrorMap(){if(mirrorCacheFor===st)return mirrorCache;const m=new Map();
+ (st?st.zones:[]).forEach(z=>{if(z.mirror==null)return;const src=zoneBySlot(z.mirror);if(!src)return;
+  const a=parseRanges(z.ranges),b=parseRanges(src.ranges);a.forEach((l,k)=>{if(k<b.length)m.set(l[0]*1000+l[1],b[k]);});});
+ mirrorCacheFor=st;mirrorCache=m;return m;}
 function partLighting(o,i,item){if(!st)return null;
+ const mm=mirrorMap().get(o*1000+i);if(mm){o=mm[0];i=mm[1];item=null;}   // a mirror light: what lights its source
  const has=r=>parseRanges(r).some(l=>l[0]===o&&l[1]===i);
  if(st.zones.some(z=>z.hidden&&has(z.ranges)))return null;
- const zs=st.zones.filter(z=>!z.hidden&&has(z.ranges)),slots=zs.map(z=>z.slot);
+ const zs=st.zones.filter(z=>!z.hidden&&z.mirror==null&&has(z.ranges)),slots=zs.map(z=>z.slot);
  let best=-1;zs.forEach(z=>{if(z.on&&z.slot>best)best=z.slot;});if(best>=0)return ZONE+best;
  st.paths.forEach(p=>{if(p.on&&p.slot>best&&p.steps.some(s=>slots.includes(s.zone)))best=p.slot;});if(best>=0)return PATH+best;
  if(st.house.on&&o<2)return HOUSE;   // Whole house = strands A and B
@@ -564,8 +574,9 @@ const tapAt={};
 // ---- On display: the parts that win at least one light on the house right now ----
 // Same drawing order as partLighting(), but only parts that are on. Uses the board's
 // state (not unapplied changes). Parts that are on but fully drawn over are listed apart.
-function topOnPart(o,i,zl){const key=o*1000+i,slots=[];let best=-1,hid=false;
- zl.forEach(x=>{if(!x.s.has(key))return;if(x.z.hidden){hid=true;return;}slots.push(x.z.slot);if(x.z.on&&x.z.slot>best)best=x.z.slot;});
+function topOnPart(o,i,zl){const mm=mirrorMap().get(o*1000+i);if(mm){o=mm[0];i=mm[1];}
+ const key=o*1000+i,slots=[];let best=-1,hid=false;
+ zl.forEach(x=>{if(!x.s.has(key)||x.z.mirror!=null)return;if(x.z.hidden){hid=true;return;}slots.push(x.z.slot);if(x.z.on&&x.z.slot>best)best=x.z.slot;});
  if(hid)return null;if(best>=0)return ZONE+best;
  st.paths.forEach(p=>{if(p.on&&p.slot>best&&p.steps.some(s=>slots.includes(s.zone)))best=p.slot;});if(best>=0)return PATH+best;
  if(st.house.on&&o<2)return HOUSE;
@@ -614,7 +625,7 @@ $('pasteLook').onclick=()=>{if(lookClip)pasteLook(lookClip.look,lookClip.name);}
 renderClip();
 
 function show(s){st=s;
- if((zoneSel()&&(!zoneBySlot(sel-ZONE)||zoneBySlot(sel-ZONE).hidden))||(pathSel()&&!pathBySlot(sel-PATH))||(sel>=0&&sel<ZONE&&(sel>=s.outputs.length||!s.outputs[sel].enabled))||(sel<HOUSE))sel=0;
+ if((zoneSel()&&(!zoneBySlot(sel-ZONE)||zoneBySlot(sel-ZONE).hidden||zoneBySlot(sel-ZONE).mirror!=null))||(pathSel()&&!pathBySlot(sel-PATH))||(sel>=0&&sel<ZONE&&(sel>=s.outputs.length||!s.outputs[sel].enabled))||(sel<HOUSE))sel=0;
  const names=onNames(s);
  $('onPill').textContent=names.length?names.length+' on':'all off';$('onPill').classList.toggle('on',names.length>0);
  $('onList').textContent=names.length?names.join(' · '):'Everything is off.';
@@ -642,11 +653,12 @@ function show(s){st=s;
  renderStrands(s);
  $('zoneSum').textContent=s.zones.length+' of 12';$('pathSum').textContent=s.paths.length+' of 8';$('fwSum').textContent='v'+s.version;
  $('zoneList').innerHTML=s.zones.map((z,i)=>'<div class="zoneRow click'+(z.slot===showingZone?' showing':'')+'" data-show="'+z.slot+'" title="Click to light this zone white for 10 seconds"><div>'+esc(z.name)+
-  '<small>'+esc(z.ranges)+' · '+z.length+' lights'+(z.hidden?' · <b>never lit</b>':'')+(z.slot===showingZone?' · showing on the house…':'')+'</small></div>'+
+  '<small>'+esc(z.ranges)+' · '+z.length+' lights'+(z.hidden?' · <b>never lit</b>':'')+(z.mirror!=null?' · <b>mirror of '+esc((zoneBySlot(z.mirror)||{name:'?'}).name)+'</b>':'')+(z.slot===showingZone?' · showing on the house…':'')+'</small></div>'+
   '<button class="btn" data-mv="'+z.slot+'" data-dir="-1" title="Move up"'+(i?'':' disabled')+'>↑</button>'+
   '<button class="btn" data-mv="'+z.slot+'" data-dir="1" title="Move down"'+(i<s.zones.length-1?'':' disabled')+'>↓</button>'+
   '<button class="btn" data-edit="'+z.slot+'">Edit</button><button class="btn danger" data-del="'+z.slot+'">Delete</button></div>').join('');
  $('noZones').hidden=s.zones.length>0;
+ if(document.activeElement!==$('zoneMirror')){const mv=$('zoneMirror').value;fillZoneMirror(editZone,mv&&mv!=='none'?+mv:null);}
  $('zoneList').querySelectorAll('[data-mv]').forEach(b=>b.onclick=async e=>{e.stopPropagation();
   const j=await post('/api/zones',{action:'move',id:b.dataset.mv,dir:b.dataset.dir});if(j.error)showErr('zoneErr',j.error);else show(j);});
  $('zoneList').querySelectorAll('[data-edit]').forEach(b=>b.onclick=e=>{e.stopPropagation();startEdit(+b.dataset.edit);});
@@ -1148,8 +1160,12 @@ async function showZone(slot){clearTimeout(showTimer);
  const j=await post('/api/locate',{ranges:z.ranges,seconds:SHOW_SECONDS,white:1});
  if(j.error){showingZone=-1;showErr('zoneErr',j.error);}else{showErr('zoneErr');show(j);}
  showTimer=setTimeout(async()=>{showingZone=-1;try{show(await (await fetch('/api/state')).json());}catch(e){}},SHOW_SECONDS*1000+300);}
-function resetZoneForm(){editZone=-1;$('zoneName').value='';$('zoneRanges').value='';$('zoneHidden').checked=false;$('zoneFormTitle').textContent='New zone';$('zoneCancel').hidden=true;showErr('zoneErr');}
-function startEdit(slot){const z=zoneBySlot(slot);editZone=slot;$('zoneName').value=z.name;$('zoneRanges').value=z.ranges;$('zoneHidden').checked=!!z.hidden;
+// "Mirror of" choices: other zones that aren't mirrors themselves.
+function fillZoneMirror(slot,cur){const opts=(st?st.zones:[]).filter(z=>z.slot!==slot&&z.mirror==null&&!z.hidden);
+ $('zoneMirror').innerHTML='<option value="none">No (its own look)</option>'+opts.map(z=>'<option value="'+z.slot+'">'+esc(z.name)+' ('+esc(z.ranges)+')</option>').join('');
+ $('zoneMirror').value=cur==null?'none':String(cur);}
+function resetZoneForm(){editZone=-1;$('zoneName').value='';$('zoneRanges').value='';$('zoneHidden').checked=false;fillZoneMirror(-1,null);$('zoneFormTitle').textContent='New zone';$('zoneCancel').hidden=true;showErr('zoneErr');}
+function startEdit(slot){const z=zoneBySlot(slot);editZone=slot;$('zoneName').value=z.name;$('zoneRanges').value=z.ranges;$('zoneHidden').checked=!!z.hidden;fillZoneMirror(slot,z.mirror);
  $('zoneFormTitle').textContent='Edit zone: '+z.name;$('zoneCancel').hidden=false;showErr('zoneErr');$('zoneName').focus();}
 async function delZone(slot){const z=zoneBySlot(slot);if(!confirm('Delete zone "'+z.name+'"?'))return;
  const j=await post('/api/zones',{action:'delete',id:slot});if(j.error)showErr('zoneErr',j.error);else{if(editZone===slot)resetZoneForm();show(j);unlinkZoneFromLayout(slot,z.name);}}
@@ -1162,7 +1178,7 @@ async function unlinkZoneFromLayout(slot,name){try{
  await fetch('/api/layout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(lay)});
  if(editorFrame.src)editorFrame.src='/editor?embed=1';loadLayout();}catch(e){}}
 $('zoneShow').onclick=async()=>{const j=await locate($('zoneRanges').value.trim());showErr('zoneErr',j.error);};
-$('zoneSave').onclick=async()=>{const p={action:'save',name:$('zoneName').value,ranges:$('zoneRanges').value,hidden:$('zoneHidden').checked?1:0};if(editZone>=0)p.id=editZone;
+$('zoneSave').onclick=async()=>{const p={action:'save',name:$('zoneName').value,ranges:$('zoneRanges').value,hidden:$('zoneHidden').checked?1:0,mirror:$('zoneMirror').value||'none'};if(editZone>=0)p.id=editZone;
  const j=await post('/api/zones',p);if(j.error){showErr('zoneErr',j.error);return;}
  if(j.locate.active)await locate('');resetZoneForm();show(j);};
 $('zoneCancel').onclick=resetZoneForm;

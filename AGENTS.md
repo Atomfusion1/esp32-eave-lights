@@ -146,9 +146,10 @@ ESP32_Eave_Lights/              folder name must equal the main sketch name
                                 duplicated in web_page.h: keep both the same)
   files.ino                     photo upload, layout.json save, /files static serving
   wifi.ino                      home Wi-Fi, hotspot fallback, mDNS eavelights.local
-  zones.ino                     zones (name + light ranges + settings) in /zones.bin,
+  zones.ino                     zones (name + light ranges + settings) in /zones.bin, "mirror of"
+                                another zone (light for light, after all layers; v0.41.0),
                                 range text parser ("A1-12, B30-65"); "never light" flag
-                                and list order per zone in /zonemeta.bin (hidden lights
+                                and list order and mirror per zone in /zonemeta.bin v2 (hidden and mirrored lights
                                 are left out of strand lines via strandMap[] and Whole house)
   secrets.h                     Wi-Fi passwords, gitignored (copy from secrets.example.h)
   <task>.ino                    add new tasks the same way

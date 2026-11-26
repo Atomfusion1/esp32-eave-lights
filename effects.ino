@@ -313,8 +313,11 @@ void drawLayers(uint32_t dtMs) {
     if (pathDefs[p].used && states[CH_PATH0 + p].on && pathLen[p]) drawChannel(CH_PATH0 + p, dtMs);
   }
   for (int z = 0; z < MAX_ZONES; z++) {
-    if (zones[z].used && !zoneHidden[z] && states[CH_ZONE0 + z].on && zoneLen[z]) drawChannel(CH_ZONE0 + z, dtMs);
+    if (zones[z].used && !zoneHidden[z] && !zoneIsMirror(z) && states[CH_ZONE0 + z].on && zoneLen[z]) drawChannel(CH_ZONE0 + z, dtMs);
   }
+
+  // Mirror zones: copy their source zone's lights (after everything else is drawn).
+  applyZoneMirrors();
 
   // "Never light" zones: dark whatever else covers them (zone paths, overlapping zones).
   for (int o = 0; o < NUM_OUTPUTS; o++) {

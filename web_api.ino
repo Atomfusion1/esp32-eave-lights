@@ -41,7 +41,7 @@
 //   POST /api/locate    ranges=A23 | A1-12,B30-65   light only those (auto-off after 5 min)
 //                       [seconds=1-300] shorter auto-off, [white=1] all white (no green first)
 //                       stop=1                      back to normal. Returns the state.
-//   POST /api/zones     action=save   [id=N] name=Porch ranges=A1-12 [hidden=0|1]
+//   POST /api/zones     action=save   [id=N] name=Porch ranges=A1-12 [hidden=0|1] [mirror=N|none]
 //                         (no id = new zone; hidden=1 = never light, e.g. the lead-in)
 //                       action=delete id=N | action=move id=N dir=-1|1 (list order).
 //                       Returns the state; "zones" are listed in the page's order.
@@ -160,6 +160,7 @@ String stateJson() {
     json += "\",\"length\":";
     json += zoneLen[z];
     json += zoneHidden[z] ? ",\"hidden\":true," : ",\"hidden\":false,";
+    json += "\"mirror\":" + (zoneIsMirror(z) ? String(zoneMirror[z]) : String("null")) + ",";
     json += channelFieldsJson(CH_ZONE0 + z);
     json += "}";
   }
@@ -493,6 +494,11 @@ void handleZones() {
     int newId;
     err = saveZone(id, server.arg("name"), server.arg("ranges"), newId);
     if (!err && server.hasArg("hidden")) err = setZoneHidden(newId, argIsTrue("hidden"));
+    // mirror=<zone slot> | none: this zone shows what that zone shows
+    if (!err && server.hasArg("mirror")) {
+      String m = server.arg("mirror");
+      err = setZoneMirror(newId, (m.length() && m != "none") ? m.toInt() : -1);
+    }
   } else if (action == "delete") {
     err = deleteZone(id);
   } else if (action == "move") {

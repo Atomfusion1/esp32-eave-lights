@@ -29,6 +29,7 @@ void initZones() {
     zoneLen[z] = 0;
     zoneHidden[z] = 0;
     zoneRank[z] = z;
+    zoneMirror[z] = -1;
     states[CH_ZONE0 + z] = ZONE_DEFAULT_STATE;
   }
 }
@@ -147,6 +148,7 @@ const char* saveZone(int id, const String& name, const String& rangesStr, int& n
     for (int z = 0; z < MAX_ZONES; z++) if (zones[z].used && zoneRank[z] >= last) last = zoneRank[z] + 1;
     zoneRank[id] = last;
     zoneHidden[id] = 0;
+    zoneMirror[id] = -1;
   } else if (id >= MAX_ZONES || !zones[id].used) {
     return "zone not found";
   }
@@ -158,7 +160,10 @@ const char* saveZone(int id, const String& name, const String& rangesStr, int& n
   for (int r = 0; r < count; r++) zd.ranges[r] = ranges[r];
   rebuildZone(id);
   rebuildAllZonePaths();   // paths follow the zone's new lights
-  if (zoneHidden[id]) initPaths();   // its lights changed: strands skip the new ones
+  // its lights changed: strands skip the new ones (never-lit or mirror zone, or one mirrored)
+  bool mirrored = false;
+  for (int z = 0; z < MAX_ZONES; z++) if (zones[z].used && zoneMirror[z] == id) mirrored = true;
+  if (zoneHidden[id] || zoneMirror[id] >= 0 || mirrored) initPaths();
   resetPhase(CH_ZONE0 + id);
   saveZoneMeta();
 
@@ -174,10 +179,12 @@ const char* deleteZone(int id) {
   zones[id].rangeCount = 0;
   states[CH_ZONE0 + id] = ZONE_DEFAULT_STATE;
   rebuildZone(id);
-  if (zoneHidden[id]) {
-    zoneHidden[id] = 0;
-    initPaths();   // its lights go back into the strands and Whole house
-  }
+  // mirrors of it stop mirroring; its own mirror setting goes
+  bool linesChanged = zoneHidden[id] || zoneMirror[id] >= 0;
+  for (int z = 0; z < MAX_ZONES; z++) if (zoneMirror[z] == id) { zoneMirror[z] = -1; linesChanged = true; }
+  zoneHidden[id] = 0;
+  zoneMirror[id] = -1;
+  if (linesChanged) initPaths();   // its lights go back into the strands and Whole house
   saveZoneMeta();
   // Paths drop their steps for it, and scenes forget it, so a new zone that gets this
   // slot later isn't pulled into them.
@@ -275,23 +282,73 @@ void saveZonesFile() {
   f.close();
 }
 
-// ---- "Never light" zones and list order (/zonemeta.bin) ----
-// Per zone slot: hidden (0/1), rank (list position, lower first).
+// ---- "Never light" zones, mirrors and list order (/zonemeta.bin) ----
+// Per zone slot: hidden (0/1), rank (list position, lower first), mirror (source slot + 1,
+// 0 = none; v2, v0.41.0). Version 1 records had only the first two bytes.
 
 const char*    ZONEMETA_FILE  = "/zonemeta.bin";
 const uint32_t ZONEMETA_MAGIC = 0x4154455A;  // "ZETA"
 
-// Marks every light of a "never light" zone. Lights past a strand's end are ignored.
+// True if zone z is a working mirror (its source exists).
+bool zoneIsMirror(int z) {
+  int m = zoneMirror[z];
+  return zones[z].used && !zoneHidden[z] && m >= 0 && m < MAX_ZONES && m != z && zones[m].used;
+}
+
+// Marks every light of a "never light" zone, and of a mirror zone. Lights past a strand's
+// end are ignored.
 void rebuildHiddenLights() {
   memset(lightHidden, 0, sizeof(lightHidden));
+  memset(lightMirrored, 0, sizeof(lightMirrored));
   for (int z = 0; z < MAX_ZONES; z++) {
-    if (!zones[z].used || !zoneHidden[z]) continue;
+    if (!zones[z].used) continue;
+    bool hide = zoneHidden[z], mirror = zoneIsMirror(z);
+    if (!hide && !mirror) continue;
     for (int r = 0; r < zones[z].rangeCount; r++) {
       const ZoneRange& zr = zones[z].ranges[r];
       int a = min(zr.first, zr.last), b = max(zr.first, zr.last);
-      for (int i = a; i <= b && i < ledCount[zr.output]; i++) lightHidden[zr.output][i] = true;
+      for (int i = a; i <= b && i < ledCount[zr.output]; i++) {
+        if (hide) lightHidden[zr.output][i] = true;
+        else lightMirrored[zr.output][i] = true;
+      }
     }
   }
+}
+
+// After all layers are drawn: each mirror zone's lights take the colors of its source's
+// lights, position by position. Lights past the source's length are dark.
+void applyZoneMirrors() {
+  for (int z = 0; z < MAX_ZONES; z++) {
+    if (!zoneIsMirror(z)) continue;
+    int m = zoneMirror[z];
+    for (int i = 0; i < zoneLen[z]; i++) {
+      const PathPoint& d = zonePoints[z][i];
+      CRGB c(0, 0, 0);
+      if (i < zoneLen[m]) { const PathPoint& s = zonePoints[m][i]; c = frame[s.output][s.index]; }
+      frame[d.output][d.index] = c;
+    }
+  }
+}
+
+// Sets zone id to mirror zone src (-1 = no mirror). A mirror can't be mirrored, a zone
+// that others mirror can't become a mirror, and a "never light" zone can't mirror.
+const char* setZoneMirror(int id, int src) {
+  if (id < 0 || id >= MAX_ZONES || !zones[id].used) return "zone not found";
+  if (src >= 0) {
+    if (src >= MAX_ZONES || !zones[src].used) return "the zone to mirror was not found";
+    if (src == id) return "a zone can't mirror itself";
+    if (zoneHidden[id]) return "a never-lit zone can't be a mirror";
+    if (zoneMirror[src] >= 0) return "that zone is itself a mirror: pick the zone it mirrors";
+    for (int z = 0; z < MAX_ZONES; z++)
+      if (z != id && zones[z].used && zoneMirror[z] == id) return "other zones mirror this one, so it can't be a mirror";
+  } else {
+    src = -1;
+  }
+  if (zoneMirror[id] == src) return nullptr;
+  zoneMirror[id] = src;
+  initPaths();   // strand lines leave out (or take back) its lights
+  saveZoneMeta();
+  return nullptr;
 }
 
 // Used zone slots in list order. Returns how many.
@@ -342,21 +399,24 @@ const char* moveZone(int id, int dir) {
 }
 
 void loadZoneMeta() {
-  for (int z = 0; z < MAX_ZONES; z++) { zoneHidden[z] = 0; zoneRank[z] = z; }
+  for (int z = 0; z < MAX_ZONES; z++) { zoneHidden[z] = 0; zoneRank[z] = z; zoneMirror[z] = -1; }
   if (storageOk && FFat.exists(ZONEMETA_FILE)) {
     File f = FFat.open(ZONEMETA_FILE, "r");
     FileHeader h;
-    if (f && f.read((uint8_t*)&h, sizeof(h)) == sizeof(h) && h.magic == ZONEMETA_MAGIC && h.recordSize == 2) {
+    // record size 2 (v1: hidden, rank) or 3 (v2: + mirror)
+    if (f && f.read((uint8_t*)&h, sizeof(h)) == sizeof(h) && h.magic == ZONEMETA_MAGIC &&
+        (h.recordSize == 2 || h.recordSize == 3)) {
       for (int z = 0; z < h.count && z < MAX_ZONES; z++) {
-        uint8_t rec[2];
-        if (f.read(rec, 2) != 2) break;
+        uint8_t rec[3] = { 0, 0, 0 };
+        if (f.read(rec, h.recordSize) != h.recordSize) break;
         zoneHidden[z] = rec[0] ? 1 : 0;
         zoneRank[z] = rec[1];
+        zoneMirror[z] = (rec[2] >= 1 && rec[2] <= MAX_ZONES) ? rec[2] - 1 : -1;
       }
     }
     if (f) f.close();
   }
-  for (int z = 0; z < MAX_ZONES; z++) if (!zones[z].used) zoneHidden[z] = 0;
+  for (int z = 0; z < MAX_ZONES; z++) if (!zones[z].used) { zoneHidden[z] = 0; zoneMirror[z] = -1; }
   normalizeZoneRanks();
 }
 
@@ -364,11 +424,11 @@ void saveZoneMeta() {
   if (!storageOk || savesBlocked) return;
   File f = FFat.open(ZONEMETA_FILE, "w");
   if (!f) return;
-  FileHeader h = { ZONEMETA_MAGIC, 1, 2, MAX_ZONES };
+  FileHeader h = { ZONEMETA_MAGIC, 2, 3, MAX_ZONES };
   f.write((const uint8_t*)&h, sizeof(h));
   for (int z = 0; z < MAX_ZONES; z++) {
-    uint8_t rec[2] = { zoneHidden[z], zoneRank[z] };
-    f.write(rec, 2);
+    uint8_t rec[3] = { zoneHidden[z], zoneRank[z], (uint8_t)(zoneMirror[z] >= 0 ? zoneMirror[z] + 1 : 0) };
+    f.write(rec, 3);
   }
   f.close();
 }

@@ -24,7 +24,7 @@ void initPaths() {
   for (int o = 0; o < NUM_OUTPUTS; o++) {
     uint16_t n = 0;
     if (strandActive(o))   // a strand switched off has no line
-      for (int i = 0; i < ledCount[o]; i++) if (!lightHidden[o][i]) strandMap[o][n++] = i;
+      for (int i = 0; i < ledCount[o]; i++) if (!lightHidden[o][i] && !lightMirrored[o][i]) strandMap[o][n++] = i;
     strandLen[o] = n;
   }
   int p = 0;

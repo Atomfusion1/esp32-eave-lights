@@ -56,7 +56,7 @@
 #define OTA_PASSWORD AP_PASSWORD
 #endif
 
-#define FW_VERSION "0.40.0"
+#define FW_VERSION "0.41.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
@@ -249,9 +249,14 @@ uint16_t  zoneLen[MAX_ZONES];                     // lights in each zone (0 if u
 // zoneHidden = "never light" (e.g. the lead-in running down the wall): those lights stay
 // dark and are left out of the strand lines and the Whole house path, so effects start
 // at the eave. Find a light can still show them. zoneRank = position in the page's lists.
+// zoneMirror = "mirror of" another zone slot (-1 = none, v0.41.0): its lights show what the
+// source zone's lights show, 1st to 1st, ...; it isn't drawn itself and its lights are left
+// out of the strand lines (like hidden ones, but lit), e.g. a tree wound up and back down.
 uint8_t  zoneHidden[MAX_ZONES];
 uint8_t  zoneRank[MAX_ZONES];
+int8_t   zoneMirror[MAX_ZONES];
 bool     lightHidden[NUM_OUTPUTS][MAX_LEDS];   // built from the hidden zones
+bool     lightMirrored[NUM_OUTPUTS][MAX_LEDS]; // built from the mirror zones
 uint16_t strandMap[NUM_OUTPUTS][MAX_LEDS];     // strand line position -> light index
 uint16_t strandLen[NUM_OUTPUTS];               // visible lights per strand
 
