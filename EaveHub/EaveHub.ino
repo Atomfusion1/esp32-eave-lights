@@ -30,7 +30,7 @@
 
 // ===================== Settings for this hub =====================
 #define HUB_NAME        "Palm box"   // shown on the eave board's page (up to 19 characters)
-#define HUB_FW          "hub 1.0.2"
+#define HUB_FW          "hub 1.0.3"
 
 // Up to two strands. Strand letter as set on the eave board, and the GPIO it is wired to.
 // Set OUT2_STRAND to 0 if only one strand is connected.
@@ -47,6 +47,7 @@
 
 #define SIGNAL_LOST_MS  3000         // hold the last picture this long without frames
 #define FADE_OUT_MS     2000         // then fade out
+#define STAY_AFTER_LOST_MS 15000     // signal lost: keep listening on that channel this long first
 #define SCAN_STEP_MS    1300         // looking for the eave board: time per channel (it sends
                                      // at least once a second, so this always catches it)
 #define HUB_CHANNEL     0            // 0 = find the channel; 1-13 = always this one (the channel
@@ -233,7 +234,10 @@ void handleLink(uint32_t now) {
     linked = false;
     Serial.println("Signal lost, looking again...");
   }
-  if (!linked && !HUB_CHANNEL && now - scanMs >= SCAN_STEP_MS) {
+  // After losing the signal, keep listening on the same channel for STAY_AFTER_LOST_MS
+  // (a weak link drops out now and then; the channel itself rarely changes).
+  bool stay = lastHeardMs != 0 && (int32_t)(now - lastHeardMs) < STAY_AFTER_LOST_MS;
+  if (!linked && !HUB_CHANNEL && !stay && now - scanMs >= SCAN_STEP_MS) {
     scanMs = now;
     setChannel(channel % 13 + 1);
   }
