@@ -6,7 +6,14 @@ Project background, hardware facts, decisions and **current state / next steps**
 **Working with this user:**
 - Compile to check, commit, then tell the user it's ready. **The user uploads** (over Wi-Fi from their IDE). Don't upload unless asked in that session.
 - Ask before big UI changes: offer options and let the user pick.
-- Node.js isn't installed, so the JavaScript in `web_page.h` / `editor_page.h` can't be syntax-checked here. Re-read new JS carefully, especially closing brackets. If the user reports a broken page, ask for the browser Console (F12) error.
+- Node.js and Python aren't installed. **Check the page JavaScript with headless Edge after every page change** (it catches syntax errors that blank the whole page). In Git Bash, with `$S` = a scratch folder:
+  ```bash
+  awk '/R"rawhtml\(/{sub(/.*R"rawhtml\(/,""); p=1} p&&/\)rawhtml"/{sub(/\)rawhtml".*/,""); print; exit} p{print}' web_page.h > "$S/page.html"
+  "/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" --headless=new --disable-gpu --enable-logging=stderr --v=0 \
+    --virtual-time-budget=3000 --dump-dom "file:///$S/page.html" 2>&1 >/dev/null | grep CONSOLE | grep -v chrome-extension
+  ```
+  No output = no script errors (same for `editor_page.h`). If the user reports a broken page, ask for the browser Console (F12) error.
+- Careful with `sed` replacements containing `&` (it inserts the matched text): that broke the page in v0.35.0.
 
 ## Toolchain
 

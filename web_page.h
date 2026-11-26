@@ -683,7 +683,7 @@ $('modeSel').onchange=e=>send({mode:e.target.value});
 $('fsec').oninput=e=>{const m=modeById(cur().mode),v=+e.target.value;$('fsecVal').textContent=m.fsecFmt?m.fsecFmt(v):v+' s';sendSoon({fadeSeconds:v});};
 $('flip').oninput=e=>{$('flipVal').textContent=flipFmt(+e.target.value);sendSoon({flipEvery:+e.target.value});};
 const flipFmt=v=>{const s=v*5;return s<60?s+' s':Math.floor(s/60)+' min'+(s%60?' '+s%60+' s':'');};
-&$('rndVal').textContent=rndFmt(+e.target.value);sendSoon({random:+e.target.value});};
+$('rnd').oninput=e=>{$('rndVal').textContent=rndFmt(+e.target.value);sendSoon({random:+e.target.value});};
 const rndFmt=v=>v?v+'%':'off';
 $('fmin').oninput=e=>{const m=modeById(cur().mode),v=+e.target.value;$('fminVal').textContent=m.fminFmt?m.fminFmt(v,cur()):pct(v);sendSoon({fadeMin:v});};
 $('spd').oninput=e=>{const m=modeById(cur().mode),v=+e.target.value;$('spdVal').textContent=m.fmt?m.fmt(v):v;sendSoon({speed:v});};
