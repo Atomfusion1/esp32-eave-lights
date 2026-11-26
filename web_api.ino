@@ -58,7 +58,7 @@ const char* MODE_NAMES[MODE_COUNT] = {
   "solid", "fade", "test", "chase", "comet",
   "rainbow", "rainbowcycle", "wipe", "gradient", "stripes", "alternate", "colorcycle",
   "twinkle", "bounce", "center", "meteor", "running", "sparkle", "fire", "lightning", "strobe",
-  "custom", "anim", "sway"
+  "custom", "anim", "sway", "bulbs", "glitter", "blinkshift"
 };
 
 // "colorCount":N,"colors":["#RRGGBB",x4] (colors 2-5), without braces.

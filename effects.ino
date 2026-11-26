@@ -204,6 +204,9 @@ void drawChannel(int ch, uint32_t dtMs) {
     case MODE_CUSTOM:       drawCustom(ch);             break;   // patterns.ino
     case MODE_ANIM:         drawAnim(ch);               break;   // animations.ino
     case MODE_SWAY:         drawSway(ch);               break;
+    case MODE_BULBS:        drawBulbs(ch);              break;
+    case MODE_GLITTER:      drawGlitter(ch);            break;
+    case MODE_BLINKSHIFT:   drawBlinkShift(ch);         break;
   }
 }
 

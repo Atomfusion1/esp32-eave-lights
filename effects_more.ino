@@ -20,6 +20,9 @@
 //                   size = how far traveling strikes spread, background (off = see-through)
 //   Strobe          color, speed = flashes (speed/10 per second, max 10), background
 //   Sway            colors, size = stripe width (also how far it swings), speed/10 lights/s, reverse
+//   Twinkling bulbs colors repeated (size = lights per color), speed, fadeMin = lowest level
+//   Glitter bulbs   colors one per light, size = glints, speed = glint quickness
+//   Blink & shift   colors repeated (size = lights per color), speed = blink rate, direction
 //
 // Everything is calculated from settings and elapsed time; "random" looks come from
 // hash32(), so the same settings always give the same pattern.
@@ -415,4 +418,63 @@ void drawSway(int ch) {
     if (frac) c = blend(c, bandColor(s, k2 / band), frac);
     putLight(ch, i, c);
   }
+}
+
+// ---------- Multicolor bulbs (v0.28.0) ----------
+// The color list repeated along the line, `group` lights per color (1 = every light the
+// next color, like classic multicolor bulbs). shift moves the colors along.
+CRGB bulbColor(const LightState& s, int i, int group, int shift) {
+  return palColor(s, i / max(group, 1) + shift);
+}
+
+// Twinkling bulbs: each bulb breathes between fadeMin and full at its own pace
+// (2-6 s per breath at speed 10; speed 20 = twice as fast). size = lights per color.
+void drawBulbs(int ch) {
+  const LightState& s = states[ch];
+  int len = lineLength(ch);
+  uint32_t t = (uint32_t)((uint64_t)effectMs[ch] * s.speed / 10);
+  for (int i = 0; i < len; i++) {
+    uint32_t h = hash32(i * 0x9E3779B1UL + 7);
+    uint32_t period = 2000 + h % 4000;
+    uint8_t wave = sin8((uint8_t)((t % period) * 256 / period + (h >> 16)));
+    uint8_t level = lerp8by8(s.fadeMin, 255, wave);
+    putLight(ch, i, litColor(bulbColor(s, i, s.size, 0), s, level));
+  }
+}
+
+// Glitter: steady multicolor bulbs (one light per color) with quick white glints on
+// random bulbs. size = how many glints, speed = how quick each glint is (600-100 ms).
+void drawGlitter(int ch) {
+  const LightState& s = states[ch];
+  int len = lineLength(ch);
+  uint32_t glintMs = max(100, 600 - (int)s.speed * 5);
+  CRGB white = litColor(CRGB(255, 255, 255), s, 255);
+  for (int i = 0; i < len; i++) {
+    CRGB c = litColor(bulbColor(s, i, 1, 0), s, 255);
+    uint32_t tt = effectMs[ch] + hash32(i * 0x85EBCA6BUL + 3) % glintMs;   // own timing
+    uint32_t slot = tt / glintMs, tIn = tt % glintMs;
+    if (hash32(slot * 0x27D4EB2DUL + i * 0x165667B1UL) % 1000 < (uint32_t)s.size * 4) {
+      uint8_t g = 255 - tIn * 255 / glintMs;
+      c = blend(c, white, scale8(g, g));        // bright at once, quick fade
+    }
+    putLight(ch, i, c);
+  }
+}
+
+// Blink & shift: the bulbs are on, then dark for the last quarter of each blink; when
+// they come back on every bulb has moved one color along (direction setting = which
+// way). speed: 20000/speed ms per blink (10 = every 2 s). size = lights per color.
+void drawBlinkShift(int ch) {
+  const LightState& s = states[ch];
+  int len = lineLength(ch);
+  uint32_t period = max((uint32_t)200, 20000UL / max((int)s.speed, 1));
+  uint32_t n = effectMs[ch] / period, tIn = effectMs[ch] % period;
+  uint32_t onEnd = period - period / 4, edge = min((uint32_t)80, period / 10);
+  uint8_t level = 0;
+  if (tIn < edge)               level = tIn * 255 / edge;              // quick fade in
+  else if (tIn < onEnd - edge)  level = 255;
+  else if (tIn < onEnd)         level = (onEnd - tIn) * 255 / edge;    // quick fade out
+  if (!level) { fillLine(ch, CRGB(0, 0, 0)); return; }
+  int shift = (int)(n % 840);   // 840 divides evenly by every color count
+  for (int i = 0; i < len; i++) putLight(ch, i, litColor(bulbColor(s, i, s.size, shift), s, level));
 }
