@@ -72,6 +72,11 @@ select.picker{font-size:17px;font-weight:600;padding:12px}
 .chip{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:20px;border:1px solid var(--line);background:none;color:var(--text);cursor:pointer;font-size:14px}
 .chip .x{margin-left:2px;padding:0 4px;color:var(--muted);border-radius:8px}
 .chip .x:hover{color:var(--bad)}
+.chip.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+#onDisplay{margin-top:10px}
+#onDisplay .chip{padding:5px 10px;font-size:13px}
+.dotc{display:inline-block;width:11px;height:11px;border-radius:50%;border:1px solid #0006;margin-right:-3px}
+.onCover{font-size:12px;color:var(--muted);margin:6px 0 0}
 .dot{display:inline-block;width:10px;height:10px;border-radius:50%;border:1px solid rgba(128,128,128,.5)}
 .liveHead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
 .liveHead label{margin:0;flex:1}
@@ -130,6 +135,8 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <div class="photo" id="photoBox"><canvas id="photoCv"></canvas><button class="zoomReset" id="zoomReset" hidden title="Scroll the mouse wheel over the photo to zoom">Reset zoom</button></div>
 <div class="live" id="stripBox"></div>
 <p class="hint" id="liveHint"></p>
+<div class="chips" id="onDisplay"></div>
+<p class="onCover" id="onCover" hidden></p>
 <p class="err" id="locateBanner" hidden></p>
 </div>
 
@@ -415,7 +422,7 @@ function setTab(t){tab=t;store.set('eaveTab',t);
  if(t==='house'&&!editorFrame.src)editorFrame.src='/editor?embed=1';
  if(editorFrame.contentWindow)editorFrame.contentWindow.postMessage({eaveEditorActive:t==='house'},'*');
  if(t!=='house'&&layoutDirtyFromEditor){layoutDirtyFromEditor=false;loadLayout();}
- drawLive();}
+ renderOnDisplay();drawLive();}
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.t));
 let layoutDirtyFromEditor=false;
 window.addEventListener('message',e=>{if(e.data&&e.data.eaveEditorHeight){editorFrame.style.height=(e.data.eaveEditorHeight+20)+'px';layoutDirtyFromEditor=true;}});
@@ -477,6 +484,33 @@ const tapAt={};
   if(next===sel)return;                                           // Lights: copy its look here
   const o=partObj(next);if(o)pasteLook(lookOf(o),partName(next));});});
 
+// ---- On display: the parts that win at least one light on the house right now ----
+// Same drawing order as partLighting(), but only parts that are on. Uses the board's
+// state (not unapplied changes). Parts that are on but fully drawn over are listed apart.
+function topOnPart(o,i,zl){const key=o*1000+i,slots=[];let best=-1,hid=false;
+ zl.forEach(x=>{if(!x.s.has(key))return;if(x.z.hidden){hid=true;return;}slots.push(x.z.slot);if(x.z.on&&x.z.slot>best)best=x.z.slot;});
+ if(hid)return null;if(best>=0)return ZONE+best;
+ st.paths.forEach(p=>{if(p.on&&p.slot>best&&p.steps.some(s=>slots.includes(s.zone)))best=p.slot;});if(best>=0)return PATH+best;
+ if(st.house.on)return HOUSE;
+ return st.outputs[o]&&st.outputs[o].on?o:null;}
+function renderOnDisplay(){const box=$('onDisplay'),cov=$('onCover');if(!box||!st)return;
+ const zl=st.zones.map(z=>({z,s:new Set(parseRanges(z.ranges).map(l=>l[0]*1000+l[1]))}));
+ const count=new Map();
+ st.outputs.forEach((out,o)=>{for(let i=0;i<out.count;i++){const v=topOnPart(o,i,zl);if(v!==null)count.set(v,(count.get(v)||0)+1);}});
+ const order=[0,1,HOUSE].concat(st.paths.map(p=>PATH+p.slot),st.zones.map(z=>ZONE+z.slot));
+ const shown=order.filter(v=>count.has(v));
+ const covered=order.filter(v=>{const o=partObj(v);return o&&o.on&&!(v>=ZONE&&v<PATH&&o.hidden)&&!count.has(v);});
+ box.innerHTML=shown.length?shown.map(v=>{const o=partObj(v),m=modeById(o.mode);
+   const cols=m.colors===0?[]:[o.color].concat((o.colors||[]).slice(0,Math.max(0,(o.colorCount||1)-1))).slice(0,m.colors==='multi'?5:1);
+   return '<button class="chip'+(tab==='lights'&&v===sel?' sel':'')+'" data-v="'+v+'" title="'+count.get(v)+' lights · brightness '+pct(o.brightness)+' · tap to control it">'+
+    '<span>'+cols.map(c=>'<span class="dotc" style="background:'+c+'"></span>').join('')+'</span>'+
+    esc(partName(v))+' <span style="color:var(--muted)">· '+esc(m.name)+'</span></button>';}).join('')
+  :'<span class="hint" style="margin:0">Nothing is lit right now.</span>';
+ cov.hidden=!covered.length;
+ cov.textContent=covered.length?'On but fully drawn over by other parts: '+covered.map(partName).join(', '):'';
+ box.querySelectorAll('button[data-v]').forEach(b=>b.onclick=()=>{const v=+b.dataset.v;
+  if(tab!=='lights')setTab('lights');choosePart(v);});}
+
 // ---- Copy / paste a look (everything except on/off) ----
 function partObj(v){return v===HOUSE?st.house:v>=PATH?pathBySlot(v-PATH):v>=ZONE?zoneBySlot(v-ZONE):st.outputs[v===BOTH?0:v];}
 function partName(v){const o=partObj(v);return v===HOUSE?'Whole house':v===BOTH?'Both strands':v>=ZONE?(o?o.name:'?'):'Strand '+o.id;}
@@ -503,7 +537,7 @@ function show(s){st=s;
  $('onList').textContent=names.length?names.join(' · '):'Everything is off.';
  $('allOff').textContent=names.length?'All lights off':s.canAllOn?'All lights on (as before)':'Everything is off';
  $('allOff').disabled=!names.length&&!s.canAllOn;$('allOff').classList.toggle('on',!names.length&&s.canAllOn);
- renderPicker(s);
+ renderPicker(s);renderOnDisplay();
  const h=s.house,zonesOn=s.zones.filter(z=>z.on&&!z.hidden),pathsOn=s.paths.filter(p=>p.on);
  const coverStrands=(h.on?['Whole house']:[]).concat(pathsOn.map(p=>p.name),zonesOn.map(z=>z.name));
  const o=cur(),lastA='A'+s.outputs[0].count,lastB='B'+(s.outputs[1]?s.outputs[1].count:'');
