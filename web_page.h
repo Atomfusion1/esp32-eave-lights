@@ -225,7 +225,9 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <label>Saved looks <span id="lookTarget"></span></label>
 <div class="chips" id="looks"></div>
 <p class="hint" id="looksEmpty">No saved looks yet. Set up a look below, then save it.</p>
-<div class="row" style="margin-top:12px"><button class="btn" id="saveLook">Save current look…</button></div>
+<div class="row" style="margin-top:12px"><button class="btn" id="saveLook">Save current look…</button><button class="btn" id="copyLook" title="Copy this part's look">Copy look</button><button class="btn" id="pasteLook">Paste look</button></div>
+<p class="hint" style="margin:8px 0 0">Tip: tap another section on the house photo to copy its look to what you're controlling.</p>
+<p class="hint" id="copyHint" hidden style="color:var(--accent);font-weight:600"></p>
 <p class="err" id="lookErr" hidden></p>
 </div>
 <div class="card">
@@ -471,7 +473,28 @@ const tapAt={};
  el.addEventListener('click',e=>{if(painting||!st)return;const d0=tapAt[box];
   if(!d0||Math.hypot(e.clientX-d0.x,e.clientY-d0.y)>6)return;   // a pan or pinch, not a tap
   const d=nearestDot(box,e);if(!d)return;const next=partLighting(d.o,d.i,d.item);if(next===null)return;
-  if(tab!=='lights')setTab('lights');choosePart(next);});});
+  if(tab!=='lights'){setTab('lights');choosePart(next);return;}   // Home: jump to it
+  if(next===sel)return;                                           // Lights: copy its look here
+  const o=partObj(next);if(o)pasteLook(lookOf(o),partName(next));});});
+
+// ---- Copy / paste a look (everything except on/off) ----
+function partObj(v){return v===HOUSE?st.house:v>=PATH?pathBySlot(v-PATH):v>=ZONE?zoneBySlot(v-ZONE):st.outputs[v===BOTH?0:v];}
+function partName(v){const o=partObj(v);return v===HOUSE?'Whole house':v===BOTH?'Both strands':v>=ZONE?(o?o.name:'?'):'Strand '+o.id;}
+function lookOf(o){const h=c=>String(c||'#000000').replace('#','').toUpperCase();
+ const l={color:h(o.color),brightness:o.brightness,mode:o.mode,fadeSeconds:o.fadeSeconds,fadeMin:o.fadeMin,speed:o.speed,size:o.size,
+  reverse:o.reverse?1:0,bgOn:o.bgOn?1:0,bgColor:h(o.bgColor),colorCount:o.colorCount};
+ (o.colors||[]).slice(0,4).forEach((c,i)=>l['color'+(i+2)]=h(c));return l;}
+// Loads a look into what you're controlling: unapplied (preview + Apply/Discard), or at once in instant mode.
+function pasteLook(l,from){if(!st||!l)return;send(Object.assign({},l));
+ showCopyHint((from?'Copied the look from '+from:'Pasted the look')+' to '+curName()+(applyMode==='apply'?': Apply or Discard below.':'.'));}
+let copyHintTimer=null;
+function showCopyHint(t){const e=$('copyHint');e.textContent=t;e.hidden=false;clearTimeout(copyHintTimer);copyHintTimer=setTimeout(()=>e.hidden=true,6000);}
+let lookClip=store.get('eaveClip',null);
+function renderClip(){$('pasteLook').disabled=!lookClip;$('pasteLook').title=lookClip?'Paste the look copied from '+lookClip.name:'Copy a look first';}
+$('copyLook').onclick=()=>{if(!st)return;lookClip={name:curName(),look:lookOf(cur())};store.set('eaveClip',lookClip);renderClip();
+ showCopyHint('Copied the look of '+lookClip.name+'. Pick another part and press Paste look.');};
+$('pasteLook').onclick=()=>{if(lookClip)pasteLook(lookClip.look,lookClip.name);};
+renderClip();
 
 function show(s){st=s;
  if((zoneSel()&&(!zoneBySlot(sel-ZONE)||zoneBySlot(sel-ZONE).hidden))||(pathSel()&&!pathBySlot(sel-PATH))||(sel>=0&&sel<ZONE&&sel>=s.outputs.length)||(sel<HOUSE))sel=0;
@@ -1391,7 +1414,7 @@ function drawLive(){const hasPhoto=!!(layout&&layout.views&&layout.views.length)
  $('liveMode').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',b.dataset.lm===(usePhoto?'photo':'strip')));
  $('photoBox').hidden=!usePhoto;$('stripBox').hidden=usePhoto;$('photoViews').hidden=!usePhoto;
  $('liveHint').textContent=liveMode==='photo'&&!hasPhoto?'No house photos yet: add them in the House tab. Showing the strip for now.':
-  (usePhoto?'':'As seen from the street. Screen brightness is approximate. ')+'Tap a light to edit what is lighting it.';
+  (usePhoto?'':'As seen from the street. Screen brightness is approximate. ')+(tab==='lights'?'Tap a light to copy its look to '+(st?curName():'this part')+'.':'Tap a light to edit what is lighting it.');
  // while painting: the controlled lights show the painting, everything else stays live
  const src=painting&&patternFrame?paintComposite():frame;
  $('paintBadge').hidden=!painting;$('paintBadge').textContent='PAINTING PATTERN '+paintPattern;
