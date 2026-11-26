@@ -30,7 +30,7 @@
 
 // ===================== Settings for this hub =====================
 #define HUB_NAME        "Palm box"   // shown on the eave board's page (up to 19 characters)
-#define HUB_FW          "hub 1.0.0"
+#define HUB_FW          "hub 1.0.2"
 
 // Up to two strands. Strand letter as set on the eave board, and the GPIO it is wired to.
 // Set OUT2_STRAND to 0 if only one strand is connected.
@@ -47,7 +47,10 @@
 
 #define SIGNAL_LOST_MS  3000         // hold the last picture this long without frames
 #define FADE_OUT_MS     2000         // then fade out
-#define SCAN_STEP_MS    300          // looking for the eave board: time per channel
+#define SCAN_STEP_MS    1300         // looking for the eave board: time per channel (it sends
+                                     // at least once a second, so this always catches it)
+#define HUB_CHANNEL     0            // 0 = find the channel; 1-13 = always this one (the channel
+                                     // shown on the eave board's page under Radio hubs)
 // ================================================================
 
 #define RADIO_MAGIC        0x52455645UL   // "EVER"
@@ -106,7 +109,7 @@ uint16_t lastSeq[NUM_OUTS]     = { 0 };
 bool     seqKnown[NUM_OUTS]    = { false };
 uint32_t seqSpan[NUM_OUTS]     = { 0 };   // frames sent by the eave board (from seq numbers)
 volatile uint32_t lastHeardMs = 0;        // any frame from the eave board
-int32_t  rssiAvg16 = -90 * 16;            // running average, x16
+int32_t  rssiAvg16 = 0;                   // running average, x16 (0 = no packet yet)
 
 uint16_t shownCount[NUM_OUTS] = { 0 };
 bool     darkDone[NUM_OUTS]   = { false };   // faded out after losing the signal
@@ -122,17 +125,24 @@ int outputFor(int strand) {
 }
 
 // ESP-NOW callback (Wi-Fi task): copies colors of our strands into staged[].
+volatile uint32_t packetsAny = 0, packetsOld = 0;   // diagnostics: any ESP-NOW packet / wrong version
+
 void onRecv(const esp_now_recv_info_t* info, const uint8_t* data, int len) {
+  packetsAny++;
   if (len < (int)sizeof(RadioFrameHdr)) return;
   RadioFrameHdr h;
   memcpy(&h, data, sizeof(h));
+  if (h.magic == RADIO_MAGIC && h.version != RADIO_VERSION) packetsOld++;
   if (h.magic != RADIO_MAGIC || h.version != RADIO_VERSION || h.type != RADIO_TYPE_FRAME) return;
   if ((int)sizeof(h) + h.n * 3 > len) return;
   uint32_t now = millis();
   lastHeardMs = now;
   int k = outputFor(h.strand);
   portENTER_CRITICAL(&mux);
-  if (info->rx_ctrl) rssiAvg16 += (info->rx_ctrl->rssi * 16 - rssiAvg16) / 8;
+  if (info->rx_ctrl) {
+    int32_t r16 = info->rx_ctrl->rssi * 16;
+    rssiAvg16 = rssiAvg16 ? rssiAvg16 + (r16 - rssiAvg16) / 8 : r16;   // first packet: take it as is
+  }
   if (k >= 0) {
     const uint8_t* p = data + sizeof(h);
     for (int i = 0; i < h.n; i++) {
@@ -204,16 +214,18 @@ void setup() {
     ESP.restart();
   }
   esp_now_register_recv_cb(onRecv);
-  setChannel(1);
+  setChannel(HUB_CHANNEL ? HUB_CHANNEL : 1);
   addBroadcastPeer();
   Serial.print("This hub's address: ");
   Serial.println(WiFi.macAddress());
-  Serial.println("Looking for the eave board...");
+  if (HUB_CHANNEL) Serial.printf("Listening on channel %d only (HUB_CHANNEL)\n", HUB_CHANNEL);
+  Serial.println("Looking for the eave board... (it sends only while a strand is set to Radio)");
 }
 
 // Looks for the eave board on each channel in turn; stays once heard.
 void handleLink(uint32_t now) {
-  bool heard = now - lastHeardMs < SIGNAL_LOST_MS && lastHeardMs != 0;
+  // signed: the radio callback can set lastHeardMs a moment after "now" was read
+  bool heard = lastHeardMs != 0 && (int32_t)(now - lastHeardMs) < SIGNAL_LOST_MS;
   if (heard && !linked) {
     linked = true;
     Serial.printf("Linked to the eave board on channel %u\n", channel);
@@ -221,7 +233,7 @@ void handleLink(uint32_t now) {
     linked = false;
     Serial.println("Signal lost, looking again...");
   }
-  if (!linked && now - scanMs >= SCAN_STEP_MS) {
+  if (!linked && !HUB_CHANNEL && now - scanMs >= SCAN_STEP_MS) {
     scanMs = now;
     setChannel(channel % 13 + 1);
   }
@@ -268,7 +280,8 @@ void showLights(uint32_t now) {
   bool any = false;
   for (int k = 0; k < NUM_OUTS; k++) {
     portENTER_CRITICAL(&mux);
-    uint32_t age = now - lastFrameMs[k];
+    int32_t ageS = (int32_t)(now - lastFrameMs[k]);   // can be just below 0 (see handleLink)
+    uint32_t age = ageS > 0 ? ageS : 0;
     bool dirty = stagedDirty[k];
     uint16_t count = stagedCount[k];
     if (dirty) memcpy(leds[k], staged[k], count * sizeof(CRGB));
@@ -331,6 +344,7 @@ void loop() {
     printMs = now;
     if (linked) Serial.printf("Linked, channel %u, signal %d dBm, %s%% of frames\n", channel, (int)(rssiAvg16 / 16),
                               pct > 100 ? "?" : String(pct).c_str());
-    else Serial.printf("Looking for the eave board (channel %u)\n", channel);
+    else Serial.printf("Looking for the eave board (channel %u); ESP-NOW packets heard: %u%s\n", channel, (unsigned)packetsAny,
+                       packetsOld ? " (some from a different radio version: update both boards)" : "");
   }
 }
