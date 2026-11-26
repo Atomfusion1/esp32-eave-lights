@@ -16,7 +16,8 @@
 //   Running lights  color, size = wave length /2, speed, direction, background
 //   Sparkle         color 1 = base, color 2 (or white) = sparkles, size = density, speed
 //   Fire / candle   color, speed = flicker speed
-//   Lightning       color (flash), speed = how often, background between flashes
+//   Lightning       colors (1 = most strikes, others now and then), speed = how often,
+//                   size = how far traveling strikes spread, background (off = see-through)
 //   Strobe          color, speed = flashes (speed/10 per second, max 10), background
 //   Sway            colors, size = stripe width (also how far it swings), speed/10 lights/s, reverse
 //
@@ -307,32 +308,81 @@ void drawFire(int ch) {
   }
 }
 
+// Lightning (v0.27.0). One strike per time slot (speed = how often), at a random moment:
+// a faint flicker (the leader), the main flash, often 1-3 restrikes with irregular dark
+// gaps, then a short afterglow. Half the strikes light the whole line at once (sheet
+// lightning); the others start at a random spot and race outward along the line, size =
+// how far (30 = the whole line). Each strike is color 1, or now and then another color
+// from the list. The flash adds to what's there, so it lights up the background color.
+// Background off = see-through: between flashes the layers underneath show, e.g. a
+// candle flicker on Whole house under lightning on a path. (A strand has nothing
+// underneath, so it's dark there.) Same settings + same time = same strikes, so lines
+// that start together (a scene) strike together.
+
+// Brightness (0-255) of strike h, t ms after it starts (0 = over). stroke = which flash.
+uint8_t strikeLevel(uint32_t h, uint32_t t, int& stroke) {
+  stroke = 0;
+  uint32_t lead = 20 + (h & 3) * 20;                       // leader flicker, 20-80 ms
+  if (t < lead) return ((t / 10 + (h >> 2)) & 1) ? 50 : 15;
+  t -= lead;
+  static const uint8_t STROKES[8] = { 1, 2, 2, 3, 3, 2, 4, 3 };   // mostly double/triple
+  int n = STROKES[(h >> 8) & 7];
+  uint32_t start = 0;
+  for (int j = 0; j < n; j++) {
+    uint32_t hj = hash32(h ^ (j * 0x68E31DA4UL + 1));
+    uint32_t on    = 30 + (hj & 3) * 15;                   // full brightness, 30-75 ms
+    uint32_t decay = 40 + ((hj >> 2) & 3) * 20;            // then dims, 40-100 ms
+    uint32_t gap   = 40 + ((hj >> 4) & 7) * 20;            // dark before the next, 40-180 ms
+    uint8_t  peak  = (j == 0) ? 255 : 170 + ((hj >> 8) & 63);   // restrikes a bit dimmer
+    stroke = j;
+    if (t < start + on) return peak;
+    if (t < start + on + decay) return lerp8by8(peak, 30, (t - start - on) * 255 / decay);
+    start += on + decay;
+    if (j < n - 1) {
+      if (t < start + gap) return ((t / 20 + hj) % 3 == 0) ? 35 : 10;   // flickering gap
+      start += gap;
+    }
+  }
+  const uint32_t GLOW = 250;                               // afterglow
+  if (t < start + GLOW) return 30 - (t - start) * 30 / GLOW;
+  return 0;
+}
+
 void drawLightning(int ch) {
   const LightState& s = states[ch];
   int len = lineLength(ch);
+  bool seeThrough = !s.bgOn && ch >= NUM_OUTPUTS;
   CRGB base = bgOrOff(s);
-  uint32_t slotMs = 60000UL / s.speed;                  // one strike per slot
+  if (!seeThrough) fillLine(ch, base);
+
+  uint32_t slotMs = 60000UL / max((int)s.speed, 1);      // one strike per slot
   uint32_t slot = effectMs[ch] / slotMs, tIn = effectMs[ch] % slotMs;
   uint32_t h = hash32(slot * 0x9E3779B1UL + 17);
   uint32_t strikeAt = h % max(slotMs / 2, (uint32_t)1);
-  uint8_t level = 0;
-  if (tIn >= strikeAt) {
-    uint32_t t = tIn - strikeAt, start = 0;
-    int flashes = 1 + (h >> 8) % 3;
-    for (int j = 0; j < flashes; j++) {
-      uint32_t dur = 40 + ((h >> (4 + j * 3)) & 7) * 15;
-      if (t >= start && t < start + dur) level = (j == 0) ? 255 : 170;
-      start += dur + 60 + ((h >> (20 + j * 2)) & 3) * 40;
-    }
+  if (tIn < strikeAt || len == 0) return;
+  uint32_t t = tIn - strikeAt;
+  int stroke;
+  uint8_t level = strikeLevel(h, t, stroke);
+  if (!level) return;
+
+  // color: color 1 most of the time, sometimes another from the list
+  uint32_t hc = hash32(h + 99);
+  int k = (s.colorCount <= 1 || hc % 100 < 60) ? 0 : 1 + (int)(hc % (s.colorCount - 1));
+  CRGB col = palColor(s, k);
+
+  // where: the whole line, or spreading from a random spot (about 0.8 lights per ms)
+  bool sheet = (h >> 12) & 1;
+  int origin = (h >> 16) % len;
+  int reach = sheet ? len : max(1, len * (int)s.size / SIZE_MAX);
+  int front = sheet ? len : (int)min((uint32_t)reach, t * 4 / 5 + 1);
+  for (int i = 0; i < len; i++) {
+    int d = abs(i - origin);
+    if (d > front) continue;
+    uint8_t lv = level;
+    if (!sheet) lv = scale8(lv, 255 - d * 128 / (reach + 1));             // dimmer toward the ends
+    lv = scale8(lv, 200 + (hash32(h + i * 31 + stroke * 7919) & 55));    // a bit ragged
+    lineLight(ch, i) += litColor(col, s, lv);
   }
-  // some strikes light the whole line, others only a section of it
-  int a = 0, b = len;
-  if ((h >> 12) & 1) {
-    a = len ? (h >> 16) % len : 0;
-    b = min(len, a + max(len / 3, 1));
-  }
-  CRGB flash = litColor(s.color, s, level);
-  for (int i = 0; i < len; i++) putLight(ch, i, (level && i >= a && i < b) ? flash : base);
 }
 
 void drawStrobe(int ch) {
