@@ -133,8 +133,13 @@ ESP32_Eave_Lights/              folder name must equal the main sketch name
                                 drop-down from the MODES table, color list, settings fold-out,
                                 saved looks, Custom painting tools),
                                 House (editor in an iframe, /editor?embed=1),
-                                Setup (fold-outs: strands, saved colors, find, zones, paths,
-                                backup, firmware)
+                                Setup: search box + grouped fold-outs, ONE TOPIC EACH (v0.40.0):
+                                Lights & wiring (Strands, Power limits, Radio hubs, Board LED),
+                                Layout (Zones, Paths, Find a light), Colors (Saved colors),
+                                System (Backup & restore, Firmware update, Restart). A new
+                                setting gets its own fold-out in the right group (with data-keys
+                                search words and a status on its closed header): don't pile
+                                it into an existing one.
   editor_page.h                 House view editor at /editor: photos, sections drawn along the
                                 eave with evenly spaced lights, bends, hidden parts, per-section
                                 look; Live view with downlight scallops (drawLight() is

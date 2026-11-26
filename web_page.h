@@ -91,6 +91,8 @@ select.picker{font-size:17px;font-weight:600;padding:12px}
 .hint{color:var(--muted);font-size:12px;margin:8px 0 0}
 .err{color:var(--bad);font-size:13px;margin:8px 0 0}
 details.fold{background:var(--card);border:1px solid var(--line);border-radius:14px;margin:14px 0}
+.grp{color:var(--muted);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;margin:22px 4px -4px}
+[data-tab="setup"] details.fold{margin:10px 0}
 details.fold>summary{cursor:pointer;padding:14px 16px;font-weight:600;font-size:15px;list-style:none;display:flex;align-items:center;gap:8px}
 details.fold>summary::-webkit-details-marker{display:none}
 details.fold>summary::before{content:'▸';color:var(--muted);transition:transform .15s}
@@ -329,7 +331,11 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 
 <!-- ===== Setup ===== -->
 <section data-tab="setup">
-<details class="fold" data-fold="strands"><summary>Strands <small id="strandSum"></small></summary><div class="body">
+<input id="setupSearch" type="search" placeholder="Search setup, e.g. power, radio, zone, backup…" style="margin:12px 0 2px">
+<p class="hint" id="setupNoMatch" hidden style="margin:8px 4px">Nothing in Setup matches that.</p>
+
+<h3 class="grp" data-grp="lights">Lights &amp; wiring</h3>
+<details class="fold" data-fold="strands" data-grp="lights" data-keys="strand strands lights count length pin gpio wired radio color order rgb rbg grb name off restart"><summary>Strands <small id="strandSum"></small></summary><div class="body">
 <p class="hint" style="margin:0 0 8px">Up to 6 strands, A–F. A and B are the eaves (Whole house, Both strands). Tap a strand to change its name, number of lights (1–400), type, pin and color order. Zones, paths and the house view follow these settings.</p>
 <div id="strandList"></div>
 <div class="sub" id="strandForm" hidden>
@@ -354,9 +360,14 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <div class="row" style="margin-top:10px"><button class="btn primary" id="stSave">Save</button><button class="btn" id="stCancel">Cancel</button></div>
 </div>
 <p class="err" id="cntErr" hidden></p>
-<div class="sub">
-<label>Power limits (all strands) <small id="capSumTxt"></small></label>
-<p class="hint" style="margin:0 0 8px">The most each light is sent, after brightness. The first values (240 per color, 400 for R+G+B, so white is about 52 %) were measured on the eave strands to keep their current safe. Higher = brighter white, but more current: check the power supply and wires first. A strand with its own power limit (Edit) uses that instead.</p>
+<div class="sub" id="restartBox" hidden>
+<p class="hint" style="margin:0 0 8px">⚠ New pin settings start after a restart (the lights go dark for a few seconds).</p>
+<button class="btn primary" id="restartBtn">Restart now</button>
+</div>
+</div></details>
+
+<details class="fold" data-fold="power" data-grp="lights" data-keys="power limits limit caps brightness current amps watts supply white max red green blue"><summary>Power limits <small id="capSumTxt"></small></summary><div class="body">
+<p class="hint" style="margin:0 0 8px">The most each light is sent, after brightness. The first values (240 per color, 400 for R+G+B, so white is about 52 %) were measured on the eave strands to keep their current safe. Higher = brighter white, but more current: check the power supply and wires first. A strand with its own power limit (Strands → Edit) uses that instead.</p>
 <div class="row" style="align-items:end">
 <div><label>Red</label><input id="capR" type="number" min="1" max="255"></div>
 <div><label>Green</label><input id="capG" type="number" min="1" max="255"></div>
@@ -364,9 +375,18 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <div><label>R+G+B</label><input id="capS" type="number" min="1" max="765"></div>
 </div>
 <div class="row" style="margin-top:8px"><button class="btn primary" id="capSave">Save limits</button><button class="btn" id="capReset">Back to measured values</button></div>
-</div>
-<div class="sub">
-<label>Board LED (test light)</label>
+<p class="err" id="capErr" hidden></p>
+</div></details>
+
+<details class="fold" data-fold="radio" data-grp="lights" data-keys="radio hub hubs espnow esp-now wireless signal dbm range frames speed channel"><summary>Radio hubs <small id="radioSum"></small></summary><div class="body">
+<p class="hint" style="margin:0 0 8px">Radio strands are sent to hub boards near the lights (a second ESP32 running EaveHub). Each hub reports how well it hears this board, every second: a good place for a hub shows about −70 dBm or better and 95 % or more of the frames.</p>
+<div id="hubList"></div>
+<div class="row" style="align-items:end;margin-top:8px"><div><label>Radio speed</label><select id="radioRate">
+<option value="long">Long range (1 Mbps, up to 25 frames/s)</option><option value="fast">Fast (6 Mbps, up to 50 frames/s, shorter reach)</option></select></div></div>
+<p class="err" id="radioErr" hidden></p>
+</div></details>
+
+<details class="fold" data-fold="boardled" data-grp="lights" data-keys="board led test light rgb gpio 48 38 flood mimic"><summary>Board LED (test light) <small id="bledSum"></small></summary><div class="body">
 <p class="hint" style="margin:0 0 8px">The board's own small RGB LED can copy one light, e.g. a flood light, so you can try effects before the real lights are connected. The strand's pin keeps sending as normal. Shown at 25 % (it is very bright up close).</p>
 <div class="row" style="align-items:end">
 <div><label>Copies strand</label><select id="bledStrand"></select></div>
@@ -374,36 +394,11 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <div><label>LED pin</label><select id="bledPin"><option value="48">GPIO 48</option><option value="38">GPIO 38</option></select></div>
 <button class="btn primary" id="bledSave">Save</button>
 </div>
-</div>
-<div class="sub">
-<label>Radio hubs (ESP-NOW) <small id="radioSum"></small></label>
-<p class="hint" style="margin:0 0 8px">Radio strands are sent to hub boards near the lights (a second ESP32 running EaveHub). Each hub reports how well it hears this board, every second: a good place for a hub shows about −70 dBm or better and 95 % or more of the frames.</p>
-<div id="hubList"></div>
-<div class="row" style="align-items:end;margin-top:8px"><div><label>Radio speed</label><select id="radioRate">
-<option value="long">Long range (1 Mbps, up to 25 frames/s)</option><option value="fast">Fast (6 Mbps, up to 50 frames/s, shorter reach)</option></select></div></div>
-</div>
-<div class="sub" id="restartBox" hidden>
-<p class="hint" style="margin:0 0 8px">⚠ New pin settings start after a restart (the lights go dark for a few seconds).</p>
-<button class="btn primary" id="restartBtn">Restart now</button>
-</div>
+<p class="err" id="bledErr" hidden></p>
 </div></details>
 
-<details class="fold" data-fold="colors"><summary>Saved colors <small id="savedSum"></small></summary><div class="body">
-<p class="hint" style="margin:0 0 10px">These show up as suggestions in every color picker (Chrome/Edge) and as swatches when painting. Up to 12.</p>
-<div class="chips" id="savedChips"></div>
-<div class="row" style="margin-top:10px;align-items:center"><input type="color" id="savedNew" value="#ff8c3c" style="height:44px"><button class="btn primary" id="savedAdd">Add color</button></div>
-</div></details>
-
-<details class="fold" data-fold="find"><summary>Find a light</summary><div class="body">
-<p class="hint" style="margin:0 0 10px">Lights only the chosen light (green) so you can see where it is. Turns itself off after 5 minutes.</p>
-<div class="seg" id="findStrand"></div>
-<div class="row" style="margin-top:10px">
-<button class="btn" id="findMinus">−</button><input id="findNum" type="number" min="1" value="1"><button class="btn" id="findPlus">+</button>
-</div>
-<div class="row" style="margin-top:10px"><button class="btn primary" id="findShow">Show light</button><button class="btn" id="findStop">Stop</button></div>
-</div></details>
-
-<details class="fold" data-fold="zones"><summary>Zones <small id="zoneSum"></small></summary><div class="body">
+<h3 class="grp" data-grp="layout">Layout</h3>
+<details class="fold" data-fold="zones" data-grp="layout" data-keys="zone zones ranges never light hidden porch section"><summary>Zones <small id="zoneSum"></small></summary><div class="body">
 <p class="hint" style="margin:0 0 10px">A zone is a name plus lights, e.g. <b>A1-12</b> or <b>A1-12, B30-65</b>. <b>A12-1</b> runs backwards. <b>Click a zone</b> to light it white for 10 seconds. Zones that are on are drawn on top of everything else. <b>↑ ↓</b> set the order zones are listed in.</p>
 <div id="zoneList"></div>
 <p class="hint" id="noZones">No zones yet.</p>
@@ -420,7 +415,7 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 </div>
 </div></details>
 
-<details class="fold" data-fold="paths"><summary>Paths <small id="pathSum"></small></summary><div class="body">
+<details class="fold" data-fold="paths" data-grp="layout" data-keys="path paths order sweep gap reverse jump"><summary>Paths <small id="pathSum"></small></summary><div class="body">
 <p class="hint" style="margin:0 0 10px">A path runs an effect through zones in the order you pick. ⇄ runs a zone backwards. <b>Gap</b> adds invisible lights after a zone so the effect disappears for a moment, like a jump. Leave a zone out to skip it.</p>
 <div id="pathList"></div>
 <p class="hint" id="noPaths">No paths yet.</p>
@@ -437,19 +432,41 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 </div>
 </div></details>
 
-<details class="fold" data-fold="backup"><summary>Backup &amp; restore</summary><div class="body">
+<details class="fold" data-fold="find" data-grp="layout" data-keys="find light locate where number which"><summary>Find a light</summary><div class="body">
+<p class="hint" style="margin:0 0 10px">Lights only the chosen light (green) so you can see where it is. Turns itself off after 5 minutes.</p>
+<div class="seg" id="findStrand"></div>
+<div class="row" style="margin-top:10px">
+<button class="btn" id="findMinus">−</button><input id="findNum" type="number" min="1" value="1"><button class="btn" id="findPlus">+</button>
+</div>
+<div class="row" style="margin-top:10px"><button class="btn primary" id="findShow">Show light</button><button class="btn" id="findStop">Stop</button></div>
+</div></details>
+
+<h3 class="grp" data-grp="colors">Colors</h3>
+<details class="fold" data-fold="colors" data-grp="colors" data-keys="saved colors swatches palette picker"><summary>Saved colors <small id="savedSum"></small></summary><div class="body">
+<p class="hint" style="margin:0 0 10px">These show up as suggestions in every color picker (Chrome/Edge) and as swatches when painting. Up to 12.</p>
+<div class="chips" id="savedChips"></div>
+<div class="row" style="margin-top:10px;align-items:center"><input type="color" id="savedNew" value="#ff8c3c" style="height:44px"><button class="btn primary" id="savedAdd">Add color</button></div>
+</div></details>
+
+<h3 class="grp" data-grp="system">System</h3>
+<details class="fold" data-fold="backup" data-grp="system" data-keys="backup restore save file download copy"><summary>Backup &amp; restore</summary><div class="body">
 <p class="hint" style="margin:0 0 10px">One file with everything: strand lengths, strand and Whole house settings, zones, paths, saved looks, scenes, house layout and photos. Keep it on your PC. Restoring replaces all of these on this board.</p>
 <div class="row"><button class="btn primary" id="backupBtn">Download backup</button><button class="btn" id="restoreBtn">Restore from file…</button></div>
 <input type="file" id="restoreFile" accept=".json,application/json" hidden>
 <p class="hint" id="backupStatus"></p>
 </div></details>
 
-<details class="fold" data-fold="firmware"><summary>Firmware update <small id="fwSum"></small></summary><div class="body">
+<details class="fold" data-fold="firmware" data-grp="system" data-keys="firmware update upload version ota bin"><summary>Firmware update <small id="fwSum"></small></summary><div class="body">
 <p class="hint" style="margin:0 0 10px">Running v<span id="fwVer"></span>. Easiest: in the Arduino IDE pick <b>Tools → Port → eavelights</b> (network) and Upload. Or here: in the IDE use <b>Sketch → Export compiled Binary</b>, then choose the <b>.bin</b> from the sketch folder (not the merged/bootloader ones). If an update fails, the current firmware keeps running.</p>
 <input type="file" id="fwFile" accept=".bin">
 <input type="password" id="fwPass" placeholder="Update password (OTA_PASSWORD in secrets.h)" style="margin-top:8px">
 <button class="btn primary" id="fwGo" style="margin-top:10px">Upload firmware</button>
 <p class="hint" id="fwStatus"></p>
+</div></details>
+
+<details class="fold" data-fold="restart" data-grp="system" data-keys="restart reboot reset start"><summary>Restart</summary><div class="body">
+<p class="hint" style="margin:0 0 10px">Restarts the board, e.g. to start a new strand pin. The lights go dark for a few seconds and come back as they were.</p>
+<button class="btn" id="restartBtn2">Restart now</button>
 </div></details>
 <p class="err" id="storageWarn" hidden>Storage not found, so zones, scenes and saved looks are lost on restart. Use Tools → Partition Scheme → 16M Flash (3MB APP/9.9MB FATFS).</p>
 </section>
@@ -1037,15 +1054,17 @@ function stCapHint(){const on=$('stCapOn').checked;$('stCapBox').hidden=!on;
   :g?'Uses the global limits: white about '+whitePct(g.red,g.green,g.blue,g.sum)+' %.':'';}
 ['stCapOn','stCapColor','stCapSum'].forEach(id=>$(id).addEventListener('input',stCapHint));
 function renderRadio(s){const r=s.radio||{hubs:[]},hs=r.hubs||[];
- $('radioSum').textContent=r.ok?'channel '+r.channel+' · '+(hs.length?hs.length+' hub'+(hs.length>1?'s':''):'no hubs heard'):'radio off';
+ // closed header: the weakest hub's signal (what matters), or why there is none
+ const worst=hs.slice().sort((a,b)=>a.rssi-b.rssi)[0];
+ $('radioSum').textContent=!r.ok?'radio off':worst?(hs.length>1?hs.length+' hubs, weakest ':'')+(worst.name||'hub')+' '+worst.rssi+' dBm'+(worst.pct==null?'':' · '+worst.pct+' %'):'no hubs heard · channel '+r.channel;
  $('hubList').innerHTML=hs.length?hs.map(h=>'<div class="zoneRow"><div>'+hubText(h)+'<small>drives strand'+(h.strands.length>1?'s ':' ')+(h.strands.split('').join(', ')||'—')+
    ' · '+esc(h.mac)+(h.fw?' · '+esc(h.fw):'')+'</small></div></div>').join('')
   :'<p class="hint" style="margin:0">No hub heard yet. A hub only finds this board once at least one strand is set to Radio.</p>';
  if(document.activeElement!==$('radioRate'))$('radioRate').value=r.rate||'long';}
 // While Setup > Strands is open, refresh every 3 s so the hubs' signal stays live (range test).
-setInterval(()=>{const f=document.querySelector('details[data-fold="strands"]');
- if(tab==='setup'&&f&&f.open&&!document.hidden)fetch('/api/state').then(r=>r.json()).then(show).catch(()=>{});},3000);
-$('radioRate').onchange=async e=>{const j=await post('/api/strands',{radioRate:e.target.value});if(j.error)showErr('cntErr',j.error);else show(j);};
+setInterval(()=>{const open=['strands','radio'].some(k=>{const f=document.querySelector('details[data-fold="'+k+'"]');return f&&f.open&&!f.hidden;});
+ if(tab==='setup'&&open&&!document.hidden)fetch('/api/state').then(r=>r.json()).then(show).catch(()=>{});},3000);
+$('radioRate').onchange=async e=>{const j=await post('/api/strands',{radioRate:e.target.value});if(j.error)showErr('radioErr',j.error);else{showErr('radioErr');show(j);}};
 function renderStrands(s){
  $('strandSum').textContent=s.outputs.filter(o=>o.enabled).map(o=>o.id+' '+o.count).join(' · ');
  $('strandList').innerHTML=s.outputs.map(o=>'<div class="zoneRow click'+(editStrand===o.id?' showing':'')+'" data-st="'+o.id+'"><div>'+esc(strandName(o))+
@@ -1059,7 +1078,8 @@ function renderStrands(s){
   $('bledStrand').innerHTML='<option value="off">Off</option>'+s.outputs.map(o=>'<option value="'+o.id+'">'+esc(strandName(o))+'</option>').join('');
   $('bledStrand').value=b.strand||'off';}
  if(document.activeElement!==$('bledLight'))$('bledLight').value=b.light||1;
- if(document.activeElement!==$('bledPin'))$('bledPin').value=String(b.pin||48);}
+ if(document.activeElement!==$('bledPin'))$('bledPin').value=String(b.pin||48);
+ $('bledSum').textContent=b.strand?'copies '+b.strand+(b.light||1)+(b.running?'':' (after restart)'):'off';}
 function setStType(t){stTypeSel=t;$('stType').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',b.dataset.t===t));
  $('stPinBox').hidden=t!=='wired';
  $('stTypeHint').textContent=t==='off'?'Not drawn and nothing is sent. Zones on it keep their lights.'
@@ -1084,13 +1104,30 @@ $('stSave').onclick=async()=>{if(!editStrand)return;
  editStrand=null;$('strandForm').hidden=true;showErr('cntErr');show(j);};
 $('capSave').onclick=async()=>{const p={capRed:$('capR').value,capGreen:$('capG').value,capBlue:$('capB').value,capSumAll:$('capS').value};
  if((+p.capRed>240||+p.capGreen>240||+p.capBlue>240||+p.capSumAll>400)&&!confirm('These are higher than the values measured on the eaves (240 / 400). The eave strands will draw more current. Make sure their power supply and wires can take it. Save?'))return;
- const j=await post('/api/strands',p);if(j.error)showErr('cntErr',j.error);else{showErr('cntErr');show(j);}};
-$('capReset').onclick=async()=>{const j=await post('/api/strands',{capReset:1});if(j.error)showErr('cntErr',j.error);else{showErr('cntErr');show(j);}};
+ const j=await post('/api/strands',p);if(j.error)showErr('capErr',j.error);else{showErr('capErr');show(j);}};
+$('capReset').onclick=async()=>{const j=await post('/api/strands',{capReset:1});if(j.error)showErr('capErr',j.error);else{showErr('capErr');show(j);}};
 $('bledSave').onclick=async()=>{const j=await post('/api/strands',{boardLed:$('bledStrand').value,boardLedLight:$('bledLight').value,boardLedPin:$('bledPin').value});
- if(j.error)showErr('cntErr',j.error);else{showErr('cntErr');show(j);}};
-$('restartBtn').onclick=async()=>{if(!confirm('Restart the board now? The lights go dark for a few seconds.'))return;
+ if(j.error)showErr('bledErr',j.error);else{showErr('bledErr');show(j);}};
+$('restartBtn').onclick=$('restartBtn2').onclick=async()=>{if(!confirm('Restart the board now? The lights go dark for a few seconds.'))return;
  try{await post('/api/strands',{action:'restart'});}catch(e){}
  $('status').textContent='Restarting… this page reloads in 15 seconds.';setTimeout(()=>location.reload(),15000);};
+
+// ================= Setup: search =================
+// Shows only the sections whose title, text or keywords (data-keys) contain every word typed,
+// and opens them; clearing the box puts back the fold-outs you had open.
+let setupOpenBefore=null;
+$('setupSearch').oninput=()=>{const words=$('setupSearch').value.toLowerCase().split(/\s+/).filter(Boolean);
+ const folds=[...document.querySelectorAll('section[data-tab="setup"] details.fold')];
+ if(!words.length){folds.forEach(d=>{d.hidden=false;if(setupOpenBefore)d.open=setupOpenBefore.includes(d.dataset.fold);});
+  document.querySelectorAll('section[data-tab="setup"] .grp').forEach(g=>g.hidden=false);
+  setupOpenBefore=null;$('setupNoMatch').hidden=true;return;}
+ if(!setupOpenBefore)setupOpenBefore=folds.filter(d=>d.open).map(d=>d.dataset.fold);
+ let any=false;
+ folds.forEach(d=>{const text=(d.querySelector('summary').textContent+' '+(d.dataset.keys||'')+' '+d.querySelector('.body').textContent).toLowerCase();
+  const hit=words.every(w=>text.includes(w));d.hidden=!hit;if(hit){d.open=true;any=true;}});
+ document.querySelectorAll('section[data-tab="setup"] .grp').forEach(g=>{
+  g.hidden=!folds.some(d=>d.dataset.grp===g.dataset.grp&&!d.hidden);});
+ $('setupNoMatch').hidden=any;};
 
 // ================= Setup: find a light =================
 let findStrand='A';
