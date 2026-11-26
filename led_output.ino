@@ -159,6 +159,7 @@ void printStrands() {
 // Called first in setup() so the power-up white ends as soon as possible.
 void initOutputs() {
   loadStrandCfg();
+  loadStrandCaps();
   for (int o = 0; o < NUM_OUTPUTS; o++) {
     const StrandCfg& c = strandCfg[o];
     if (c.type != STRAND_WIRED) continue;
@@ -222,20 +223,72 @@ void strandsChanged() {
 
 // ---- Sending ----
 
-// Limits one pixel to the measured safe levels.
-// First scales the whole color down if R+G+B is over the sum cap (keeps hue),
-// then clamps each channel to its own cap.
-CRGB capPixel(CRGB c) {
-  uint16_t sum = (uint16_t)c.r + c.g + c.b;
-  if (sum > CAP_CHANNEL_SUM) {
-    c.r = (uint32_t)c.r * CAP_CHANNEL_SUM / sum;
-    c.g = (uint32_t)c.g * CAP_CHANNEL_SUM / sum;
-    c.b = (uint32_t)c.b * CAP_CHANNEL_SUM / sum;
+// ---- Power limits ----
+// Global limits (Setup > Strands > Power limits), first set to the eaves' measured
+// values (CAP_* in the main tab), saved in Preferences "capglob". Every strand uses them
+// unless its own override is set (Setup > Strands > a strand > Power limit), e.g. the
+// 30 W floods at full power: Preferences "strcap" (apart from "strands", so older saved
+// strand settings stay readable).
+struct GlobalCap {
+  uint8_t  red, green, blue;   // most per color (0-255)
+  uint8_t  spare;
+  uint16_t sum;                // most for R+G+B together (0-765)
+};
+GlobalCap capGlobal = { CAP_RED, CAP_GREEN, CAP_BLUE, 0, CAP_CHANNEL_SUM };
+
+struct StrandCap {
+  uint8_t  override;   // 1 = use color/sum below instead of the global limits
+  uint8_t  color;      // most per color (0-255)
+  uint16_t sum;        // most for R+G+B together (0-765)
+};
+StrandCap strandCap[NUM_OUTPUTS];
+
+void loadStrandCaps() {
+  for (int o = 0; o < NUM_OUTPUTS; o++) strandCap[o] = { 0, CAP_RED, CAP_CHANNEL_SUM };
+  Preferences p;
+  p.begin(PREFS_NAMESPACE, true);
+  if (p.getBytesLength("strcap") == sizeof(strandCap)) p.getBytes("strcap", strandCap, sizeof(strandCap));
+  if (p.getBytesLength("capglob") == sizeof(capGlobal)) p.getBytes("capglob", &capGlobal, sizeof(capGlobal));
+  p.end();
+  if (capGlobal.sum < 1 || capGlobal.sum > 765) capGlobal.sum = CAP_CHANNEL_SUM;
+  for (int o = 0; o < NUM_OUTPUTS; o++) {
+    if (strandCap[o].override > 1) strandCap[o].override = 0;
+    if (strandCap[o].sum > 765) strandCap[o].sum = 765;
   }
-  if (c.r > CAP_RED)   c.r = CAP_RED;
-  if (c.g > CAP_GREEN) c.g = CAP_GREEN;
-  if (c.b > CAP_BLUE)  c.b = CAP_BLUE;
+}
+
+void saveStrandCaps() {
+  if (restoreBlocksSaving()) return;
+  Preferences p;
+  p.begin(PREFS_NAMESPACE, false);
+  p.putBytes("strcap", strandCap, sizeof(strandCap));
+  p.putBytes("capglob", &capGlobal, sizeof(capGlobal));
+  p.end();
+}
+
+// Limits one pixel: first scales the whole color down if R+G+B is over the sum limit
+// (keeps the hue), then clamps each color to its own limit.
+CRGB capWith(CRGB c, uint8_t maxR, uint8_t maxG, uint8_t maxB, uint16_t maxSum) {
+  uint16_t sum = (uint16_t)c.r + c.g + c.b;
+  if (sum > maxSum) {
+    c.r = (uint32_t)c.r * maxSum / sum;
+    c.g = (uint32_t)c.g * maxSum / sum;
+    c.b = (uint32_t)c.b * maxSum / sum;
+  }
+  if (c.r > maxR) c.r = maxR;
+  if (c.g > maxG) c.g = maxG;
+  if (c.b > maxB) c.b = maxB;
   return c;
+}
+
+// The global limits (first the eaves' measured safe levels).
+CRGB capPixel(CRGB c) { return capWith(c, capGlobal.red, capGlobal.green, capGlobal.blue, capGlobal.sum); }
+
+// Strand o's limits: its override if set, else the eaves' levels.
+CRGB capPixelFor(CRGB c, int o) {
+  const StrandCap& k = strandCap[o];
+  if (!k.override) return capPixel(c);
+  return capWith(c, k.color, k.color, k.color, k.sum);
 }
 
 // An RGB color rearranged so that FastLED (registered as RGB) sends its bytes in the
@@ -259,7 +312,7 @@ void showFrame() {
     if (!strandActive(o)) {
       fill_solid(out[o], ledCount[o], CRGB(0, 0, 0));
     } else {
-      for (int i = 0; i < ledCount[o]; i++) out[o][i] = capPixel(frame[o][i]);
+      for (int i = 0; i < ledCount[o]; i++) out[o][i] = capPixelFor(frame[o][i], o);
     }
     if (!controllers[o]) continue;
     bool sending = c.type == STRAND_WIRED && c.pin == bootPin[o];
@@ -295,6 +348,8 @@ void handleRestartRequest() {
 // ---- API: POST /api/strands ----
 //   a=67 b=65 [c=.. f=..]          lengths only (older pages, backup restore)
 //   strand=C [count=250] [name=Palm tree] [type=off|wired|radio] [pin=10] [order=RGB]
+//            [capOverride=0|1] [capColor=1-255] [capSum=1-765]   power limit override
+//   capRed= capGreen= capBlue= (1-255) capSumAll= (1-765) | capReset=1   global power limits
 //   boardLed=D|off [boardLedLight=1] [boardLedPin=48]   the board's RGB LED copies D1
 //   radioRate=long|fast            radio strands: 1 Mbps / 25 fps or 6 Mbps / 50 fps (radio.ino)
 //   action=restart                 restart now (starts new pins)
@@ -370,12 +425,49 @@ void handleStrands() {
         }
       }
     }
+    // power limit override: capOverride=0|1 capColor=0-255 capSum=0-765
+    if (server.hasArg("capOverride") || server.hasArg("capColor") || server.hasArg("capSum")) {
+      StrandCap k = strandCap[o];
+      if (server.hasArg("capOverride")) k.override = argIsTrue("capOverride") ? 1 : 0;
+      if (server.hasArg("capColor")) {
+        int v = server.arg("capColor").toInt();
+        if (v < 1 || v > 255) return sendError("max per color must be 1 to 255");
+        k.color = v;
+      }
+      if (server.hasArg("capSum")) {
+        int v = server.arg("capSum").toInt();
+        if (v < 1 || v > 765) return sendError("max for R+G+B must be 1 to 765");
+        k.sum = v;
+      }
+      strandCap[o] = k;
+      saveStrandCaps();
+    }
     bool activeChanged = (c.type != STRAND_OFF) != strandActive(o);
     strandCfg[o] = c;
     saveStrandCfg();
     if (activeChanged && !countChanged) strandsChanged();
   }
   if (server.hasArg("radioRate") && !setRadioRate(server.arg("radioRate"))) return sendError("radioRate must be long or fast");
+  // global power limits: capRed/capGreen/capBlue=1-255 capSumAll=1-765, capReset=1 = measured values
+  if (server.hasArg("capReset") || server.hasArg("capRed") || server.hasArg("capGreen") || server.hasArg("capBlue") || server.hasArg("capSumAll")) {
+    GlobalCap g = capGlobal;
+    if (argIsTrue("capReset")) g = { CAP_RED, CAP_GREEN, CAP_BLUE, 0, CAP_CHANNEL_SUM };
+    const char* names[3] = { "capRed", "capGreen", "capBlue" };
+    uint8_t* fields[3] = { &g.red, &g.green, &g.blue };
+    for (int k = 0; k < 3; k++) {
+      if (!server.hasArg(names[k])) continue;
+      int v = server.arg(names[k]).toInt();
+      if (v < 1 || v > 255) return sendError("max per color must be 1 to 255");
+      *fields[k] = v;
+    }
+    if (server.hasArg("capSumAll")) {
+      int v = server.arg("capSumAll").toInt();
+      if (v < 1 || v > 765) return sendError("max for R+G+B must be 1 to 765");
+      g.sum = v;
+    }
+    capGlobal = g;
+    saveStrandCaps();
+  }
   // the board's own RGB LED
   if (server.hasArg("boardLed") || server.hasArg("boardLedLight") || server.hasArg("boardLedPin")) {
     BoardLedCfg b = boardLed;

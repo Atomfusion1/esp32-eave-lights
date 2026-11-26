@@ -3,7 +3,10 @@
 //   GET  /              control page
 //   GET  /api/state     {"version", "storage", "outputs":[A..F] (each with "name", "type"
 //                        off|wired|radio, "pin", "order", "running", "enabled" = drawn,
-//                        "count"), "restartNeeded", "pins":[allowed GPIOs],
+//                        "count", "cap":{"override","color","sum"} power limit),
+//                        "capGlobal":{"red","green","blue","sum"} (every strand without an
+//                        override), "capMeasured":{"color","sum"} (CAP_* defaults), "restartNeeded",
+//                        "pins":[allowed GPIOs],
 //                        "boardLed":{"strand","light","pin","running"},
 //                        "radio":{"ok","channel","rate","hubs":[{"mac","name","fw","strands",
 //                        "rssi" (hub hears us), "rssiHere","pct","uptime","age"}]}, "house":{...},
@@ -114,10 +117,15 @@ String stateJson() {
              (c.type == STRAND_WIRED ? bootPin[o] == c.pin : c.type == STRAND_RADIO) ? "true" : "false",
              ORDER_NAMES[c.order], bootPin[o], strandActive(o) ? "true" : "false", ledCount[o]);
     json += buf;
+    json += "\"cap\":{\"override\":" + String(strandCap[o].override ? "true" : "false") +
+            ",\"color\":" + String(strandCap[o].color) + ",\"sum\":" + String(strandCap[o].sum) + "},";
     json += channelFieldsJson(o);
     json += "}";
   }
-  json += "],\"restartNeeded\":";
+  json += "],\"capGlobal\":{\"red\":" + String(capGlobal.red) + ",\"green\":" + String(capGlobal.green) +
+          ",\"blue\":" + String(capGlobal.blue) + ",\"sum\":" + String(capGlobal.sum) + "}";
+  json += ",\"capMeasured\":{\"color\":" + String(CAP_RED) + ",\"sum\":" + String(CAP_CHANNEL_SUM) + "}";
+  json += ",\"restartNeeded\":";
   json += restartNeeded() ? "true" : "false";
   json += ",\"pins\":[";
   for (unsigned int k = 0; k < sizeof(STRAND_PINS); k++) {

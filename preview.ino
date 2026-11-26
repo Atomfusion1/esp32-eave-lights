@@ -79,7 +79,7 @@ void previewAfterFrame(uint32_t dtMs) {
   drawLayers(dtMs);
   previewPass = false;
   for (int o = 0; o < NUM_OUTPUTS; o++) {
-    for (int i = 0; i < ledCount[o]; i++) previewOut[o][i] = strandActive(o) ? capPixel(frame[o][i]) : CRGB(0, 0, 0);
+    for (int i = 0; i < ledCount[o]; i++) previewOut[o][i] = strandActive(o) ? capPixelFor(frame[o][i], o) : CRGB(0, 0, 0);
   }
 
   // keep the preview's positions, put everything real back

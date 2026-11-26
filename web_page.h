@@ -345,9 +345,26 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <div id="stPinBox"><label>Pin (GPIO)</label><select id="stPin"></select></div>
 <div><label>Color order</label><select id="stOrder"><option>RGB</option><option>RBG</option><option>GRB</option><option>GBR</option><option>BRG</option><option>BGR</option></select></div>
 </div>
+<label style="display:flex;gap:8px;align-items:center;margin:12px 0 0;color:var(--text);font-size:14px"><input type="checkbox" id="stCapOn" style="width:18px;height:18px;accent-color:var(--accent)"> Own power limit (instead of the global limits)</label>
+<div class="row" id="stCapBox" style="align-items:end;margin-top:6px">
+<div><label>Max per color (1–255)</label><input id="stCapColor" type="number" min="1" max="255"></div>
+<div><label>Max R+G+B (1–765)</label><input id="stCapSum" type="number" min="1" max="765"></div>
+</div>
+<p class="hint" id="stCapHint" style="margin:6px 0 0"></p>
 <div class="row" style="margin-top:10px"><button class="btn primary" id="stSave">Save</button><button class="btn" id="stCancel">Cancel</button></div>
 </div>
 <p class="err" id="cntErr" hidden></p>
+<div class="sub">
+<label>Power limits (all strands) <small id="capSumTxt"></small></label>
+<p class="hint" style="margin:0 0 8px">The most each light is sent, after brightness. The first values (240 per color, 400 for R+G+B, so white is about 52 %) were measured on the eave strands to keep their current safe. Higher = brighter white, but more current: check the power supply and wires first. A strand with its own power limit (Edit) uses that instead.</p>
+<div class="row" style="align-items:end">
+<div><label>Red</label><input id="capR" type="number" min="1" max="255"></div>
+<div><label>Green</label><input id="capG" type="number" min="1" max="255"></div>
+<div><label>Blue</label><input id="capB" type="number" min="1" max="255"></div>
+<div><label>R+G+B</label><input id="capS" type="number" min="1" max="765"></div>
+</div>
+<div class="row" style="margin-top:8px"><button class="btn primary" id="capSave">Save limits</button><button class="btn" id="capReset">Back to measured values</button></div>
+</div>
 <div class="sub">
 <label>Board LED (test light)</label>
 <p class="hint" style="margin:0 0 8px">The board's own small RGB LED can copy one light, e.g. a flood light, so you can try effects before the real lights are connected. The strand's pin keeps sending as normal. Shown at 25 % (it is very bright up close).</p>
@@ -1011,7 +1028,14 @@ function hubText(h){return esc(h.name||h.mac)+' · signal '+h.rssi+' dBm ('+sigW
 function strandDesc(o){if(o.type==='off')return 'off';
  let where='pin '+o.pin+(o.running?'':' (after restart)');
  if(o.type==='radio'){const h=hubFor(o.id);where='radio → '+(h?(h.name||'hub')+' '+h.rssi+' dBm'+(h.pct==null?'':' '+h.pct+'%'):'no hub heard yet');}
- return o.count+' lights · '+where+' · '+o.order;}
+ return o.count+' lights · '+where+' · '+o.order+(o.cap&&o.cap.override?' · own power limit (white '+whitePct(o.cap.color,o.cap.color,o.cap.color,o.cap.sum)+' %)':'');}
+// How bright full white ends up with these limits, in %.
+const whitePct=(r,g,b,s)=>Math.round(Math.min(r,g,b,s/3)/255*100);
+function stCapHint(){const on=$('stCapOn').checked;$('stCapBox').hidden=!on;
+ const g=st&&st.capGlobal;
+ $('stCapHint').textContent=on?'Full white on this strand: about '+whitePct(+$('stCapColor').value||0,+$('stCapColor').value||0,+$('stCapColor').value||0,+$('stCapSum').value||0)+' %. 255 / 765 = no limit (e.g. the 30 W floods at full power).'
+  :g?'Uses the global limits: white about '+whitePct(g.red,g.green,g.blue,g.sum)+' %.':'';}
+['stCapOn','stCapColor','stCapSum'].forEach(id=>$(id).addEventListener('input',stCapHint));
 function renderRadio(s){const r=s.radio||{hubs:[]},hs=r.hubs||[];
  $('radioSum').textContent=r.ok?'channel '+r.channel+' · '+(hs.length?hs.length+' hub'+(hs.length>1?'s':''):'no hubs heard'):'radio off';
  $('hubList').innerHTML=hs.length?hs.map(h=>'<div class="zoneRow"><div>'+hubText(h)+'<small>drives strand'+(h.strands.length>1?'s ':' ')+(h.strands.split('').join(', ')||'—')+
@@ -1028,6 +1052,8 @@ function renderStrands(s){
   '<small>'+esc(strandDesc(o))+(o.id==='A'||o.id==='B'?' · eave':'')+'</small></div><button class="btn" data-st2="'+o.id+'">Edit</button></div>').join('');
  $('strandList').querySelectorAll('[data-st]').forEach(r=>r.onclick=()=>openStrand(r.dataset.st));
  $('restartBox').hidden=!s.restartNeeded;renderRadio(s);
+ const cg=s.capGlobal;if(cg){[['capR','red'],['capG','green'],['capB','blue'],['capS','sum']].forEach(([id,k])=>{if(document.activeElement!==$(id))$(id).value=cg[k];});
+  $('capSumTxt').textContent='white about '+whitePct(cg.red,cg.green,cg.blue,cg.sum)+' %';}
  const b=s.boardLed||{};
  if(document.activeElement!==$('bledStrand')){
   $('bledStrand').innerHTML='<option value="off">Off</option>'+s.outputs.map(o=>'<option value="'+o.id+'">'+esc(strandName(o))+'</option>').join('');
@@ -1045,15 +1071,21 @@ function openStrand(id){const o=st.outputs.find(x=>x.id===id);if(!o)return;editS
  const used=st.outputs.filter(x=>x.id!==id&&x.type==='wired').map(x=>x.pin);
  $('stPin').innerHTML=(st.pins||[]).map(p=>'<option value="'+p+'"'+(used.includes(p)?' disabled':'')+'>GPIO '+p+(used.includes(p)?' (in use)':'')+'</option>').join('');
  $('stPin').value=String(o.pin);$('stOrder').value=o.order||'RGB';setStType(o.type||'off');
+ const k=o.cap||{override:false,color:240,sum:400};$('stCapOn').checked=!!k.override;$('stCapColor').value=k.color;$('stCapSum').value=k.sum;stCapHint();
  $('strandForm').hidden=false;showErr('cntErr');renderStrands(st);$('stName').focus();}
 function closeStrand(){editStrand=null;$('strandForm').hidden=true;showErr('cntErr');if(st)renderStrands(st);}
 $('stType').querySelectorAll('button').forEach(b=>b.onclick=()=>setStType(b.dataset.t));
 $('stCancel').onclick=closeStrand;
 $('stSave').onclick=async()=>{if(!editStrand)return;
- const p={strand:editStrand,name:$('stName').value,count:$('stCount').value,type:stTypeSel,order:$('stOrder').value};
+ const p={strand:editStrand,name:$('stName').value,count:$('stCount').value,type:stTypeSel,order:$('stOrder').value,capOverride:$('stCapOn').checked?1:0};
+ if($('stCapOn').checked){p.capColor=$('stCapColor').value;p.capSum=$('stCapSum').value;}
  if(stTypeSel==='wired')p.pin=$('stPin').value;
  const j=await post('/api/strands',p);if(j.error){showErr('cntErr',j.error);return;}
  editStrand=null;$('strandForm').hidden=true;showErr('cntErr');show(j);};
+$('capSave').onclick=async()=>{const p={capRed:$('capR').value,capGreen:$('capG').value,capBlue:$('capB').value,capSumAll:$('capS').value};
+ if((+p.capRed>240||+p.capGreen>240||+p.capBlue>240||+p.capSumAll>400)&&!confirm('These are higher than the values measured on the eaves (240 / 400). The eave strands will draw more current. Make sure their power supply and wires can take it. Save?'))return;
+ const j=await post('/api/strands',p);if(j.error)showErr('cntErr',j.error);else{showErr('cntErr');show(j);}};
+$('capReset').onclick=async()=>{const j=await post('/api/strands',{capReset:1});if(j.error)showErr('cntErr',j.error);else{showErr('cntErr');show(j);}};
 $('bledSave').onclick=async()=>{const j=await post('/api/strands',{boardLed:$('bledStrand').value,boardLedLight:$('bledLight').value,boardLedPin:$('bledPin').value});
  if(j.error)showErr('cntErr',j.error);else{showErr('cntErr');show(j);}};
 $('restartBtn').onclick=async()=>{if(!confirm('Restart the board now? The lights go dark for a few seconds.'))return;
@@ -1143,7 +1175,7 @@ $('backupBtn').onclick=async()=>{const say=t=>$('backupStatus').textContent=t;
   for(const f of list){say('Reading '+f.path+'…');const r=await fetch('/fs'+f.path,{cache:'no-store'});if(!r.ok)throw new Error('could not read '+f.path);
    files.push({path:f.path,data:toB64(new Uint8Array(await r.arrayBuffer()))});}
   const backup={format:'eave-lights-backup',version:1,created:new Date().toISOString(),firmware:s.version,
-   strands:s.outputs.map(o=>({id:o.id,count:o.count,name:o.name,type:o.type,pin:o.pin,order:o.order})),boardLed:s.boardLed||null,
+   strands:s.outputs.map(o=>({id:o.id,count:o.count,name:o.name,type:o.type,pin:o.pin,order:o.order,cap:o.cap})),boardLed:s.boardLed||null,capGlobal:s.capGlobal||null,
    channels:Object.assign({house:chanFields(s.house)},...s.outputs.map(o=>({[o.id.toLowerCase()]:chanFields(o)}))),
    timer:progData&&progData.timer?(({enabled,onMode,onClock,onOffset,offMode,offClock,offOffset,lat,lon})=>({enabled:enabled?1:0,onMode,onClock,onOffset,offMode,offClock,offOffset,lat,lon}))(progData.timer):null,
    calendar:progData?(progData.scheduleOn?1:0):null,fallback:progData?progData.fallback:null,files};
@@ -1166,7 +1198,9 @@ $('restoreFile').onchange=async e=>{const f=e.target.files[0];e.target.value='';
   const cnt={};(b.strands||[]).forEach(s=>cnt[s.id.toLowerCase()]=s.count);
   if(cnt.a||cnt.b)await post('/api/strands',cnt);
   // strand settings (backups from v0.36.0 on); a wired strand on a new pin needs a restart
+  if(b.capGlobal)await post('/api/strands',{capRed:b.capGlobal.red,capGreen:b.capGlobal.green,capBlue:b.capGlobal.blue,capSumAll:b.capGlobal.sum});
   for(const s of b.strands||[])if(s.type){const p={strand:s.id,name:s.name||'',type:s.type,order:s.order||'RGB'};if(s.type==='wired')p.pin=s.pin;
+   if(s.cap)Object.assign(p,{capOverride:s.cap.override?1:0,capColor:s.cap.color,capSum:s.cap.sum});
    const j=await post('/api/strands',p);if(j.error)failed+='strand '+s.id+' ('+j.error+') ';}
   if(b.boardLed)await post('/api/strands',{boardLed:b.boardLed.strand||'off',boardLedLight:b.boardLed.light||1,boardLedPin:b.boardLed.pin||48});
   for(const [id,fields] of Object.entries(b.channels||{}))await post('/api/state',Object.assign({output:id},fields));
