@@ -71,7 +71,7 @@
 #define DEFAULT_LEDS_B  65
 #define DEFAULT_LEDS    50    // strands C-F until set on the page
 #define PIN_OUTPUT_A    8     // tested
-#define PIN_OUTPUT_B    9     // pin tested 2026-11-23 with strand A moved over; strand B itself untested
+#define PIN_OUTPUT_B    9     // strand B (65 lights) working on the house (2026-11-26)
 
 // The layout before v0.36.0 (2 strands of up to 300), only used to convert old files.
 #define LEGACY_OUTPUTS  2

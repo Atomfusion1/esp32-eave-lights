@@ -1,12 +1,12 @@
 # ESP32-S3 House Eave Lighting — Project Handoff
 
 **Date:** 2026-11-26  
-**Status:** Firmware **v0.41.1** on the board (eaves on strands A and B), hub **1.1.0** tested by radio. Yard lights (palm tree, oak floods) planned. See **§0**.  
+**Status:** Firmware **v0.41.1** on the board; both eave strands (A 67, B 65) and all features so far tested on the house by the user (2026-11-26); hub **1.1.0** tested by radio. Yard lights (palm tree, oak floods) planned. See **§0**.  
 **Purpose:** Give a new VS Code/Codex coding session the hardware facts, target architecture, safety constraints and current state without requiring the conversation history. How to build, upload and lay out code: [AGENTS.md](../AGENTS.md).
 
 ## 0. Current state & next steps (2026-11-26)
 
-**Running on the board** (user uploads over Wi-Fi): v0.41.1. What the system does and the page layout are summarised in [README.md](../README.md); code rules in [AGENTS.md](../AGENTS.md). Earlier milestones (v0.15–v0.25: effects, Apply/preview, playlists and calendar, paintings, animations, timer, scene groups) are in the git log.
+**Running on the board and tested on the house** (user, 2026-11-26): v0.41.1, both eave strands and everything below. What the system does and the page layout are summarised in [README.md](../README.md); code rules in [AGENTS.md](../AGENTS.md). Earlier milestones (v0.15–v0.25: effects, Apply/preview, playlists and calendar, paintings, animations, timer, scene groups) are in the git log.
 
 **Since v0.25** (git log has the details):
 - v0.26–v0.30: never-lit zones and zone list order, up to 64 scenes, tap a light to control what lights it, big tables in PSRAM, lightning upgrade, multicolor bulb effects (Twinkling bulbs, Glitter, Blink & shift), up to 30 scenes per playlist, shuffle, Copy/Paste look, "what's lit" list under the live view.
@@ -60,7 +60,7 @@ The system should be extensible: initially 2 physical outputs × 65 LEDs, but av
 | Toolchain | **Portable Arduino IDE 1.8.19** at `D:\00 Programming\01 Arduino\arduino-1.8.19 ESP 3.0` (ESP32 core 3.3.12, FastLED 3.10.10). `ESP32_Eave_Lights.ino` must stay in the repo root. Code is split into one `.ino` tab per task. See [AGENTS.md](../AGENTS.md). |
 | Board settings | ESP32S3 Dev Module · USB CDC On Boot: **Disabled** (COM13 is the board's CH343 USB-serial chip) · Flash Size: 16MB · Partition: 16M Flash (3MB APP/9.9MB FATFS) · PSRAM: OPI PSRAM. |
 | Output A | GPIO 8, 65 LEDs, WS2811, `RBG` (tested). |
-| Output B | GPIO 9. **Pin verified 2026-11-23** (v0.3.0) by moving strand A's data from GPIO 8 to 9: test cycle, fade and web control all correct. The installed strand B itself is still untested. Enabled in code; currently mirrors output A. GPIO 8/9 are the Arduino default I2C pins: any future I2C device must use other pins explicitly. |
+| Output B | GPIO 9. **Pin verified 2026-11-23** (v0.3.0) by moving strand A's data from GPIO 8 to 9: test cycle, fade and web control all correct. **Strand B (65 lights) connected and working on the house (user, 2026-11-26).** GPIO 8/9 are the Arduino default I2C pins: any future I2C device must use other pins explicitly. |
 | Power switching | The 24 V supply is on a **dusk-to-dawn photocell** (user, 2026-11-23): lights are only powered at night, and saved settings bring the last look back each dusk. Standby draw with all lights black measured **0.188 A at 24 V** (one strand, ~2.9 mA per puck); accepted because it only occurs at night. No MOSFET/relay needed. If the ESP32 is on the same switched supply, the web page is only reachable after dusk. |
 | Startup | Lights showing white at power-up until the ESP32 boots is **accepted**. Firmware sends OFF as the first thing in `setup()`. No 24 V power switch planned. |
 | Power limit | Per-color caps: red 240, green 240, blue 240; mixed colors limited to a channel sum of 400 (white ≈ 133 each). White at 100 each measured 1.1 A per strand; white at 133 each (v0.1.2 test pattern) measured **1.26 A** per strand (2026-11-23, one strand). |
@@ -104,7 +104,7 @@ The system should be extensible: initially 2 physical outputs × 65 LEDs, but av
 
 - Outdoor individually addressable puck-style eave lights originally used with **Lotus Lantern Pro** controller.
 - **24 V DC** power distribution.
-- Two planned branches/strands in a **Y topology**, each **65 physical LED pucks** (130 total). One branch has been directly tested; the other is installed outside and is presumed similar but untested with ESP32.
+- Two planned branches/strands in a **Y topology**, each **65 physical LED pucks** (130 total). Both branches are installed and working with the ESP32 (A = 67 lights, B = 65; user, 2026-11-26).
 - White approximately 7 × 7 mm LED package, several nearby SMD resistors and small six-pin IC. No conclusive IC identity; avoid claiming a specific silicon driver.
 - Original controller waveform measured with oscilloscope: nominal data HIGH around 5–5.5 V; **800 kHz**, **1.25 µs per bit**, short HIGH pulse about **0.35 µs**.
 - Tested with **FastLED using `WS2811` chipset setting**, including chasing individual pucks successfully. Therefore the strand is **WS2811-protocol-compatible for practical control**.
