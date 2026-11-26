@@ -156,6 +156,7 @@ bool timerHoldsOff   = false;
 // off again. Reaching the on time ends it early (the lights simply stay on).
 const uint32_t TIMER_OVERRIDE_MIN = 120;
 bool     overrideActive = false;
+bool     keepShownLook  = false;   // override started by hand: the playlist starts without replacing the look
 uint32_t overrideEndMs  = 0;
 
 void startTimerOverride(uint32_t minutes) {
@@ -256,7 +257,11 @@ void handleTimer(bool haveClock, const struct tm& t) {
   }
   if (timerHoldsOff && timerLastWindow == 0) {   // something switched on by hand while off
     for (int ch = 0; ch < NUM_CHANNELS; ch++) {
-      if (states[ch].on && channelInUse(ch)) { startTimerOverride(TIMER_OVERRIDE_MIN); return; }
+      if (states[ch].on && channelInUse(ch)) {
+        startTimerOverride(TIMER_OVERRIDE_MIN);
+        keepShownLook = true;   // the calendar's playlist mustn't replace what was just shown
+        return;
+      }
     }
   }
   int w = timerWindow(t);
@@ -316,6 +321,17 @@ void handleSchedule() {
     }
   }
 
+  if (want != activeProgram && want >= 0 && keepShownLook) {
+    // Lights switched on by hand while the timer had them off (e.g. a scene shown): the
+    // playlist counts as playing from now, but keeps that look until its first change.
+    keepShownLook = false;
+    activeProgram = want;
+    activeStep = firstStep(want);
+    stepStartMs = millis();
+    Serial.printf("Playlist %s: continues after the look shown by hand\n", programs[want].name);
+    return;
+  }
+  keepShownLook = false;
   if (want != activeProgram) {
     activeProgram = want;
     activeStep = (want >= 0) ? firstStep(want) : 0;
