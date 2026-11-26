@@ -20,7 +20,18 @@
 
 const char*    PROGRAMS_FILE    = "/programs.bin";
 const uint32_t PROGRAMS_MAGIC   = 0x474F5250;  // "PROG"
-const uint16_t PROGRAMS_VERSION = 1;
+const uint16_t PROGRAMS_VERSION = 2;   // v1 (before 0.29.0): up to 10 scenes per playlist
+
+// Version 1 record (10 steps), only used to convert old files.
+struct ProgramV1 {
+  bool        used;
+  char        name[NAME_LEN];
+  uint8_t     stepCount;
+  ProgramStep steps[10];
+  bool        useDates;
+  uint8_t     fromMonth, fromDay;
+  uint8_t     toMonth, toDay;
+};
 
 bool     clockStarted  = false;
 int      activeProgram = -1;     // playlist playing now, or -1
@@ -316,7 +327,7 @@ const char* saveProgram(int id, const String& name, const String& stepsText,
     pos = comma + 1;
     item.trim();
     if (!item.length()) continue;
-    if (pr.stepCount >= MAX_PROGRAM_STEPS) return "too many scenes (max 10)";
+    if (pr.stepCount >= MAX_PROGRAM_STEPS) return "too many scenes (max 30)";
     int colon = item.indexOf(':');
     if (colon < 1) return "bad step";
     int sc = item.substring(0, colon).toInt();
@@ -422,21 +433,39 @@ void loadPrograms() {
   File f = FFat.open(PROGRAMS_FILE, "r");
   if (!f) return;
   FileHeader h;
-  if (f.read((uint8_t*)&h, sizeof(h)) != sizeof(h) || h.magic != PROGRAMS_MAGIC ||
-      h.version != PROGRAMS_VERSION || h.recordSize != sizeof(Program)) {
+  bool okHeader = f.read((uint8_t*)&h, sizeof(h)) == sizeof(h) && h.magic == PROGRAMS_MAGIC;
+  bool isV1 = okHeader && h.version == 1 && h.recordSize == sizeof(ProgramV1);
+  bool isV2 = okHeader && h.version == PROGRAMS_VERSION && h.recordSize == sizeof(Program);
+  if (!isV1 && !isV2) {
     Serial.println("Playlists: file is from a different firmware layout, starting empty");
     f.close();
     return;
   }
   int loaded = 0;
   for (int p = 0; p < h.count && p < MAX_PROGRAMS; p++) {
-    if (f.read((uint8_t*)&programs[p], sizeof(Program)) != sizeof(Program)) break;
-    programs[p].name[NAME_LEN - 1] = 0;
-    if (programs[p].stepCount > MAX_PROGRAM_STEPS) programs[p].used = false;
-    if (programs[p].used) loaded++;
+    Program& pr = programs[p];
+    if (isV1) {
+      ProgramV1 old;
+      if (f.read((uint8_t*)&old, sizeof(old)) != sizeof(old)) break;
+      memset(&pr, 0, sizeof(pr));
+      pr.used = old.used;
+      memcpy(pr.name, old.name, NAME_LEN);
+      pr.stepCount = min((int)old.stepCount, 10);
+      for (int k = 0; k < 10; k++) pr.steps[k] = old.steps[k];
+      pr.useDates = old.useDates;
+      pr.fromMonth = old.fromMonth; pr.fromDay = old.fromDay;
+      pr.toMonth = old.toMonth;     pr.toDay = old.toDay;
+    } else {
+      if (f.read((uint8_t*)&pr, sizeof(Program)) != sizeof(Program)) break;
+    }
+    pr.name[NAME_LEN - 1] = 0;
+    if (pr.stepCount > MAX_PROGRAM_STEPS) pr.used = false;
+    if (pr.used) loaded++;
   }
   f.close();
-  Serial.printf("Playlists: %d loaded, calendar %s\n", loaded, scheduleOn ? "on" : "off");
+  Serial.printf("Playlists: %d loaded%s, calendar %s\n", loaded,
+                isV1 ? " (converted from the old format)" : "", scheduleOn ? "on" : "off");
+  if (isV1) saveProgramsFile();   // write it back in the new format
 }
 
 void saveProgramsFile() {

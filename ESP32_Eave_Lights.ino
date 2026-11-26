@@ -53,7 +53,7 @@
 #define OTA_PASSWORD AP_PASSWORD
 #endif
 
-#define FW_VERSION "0.28.0"
+#define FW_VERSION "0.29.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
@@ -331,7 +331,7 @@ Scene* scenes = nullptr;   // [MAX_SCENES], in PSRAM (allocBigTables)
 // The date comes from the internet (NTP) in this time zone:
 #define TIMEZONE "EST5EDT,M3.2.0,M11.1.0"   // US Eastern (Ohio), with daylight saving
 #define MAX_PROGRAMS      12
-#define MAX_PROGRAM_STEPS 10
+#define MAX_PROGRAM_STEPS 30   // was 10 before v0.29.0 (programs.bin v1, converted on load)
 
 struct ProgramStep {
   uint8_t  scene;     // scene slot

@@ -461,7 +461,7 @@ void drawGlitter(int ch) {
   }
 }
 
-// Blink & shift: the bulbs are on, then dark for the last quarter of each blink; when
+// Blink & shift: the bulbs fade out, stay dark briefly, and fade back in; when
 // they come back on every bulb has moved one color along (direction setting = which
 // way). speed: 20000/speed ms per blink (10 = every 2 s). size = lights per color.
 void drawBlinkShift(int ch) {
@@ -469,11 +469,14 @@ void drawBlinkShift(int ch) {
   int len = lineLength(ch);
   uint32_t period = max((uint32_t)200, 20000UL / max((int)s.speed, 1));
   uint32_t n = effectMs[ch] / period, tIn = effectMs[ch] % period;
-  uint32_t onEnd = period - period / 4, edge = min((uint32_t)80, period / 10);
+  // soft blink (v0.29.0): fade in 20%, on, fade out 20%, dark 10% of each blink
+  uint32_t fade = max((uint32_t)60, period / 5), dark = period / 10;
+  uint32_t outStart = period - dark - fade, outEnd = period - dark;
   uint8_t level = 0;
-  if (tIn < edge)               level = tIn * 255 / edge;              // quick fade in
-  else if (tIn < onEnd - edge)  level = 255;
-  else if (tIn < onEnd)         level = (onEnd - tIn) * 255 / edge;    // quick fade out
+  if (tIn < fade)               level = tIn * 255 / fade;
+  else if (tIn < outStart)      level = 255;
+  else if (tIn < outEnd)        level = (outEnd - tIn) * 255 / fade;
+  level = ease8InOutQuad(level);   // eased: no sudden start or stop
   if (!level) { fillLine(ch, CRGB(0, 0, 0)); return; }
   int shift = (int)(n % 840);   // 840 divides evenly by every color count
   for (int i = 0; i < len; i++) putLight(ch, i, litColor(bulbColor(s, i, s.size, shift), s, level));
