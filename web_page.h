@@ -191,6 +191,8 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <div class="card">
 <h2>On right now</h2>
 <p class="onList" id="onList">…</p>
+<div id="ovrBox" hidden style="margin-top:10px"><p class="onList" id="ovrTxt"></p>
+<div class="row" style="margin-top:8px"><button class="btn" id="ovrMore">+1 hour</button><button class="btn danger" id="ovrEnd">Off now</button></div></div>
 <button class="power" id="allOff" style="margin-top:12px">All lights off</button>
 </div>
 
@@ -211,7 +213,7 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <div class="row" style="margin-top:12px"><button class="btn primary" id="tmSave">Save timer</button></div>
 </div>
 <p class="hint" id="tmToday"></p>
-<p class="hint">It turns on what was on before "All lights off" (and your calendar playlist, if on). In between you can still switch lights by hand. With the photocell still fitted, the lights only have power at night anyway.</p>
+<p class="hint">It turns on what was on before "All lights off" (and your calendar playlist, if on). Outside its hours, pressing ▶ on a playlist or turning lights on keeps them on for 2 hours, then it turns them off again (Home shows the time, with +1 hour and Off now). With the photocell still fitted, the lights only have power at night anyway.</p>
 </div>
 </section>
 
@@ -885,7 +887,15 @@ function renderTimer(t){if(!t)return;
   $('tmOffMode').value=t.offMode;$('tmOffClock').value=hhmm(t.offClock);$('tmOffOffset').value=t.offOffset;$('tmLat').value=t.lat;$('tmLon').value=t.lon;}
  tmFormVisibility();
  $('tmToday').textContent=t.todayOn===undefined?'Clock not set yet (needs internet).':
-  'Today: sunset '+clock12(t.sunset)+', sunrise '+clock12(t.sunrise)+(t.enabled?' · lights on '+clock12(t.todayOn)+', off '+clock12(t.todayOff)+(t.holdsOff?' · off by the timer now':''):'');}
+  'Today: sunset '+clock12(t.sunset)+', sunrise '+clock12(t.sunrise)+(t.enabled?' · lights on '+clock12(t.todayOn)+', off '+clock12(t.todayOff)+(t.holdsOff?' · off by the timer now':''):'');
+ renderOverride(t);}
+// Override: Play or turning lights on while the timer has them off keeps them on for 2 hours.
+function renderOverride(t){const left=t&&t.enabled&&t.overrideLeft>=0?t.overrideLeft:-1;$('ovrBox').hidden=left<0;if(left<0)return;
+ const end=new Date(Date.now()+left*1000),tm=Math.ceil(left/60),h=Math.floor(tm/60),m=tm%60;
+ $('ovrTxt').textContent='⏰ On outside the timer’s hours: staying on until '+end.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+
+  ' ('+(h?h+' h ':'')+m+' min left), then the timer turns them off.';}
+$('ovrMore').onclick=()=>progAction({action:'override',minutes:60});
+$('ovrEnd').onclick=async()=>{await progAction({action:'override',end:1});setTimeout(()=>{loadPrograms();fetch('/api/state').then(r=>r.json()).then(show).catch(()=>{});},1500);};
 function tmFormVisibility(){const onSun=$('tmOnMode').value==='0',offM=$('tmOffMode').value;
  $('tmOnClock').hidden=onSun;['tmOnOffset','tmOnOffLbl','tmOnMinLbl'].forEach(id=>$(id).hidden=!onSun);
  $('tmOffClock').hidden=offM!=='1';['tmOffOffset','tmOffOffLbl','tmOffMinLbl'].forEach(id=>$(id).hidden=offM!=='0');}

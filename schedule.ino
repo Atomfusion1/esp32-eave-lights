@@ -145,10 +145,44 @@ void startProgramStep() {
 // ---------- On/off timer ----------
 // At the on time: "All lights on (as before)". At the off time: "All lights off".
 // It acts only when the time is crossed (and once after start-up to catch up), so lights
-// switched by hand in between stay as they are. Playlists pause while it's "off".
+// switched by hand in between stay as they are. Playlists pause while it's "off", unless
+// Play or a light switched on starts an override (below).
 
 int  timerLastWindow = -1;   // -1 = not checked yet, 0 = off window, 1 = on window
 bool timerHoldsOff   = false;
+
+// Override (v0.32.0): pressing Play, or turning anything on by hand, while the timer has
+// the lights off keeps them on for TIMER_OVERRIDE_MIN minutes, then the timer turns them
+// off again. Reaching the on time ends it early (the lights simply stay on).
+const uint32_t TIMER_OVERRIDE_MIN = 120;
+bool     overrideActive = false;
+uint32_t overrideEndMs  = 0;
+
+void startTimerOverride(uint32_t minutes) {
+  if (!lightTimer.enabled || !(timerHoldsOff || overrideActive)) return;
+  overrideActive = true;
+  overrideEndMs  = millis() + minutes * 60000UL;
+  timerHoldsOff  = false;
+  scheduleForce  = true;
+  Serial.printf("Timer: override, on for %u min\n", (unsigned)minutes);
+}
+
+// +minutes on a running override (from the page).
+void extendTimerOverride(uint32_t minutes) {
+  if (overrideActive) overrideEndMs += minutes * 60000UL;
+}
+
+// Ends the override now: the timer turns the lights off on its next check.
+void endTimerOverride() {
+  if (overrideActive) overrideEndMs = millis();
+}
+
+// Seconds left on the override, -1 = none.
+long overrideSecondsLeft() {
+  if (!overrideActive) return -1;
+  int32_t left = (int32_t)(overrideEndMs - millis());
+  return left > 0 ? left / 1000 : 0;
+}
 
 // Minutes the clock is ahead of UTC right now (Eastern: -300 or -240).
 int utcOffsetMinutes() {
@@ -204,7 +238,27 @@ int timerWindow(const struct tm& t) {
 }
 
 void handleTimer(bool haveClock, const struct tm& t) {
-  if (!lightTimer.enabled || !haveClock) { timerHoldsOff = false; timerLastWindow = -1; return; }
+  if (!lightTimer.enabled || !haveClock) { timerHoldsOff = false; timerLastWindow = -1; overrideActive = false; return; }
+  if (overrideActive) {
+    if (timerWindow(t)) {                       // on time reached: just stay on
+      overrideActive = false;
+      timerLastWindow = 1;
+      Serial.println("Timer: override ended, on time reached");
+    } else if ((int32_t)(millis() - overrideEndMs) >= 0) {
+      overrideActive = false;
+      timerHoldsOff = true;
+      timerLastWindow = 0;
+      allLightsOff();
+      activeProgram = -1;
+      Serial.println("Timer: override over, lights off");
+    }
+    return;
+  }
+  if (timerHoldsOff && timerLastWindow == 0) {   // something switched on by hand while off
+    for (int ch = 0; ch < NUM_CHANNELS; ch++) {
+      if (states[ch].on && channelInUse(ch)) { startTimerOverride(TIMER_OVERRIDE_MIN); return; }
+    }
+  }
   int w = timerWindow(t);
   if (w == timerLastWindow) return;
   bool first = timerLastWindow < 0;
@@ -290,6 +344,7 @@ void nudgeSchedule() {
 
 void playProgram(int id) {
   manualProgram = id;
+  startTimerOverride(TIMER_OVERRIDE_MIN);   // timer has the lights off: play anyway for a while
   stoppedYday = -1;
   activeProgram = -1;          // restart it from the first scene
   scheduleForce = true;
@@ -435,7 +490,8 @@ String programsJson() {
     timerTimes(t, onMin, offMin);
     j += ",\"todayOn\":" + String(onMin) + ",\"todayOff\":" + String(offMin) +
          ",\"sunset\":" + String(sunMinutes(t.tm_yday, false)) + ",\"sunrise\":" + String(sunMinutes(t.tm_yday, true)) +
-         ",\"holdsOff\":" + (timerHoldsOff ? "true" : "false");
+         ",\"holdsOff\":" + (timerHoldsOff ? "true" : "false") +
+         ",\"overrideLeft\":" + String(overrideSecondsLeft());
   }
   j += "}";
   j += ",\"stoppedToday\":";

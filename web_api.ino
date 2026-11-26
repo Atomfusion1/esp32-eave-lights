@@ -414,6 +414,7 @@ bool allLightsOn() {
 }
 
 void handleAllOff() {
+  endTimerOverride();   // the timer had them off: back to that (no 2-hour leftover)
   allLightsOff();
   sendState();
 }
@@ -547,6 +548,7 @@ void handleScenes() {
 //   action=save [id] name steps=scene:seconds,... dates=0|1 from=MM-DD to=MM-DD shuffle=0|1
 //   action=delete id | action=play id | action=stop | action=next | action=calendar on=0|1
 //   action=timer enabled onMode onClock onOffset offMode offClock offOffset lat lon (schedule.ino)
+//   action=override minutes=N (start, or add N to a running one) | action=override end=1
 // Every action returns the playlist JSON (same as GET).
 void handlePrograms() {
   String action = server.arg("action");
@@ -573,6 +575,10 @@ void handlePrograms() {
       nudgeSchedule();
       markStateChanged();
     }
+  } else if (action == "override") {
+    if (argIsTrue("end")) endTimerOverride();
+    else if (overrideSecondsLeft() >= 0) extendTimerOverride(constrain(server.arg("minutes").toInt(), 1, 600));
+    else startTimerOverride(constrain(server.arg("minutes").toInt(), 1, 600));
   } else if (action == "timer") {
     setTimerFromArgs();
   } else if (action.length()) {
