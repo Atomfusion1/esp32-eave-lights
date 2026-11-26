@@ -53,7 +53,7 @@
 #define OTA_PASSWORD AP_PASSWORD
 #endif
 
-#define FW_VERSION "0.33.0"
+#define FW_VERSION "0.34.0"
 #define HOSTNAME   "eavelights"   // -> http://eavelights.local
 
 // ---------- Outputs ----------
@@ -143,7 +143,9 @@ struct LightState {
   uint8_t reverse : 1;  // direction (center: 1 = inward)
   uint8_t jitter  : 7;  // randomness 0-100 %: speed wanders up and down by this much (v0.31.0;
                         // shares the old reverse byte, so saved files keep their layout)
-  bool    bgOn;         // true = unlit lights show bgColor instead of off
+  uint8_t bgOn     : 1; // 1 = unlit lights show bgColor instead of off
+  uint8_t bothWays : 1; // leaves: each leaf picks its direction at random (v0.34.0;
+  uint8_t          : 6; // shares the old bgOn byte, so saved files keep their layout)
   CRGB    bgColor;      // background, also scaled by brightness
   uint8_t colorCount;   // colors used by multi-color effects (1-MAX_COLORS): color + extra
   CRGB    extra[MAX_COLORS - 1];  // colors 2-5
@@ -261,16 +263,16 @@ uint16_t  pathLen[MAX_PATHS];                    // positions in each path, gaps
 
 // Defaults used on first boot (nothing saved yet). Zone states are set in initZones().
 LightState states[NUM_CHANNELS] = {
-  { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64, 10, 5, false, 0, false, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS },  // strand A
-  { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64, 10, 5, false, 0, false, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS },  // strand B
-  { false, CRGB(255, 140, 40), 128, MODE_COMET, 5, 64, 20, 8, false, 0, false, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS },  // Whole house
+  { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64, 10, 5, false, 0, false, 0, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS },  // strand A
+  { false, CRGB(255, 140, 40), 128, MODE_SOLID, 5, 64, 10, 5, false, 0, false, 0, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS },  // strand B
+  { false, CRGB(255, 140, 40), 128, MODE_COMET, 5, 64, 20, 8, false, 0, false, 0, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS },  // Whole house
 };
 // A new zone starts as steady warm white, off.
 const LightState ZONE_DEFAULT_STATE =
-  { false, CRGB(255, 160, 60), 160, MODE_SOLID, 5, 64, 10, 5, false, 0, false, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS };
+  { false, CRGB(255, 160, 60), 160, MODE_SOLID, 5, 64, 10, 5, false, 0, false, 0, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS };
 // A new zone path starts as an orange comet, off.
 const LightState PATH_DEFAULT_STATE =
-  { false, CRGB(255, 140, 40), 128, MODE_COMET, 5, 64, 20, 8, false, 0, false, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS };
+  { false, CRGB(255, 140, 40), 128, MODE_COMET, 5, 64, 20, 8, false, 0, false, 0, CRGB(16, 32, 64), DEFAULT_EXTRA_COLORS };
 
 // ---------- Animations ----------
 // A looping list of steps applied to a "frame": the channel's colors as bands, or a

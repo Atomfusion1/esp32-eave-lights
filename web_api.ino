@@ -17,7 +17,7 @@
 //                              (what speed/size mean per mode: top of effects_more.ino)
 //                         fadeSeconds=2-60  fadeMin=0-255
 //                         speed=1-100  size=1-30  reverse=0|1  random=0-100 (%)
-//                         bgOn=0|1  bgColor=RRGGBB   (background)
+//                         bgOn=0|1  bgColor=RRGGBB   (background)  bothWays=0|1 (leaves: random direction per leaf)
 //                         colorCount=1-5  color2..color5=RRGGBB   (color list)
 //                       Invalid values change nothing and return 400. Returns the new state.
 //   GET  /api/frame     exact colors being sent right now (after power caps), binary:
@@ -84,11 +84,11 @@ String channelFieldsJson(int ch) {
   snprintf(buf, sizeof(buf),
            "\"on\":%s,\"color\":\"#%02X%02X%02X\",\"brightness\":%u,\"mode\":\"%s\","
            "\"fadeSeconds\":%u,\"fadeMin\":%u,\"speed\":%u,\"size\":%u,\"reverse\":%s,\"random\":%u,"
-           "\"bgOn\":%s,\"bgColor\":\"#%02X%02X%02X\"",
+           "\"bgOn\":%s,\"bothWays\":%s,\"bgColor\":\"#%02X%02X%02X\"",
            s.on ? "true" : "false", s.color.r, s.color.g, s.color.b, s.brightness,
            MODE_NAMES[s.mode], s.fadeSeconds, s.fadeMin, s.speed, s.size,
            s.reverse ? "true" : "false", (unsigned)s.jitter,
-           s.bgOn ? "true" : "false", s.bgColor.r, s.bgColor.g, s.bgColor.b);
+           s.bgOn ? "true" : "false", s.bothWays ? "true" : "false", s.bgColor.r, s.bgColor.g, s.bgColor.b);
   return String(buf) + "," + colorListJson(s);
 }
 
@@ -318,6 +318,7 @@ const char* applyLookArgs(LightState& s, bool& changed) {
       changed = true;
     }
     if (server.hasArg("bgOn"))    { s.bgOn = argIsTrue("bgOn"); changed = true; }
+    if (server.hasArg("bothWays")) { s.bothWays = argIsTrue("bothWays"); changed = true; }
     if (hasBgColor) { s.bgColor = newBgColor; changed = true; }
     if (server.hasArg("colorCount")) {
       s.colorCount = (uint8_t)constrain(server.arg("colorCount").toInt(), 1, MAX_COLORS);

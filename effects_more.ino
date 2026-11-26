@@ -23,8 +23,8 @@
 //   Twinkling bulbs colors repeated (size = lights per color), speed, fadeMin = lowest level
 //   Glitter bulbs   colors one per light, size = glints, speed = glint quickness
 //   Blink & shift   colors repeated (size = lights per color), speed = blink rate, direction
-//   Leaves          colors (one per leaf), size = leaves, fadeSeconds/2 = swing back, speed/10
-//                   lights/s drift, direction, background; randomness varies the swings
+//   Leaves          colors (one per leaf), size = leaves, fadeMin/8 = fall, fadeSeconds/2 = swing back, speed/10
+//                   lights/s, direction (bothWays = random per leaf), background; randomness varies swings
 //
 // Everything is calculated from settings and elapsed time; "random" looks come from
 // hash32(), so the same settings always give the same pattern.
@@ -484,12 +484,14 @@ void drawBlinkShift(int ch) {
   for (int i = 0; i < len; i++) putLight(ch, i, litColor(bulbColor(s, i, s.size, shift), s, level));
 }
 
-// ---------- Leaves (v0.31.0) ----------
-// `size` leaves drift along the line. Each flutter a leaf glides forward, then swings
-// back fadeSeconds/2 lights (slow at each turn, dimming a little as it turns over),
-// gaining back+1 lights per flutter. speed/10 = average drift in lights per second;
-// direction = which end they start from. Randomness (jitter) also varies each swing
-// (from none to double), the forward/back timing, and each leaf's own pace.
+// ---------- Leaves (v0.31.0, v0.34.0: fall distance, random direction) ----------
+// `size` leaves drift along the line. Each flutter a leaf falls forward fadeMin/8 lights,
+// then swings back fadeSeconds/2 lights (slow at each turn, dimming a little as it turns
+// over), at speed/10 lights per second. It gains fall - back lights per flutter (never
+// less than 0: falling no further than it swings back makes it hover). direction = which
+// end they start from; bothWays = each leaf picks a direction at random each pass.
+// Randomness (jitter) varies each swing (from none to double, the fall changes with it
+// so the gain stays the same) and each leaf's own pace.
 // Leaves leave the far end and drift in again at the start. Colors: leaf k = color k.
 float hashUnit(uint32_t h) { return (h & 0xFFFF) / 65535.0f; }   // 0..1
 float smoothUnit(float x) { return x * x * (3.0f - 2.0f * x); }
@@ -500,10 +502,11 @@ void drawLeaves(int ch) {
   int len = lineLength(ch);
   int n = constrain((int)s.size, 1, MAX_LEAVES);
   float r     = s.jitter / 100.0f;
-  float back  = s.fadeSeconds / 2.0f;              // lights it swings back
-  float net   = back + 1.0f;                       // lights gained per flutter
+  float fall  = max((int)s.fadeMin, 4) / 8.0f;     // lights it falls forward (0.5-28.75)
+  float back  = s.fadeSeconds / 2.0f;              // lights it swings back (1-30)
+  float net   = max(fall - back, 0.0f);            // lights gained per flutter
   float span  = len + 4.0f;                        // 2 lights off each end before wrapping
-  float flutterMs = net * 10000.0f / max((int)s.speed, 1);   // speed/10 lights per second
+  float flutterMs = (fall + back) * 10000.0f / max((int)s.speed, 1);   // at speed/10 lights/s
 
   float pos[MAX_LEAVES], lvl[MAX_LEAVES];
   for (int k = 0; k < n; k++) {
@@ -513,14 +516,18 @@ void drawLeaves(int ch) {
     uint32_t c = tt / T;
     float u = (tt % T) / (float)T;
     uint32_t hc = hash32(c * 0x9E3779B1UL ^ h);
-    float b = back * (1.0f + r * (hashUnit(hc) * 2 - 1));          // this swing's size
-    float f = 0.62f + 0.2f * r * (hashUnit(hash32(hc)) * 2 - 1);   // part of the time going forward
+    float b  = back * (1.0f + r * (hashUnit(hc) * 2 - 1));   // this swing's size
+    float fw = net + b;                                      // this flutter's fall
+    float f  = (fw + b) > 0 ? fw / (fw + b) : 1.0f;          // same speed both ways
     float x, e;
-    if (u < f) { e = u / f;              x = (net + b) * smoothUnit(e); }
-    else       { e = (u - f) / (1 - f);  x = net + b - b * smoothUnit(e); }
+    if (u < f) { e = u / f;              x = fw * smoothUnit(e); }
+    else       { e = (u - f) / (1 - f);  x = fw - b * smoothUnit(e); }
     lvl[k] = 0.55f + 0.45f * sinf(PI * e);         // brightest mid-swing, dimmer as it turns
     double p = (double)k * span / n + (double)c * net + x;
-    pos[k] = (float)fmod(p, (double)span) - 2.0f;
+    double pass = floor(p / span);                 // how many times it has crossed the line
+    float q = (float)(p - pass * span) - 2.0f;
+    if (s.bothWays && (hash32((uint32_t)(int64_t)pass * 0x27D4EB2DUL ^ h) & 1)) q = len - 1 - q;
+    pos[k] = q;
   }
 
   CRGB bg = bgOrOff(s);
