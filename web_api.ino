@@ -634,6 +634,9 @@ void handlePrograms() {
 }
 
 void handleRoot() {
+  // no-cache: the browser must check with the board each time, so a firmware update never
+  // leaves an old copy of the page showing (it happened with v0.40.0)
+  server.sendHeader("Cache-Control", "no-cache");
   server.send_P(200, "text/html", INDEX_HTML);
 }
 

@@ -93,6 +93,7 @@ void handleDeleteFile() {
 }
 
 void handleEditor() {
+  server.sendHeader("Cache-Control", "no-cache");   // always check for a newer page after an update
   server.send_P(200, "text/html", EDITOR_HTML);
 }
 
