@@ -259,6 +259,7 @@ void drawMeteor(int ch, uint32_t dtMs) {
   const LightState& s = states[ch];
   int len = lineLength(ch);
   int32_t head = (int32_t)advanceMotion(ch, dtMs, len + s.size);
+  updatePassFlip(ch);   // Random direction: this pass may start from the other end
   uint32_t slot = effectMs[ch] / 50;          // trail sparkle changes every 50 ms
   for (int i = 0; i < len; i++) {
     int32_t d = head - (int32_t)i * 256;

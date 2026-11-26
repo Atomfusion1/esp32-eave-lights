@@ -26,7 +26,7 @@ uint32_t stateDirtyMs = 0;
 // Converts a pre-0.15.0 saved state; colors 2-5 get the defaults.
 LightState upgradeState(const LightStateV1& o) {
   LightState s = { o.on, o.color, o.brightness, o.mode, o.fadeSeconds, o.fadeMin, o.speed, o.size,
-                   o.reverse, 0, o.bgOn, 0, o.bgColor, DEFAULT_EXTRA_COLORS };
+                   o.reverse, 0, o.bgOn, 0, 0, o.bgColor, DEFAULT_EXTRA_COLORS };
   return s;
 }
 
@@ -102,6 +102,7 @@ void loadState() {
     s.jitter      = prefs.getUChar(outputKey(o, "rnd"), s.jitter);
     s.bgOn        = prefs.getBool(outputKey(o, "bgon"), s.bgOn);
     s.bothWays    = prefs.getBool(outputKey(o, "both"), s.bothWays);
+    s.flipEvery   = prefs.getUChar(outputKey(o, "flip"), s.flipEvery);
     s.bgColor     = CRGB(prefs.getUInt(outputKey(o, "bgc"), colorToRgb(s.bgColor)));
     s.colorCount  = prefs.getUChar(outputKey(o, "ncol"), s.colorCount);
     for (int k = 0; k < MAX_COLORS - 1; k++) {
@@ -162,6 +163,7 @@ void handleStateSave() {
     prefs.putUChar(outputKey(o, "rnd"), s.jitter);
     prefs.putBool(outputKey(o, "bgon"), s.bgOn);
     prefs.putBool(outputKey(o, "both"), s.bothWays);
+    prefs.putUChar(outputKey(o, "flip"), s.flipEvery);
     prefs.putUInt(outputKey(o, "bgc"), colorToRgb(s.bgColor));
     prefs.putUChar(outputKey(o, "ncol"), s.colorCount);
     for (int k = 0; k < MAX_COLORS - 1; k++) {

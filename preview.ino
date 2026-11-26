@@ -22,6 +22,8 @@ CRGB       previewOut[NUM_OUTPUTS][MAX_LEDS];
 // Effect positions: before this frame's normal render, after it, and the preview's own.
 uint16_t pvSavedFade[NUM_CHANNELS], pvAfterFade[NUM_CHANNELS], pvFade[NUM_CHANNELS];
 uint32_t pvSavedMotion[NUM_CHANNELS], pvAfterMotion[NUM_CHANNELS], pvMotion[NUM_CHANNELS];
+int16_t  pvSavedDir[NUM_CHANNELS], pvAfterDir[NUM_CHANNELS], pvDir[NUM_CHANNELS];      // Random direction
+uint16_t pvSavedPass[NUM_CHANNELS], pvAfterPass[NUM_CHANNELS], pvPass[NUM_CHANNELS];
 uint32_t pvSavedEffect[NUM_CHANNELS], pvAfterEffect[NUM_CHANNELS], pvEffect[NUM_CHANNELS];
 
 bool previewCovers(int ch) {
@@ -34,6 +36,8 @@ void previewBeforeFrame() {
   if (!previewActive) return;
   memcpy(pvSavedFade, fadePhase, sizeof(fadePhase));
   memcpy(pvSavedMotion, motionPos, sizeof(motionPos));
+  memcpy(pvSavedDir, dirRate, sizeof(dirRate));
+  memcpy(pvSavedPass, passNo, sizeof(passNo));
   memcpy(pvSavedEffect, effectMs, sizeof(effectMs));
 }
 
@@ -44,9 +48,13 @@ void previewAfterFrame(uint32_t dtMs) {
   // remember where the real effects are now, then rewind to the start of this frame
   memcpy(pvAfterFade, fadePhase, sizeof(fadePhase));
   memcpy(pvAfterMotion, motionPos, sizeof(motionPos));
+  memcpy(pvAfterDir, dirRate, sizeof(dirRate));
+  memcpy(pvAfterPass, passNo, sizeof(passNo));
   memcpy(pvAfterEffect, effectMs, sizeof(effectMs));
   memcpy(fadePhase, pvSavedFade, sizeof(fadePhase));
   memcpy(motionPos, pvSavedMotion, sizeof(motionPos));
+  memcpy(dirRate, pvSavedDir, sizeof(dirRate));
+  memcpy(passNo, pvSavedPass, sizeof(passNo));
   memcpy(effectMs, pvSavedEffect, sizeof(effectMs));
 
   // swap in the preview settings and the preview's own positions
@@ -62,6 +70,8 @@ void previewAfterFrame(uint32_t dtMs) {
     states[ch] = previewState;
     fadePhase[ch] = pvFade[ch];
     motionPos[ch] = pvMotion[ch];
+    dirRate[ch]   = pvDir[ch];
+    passNo[ch]    = pvPass[ch];
     effectMs[ch]  = pvEffect[ch];
   }
 
@@ -77,6 +87,8 @@ void previewAfterFrame(uint32_t dtMs) {
     if (!previewCovers(ch)) continue;
     pvFade[ch] = fadePhase[ch];
     pvMotion[ch] = motionPos[ch];
+    pvDir[ch]  = dirRate[ch];
+    pvPass[ch] = passNo[ch];
     pvEffect[ch] = effectMs[ch];
   }
   if (previewTarget < 0) {
@@ -86,6 +98,8 @@ void previewAfterFrame(uint32_t dtMs) {
   }
   memcpy(fadePhase, pvAfterFade, sizeof(fadePhase));
   memcpy(motionPos, pvAfterMotion, sizeof(motionPos));
+  memcpy(dirRate, pvAfterDir, sizeof(dirRate));
+  memcpy(passNo, pvAfterPass, sizeof(passNo));
   memcpy(effectMs, pvAfterEffect, sizeof(effectMs));
 }
 
@@ -110,6 +124,7 @@ void handlePreview() {
     memset(pvFade, 0, sizeof(pvFade));
     memset(pvMotion, 0, sizeof(pvMotion));
     memset(pvEffect, 0, sizeof(pvEffect));
+    for (int ch = 0; ch < NUM_CHANNELS; ch++) { pvDir[ch] = 256; pvPass[ch] = 0; }
   }
   previewState = ps;
   previewTarget = target;

@@ -306,7 +306,9 @@ iframe.editor{width:100%;border:none;min-height:600px;display:block}
 <div id="fminBox"><label style="margin-top:14px"><span id="fminName">Lowest level</span>: <span id="fminVal"></span></label><input id="fmin" type="range" min="0" max="230">
 <p class="hint" id="fminHint">Below about 20% the dim end may show steps.</p></div>
 <div id="dirBox"><label style="margin-top:14px">Direction</label>
-<div class="seg" id="dir"><button data-rev="0"></button><button data-rev="1"></button><button data-rev="2" hidden>Random (each leaf)</button></div></div>
+<div class="seg" id="dir"><button data-rev="0"></button><button data-rev="1"></button><button data-rev="2" hidden>Random</button></div></div>
+<div id="flipBox" hidden><label style="margin-top:14px">Check every: <span id="flipVal"></span></label><input id="flip" type="range" min="1" max="60">
+<p class="hint">At each check it’s a coin toss whether it goes forward or backward, so sometimes it keeps going the same way. It slows down and turns around smoothly.</p></div>
 <div id="bgBox"><label style="margin-top:14px">Background (lights between / behind the effect)</label>
 <div class="seg" id="bg"><button data-bg="0">Off</button><button data-bg="1">On</button></div>
 <input id="bgColor" type="color" style="margin-top:10px" list="savedColors" hidden>
@@ -527,7 +529,7 @@ function partObj(v){return v===HOUSE?st.house:v>=PATH?pathBySlot(v-PATH):v>=ZONE
 function partName(v){const o=partObj(v);return v===HOUSE?'Whole house':v===BOTH?'Both strands':v>=ZONE?(o?o.name:'?'):'Strand '+o.id;}
 function lookOf(o){const h=c=>String(c||'#000000').replace('#','').toUpperCase();
  const l={color:h(o.color),brightness:o.brightness,mode:o.mode,fadeSeconds:o.fadeSeconds,fadeMin:o.fadeMin,speed:o.speed,size:o.size,random:o.random||0,
-  reverse:o.reverse?1:0,bothWays:o.bothWays?1:0,bgOn:o.bgOn?1:0,bgColor:h(o.bgColor),colorCount:o.colorCount};
+  reverse:o.reverse?1:0,bothWays:o.bothWays?1:0,flipEvery:o.flipEvery||6,bgOn:o.bgOn?1:0,bgColor:h(o.bgColor),colorCount:o.colorCount};
  (o.colors||[]).slice(0,4).forEach((c,i)=>l['color'+(i+2)]=h(c));return l;}
 // Loads a look into what you're controlling: unapplied (preview + Apply/Discard), or at once in instant mode.
 function pasteLook(l,from){if(!st||!l)return;send(Object.assign({},l));
@@ -598,7 +600,7 @@ async function post(url,p){const r=await fetch(url,{method:'POST',body:new URLSe
 // ---- Apply mode: look changes wait on the page until Apply (on/off stays instant) ----
 // paintPending: a painting has unapplied paint (a draft on the board, see markPaintPending).
 let applyMode=store.get('eaveApplyMode','apply'),pending={},pendingTarget=null,pendingName='',paintPending=false;
-const LOOK_KEYS=['color','brightness','mode','fadeSeconds','fadeMin','speed','size','reverse','random','bothWays','bgOn','bgColor','colorCount','color2','color3','color4','color5'];
+const LOOK_KEYS=['color','brightness','mode','fadeSeconds','fadeMin','speed','size','reverse','random','bothWays','flipEvery','bgOn','bgColor','colorCount','color2','color3','color4','color5'];
 const hasPending=()=>Object.keys(pending).length>0||paintPending;
 // Shows pending values on the page's copy of the settings (the lights don't change yet).
 function applyPendingTo(o,p){if(!o)return;
@@ -647,7 +649,9 @@ $('color').oninput=$('color').onchange=e=>sendSoon({color:e.target.value.slice(1
 $('bri').oninput=e=>{$('briVal').textContent=pct(e.target.value);sendSoon({brightness:e.target.value});};
 $('modeSel').onchange=e=>send({mode:e.target.value});
 $('fsec').oninput=e=>{const m=modeById(cur().mode),v=+e.target.value;$('fsecVal').textContent=m.fsecFmt?m.fsecFmt(v):v+' s';sendSoon({fadeSeconds:v});};
-$('rnd').oninput=e=>{$('rndVal').textContent=rndFmt(+e.target.value);sendSoon({random:+e.target.value});};
+$('flip').oninput=e=>{$('flipVal').textContent=flipFmt(+e.target.value);sendSoon({flipEvery:+e.target.value});};
+const flipFmt=v=>{const s=v*5;return s<60?s+' s':Math.floor(s/60)+' min'+(s%60?' '+s%60+' s':'');};
+&$('rndVal').textContent=rndFmt(+e.target.value);sendSoon({random:+e.target.value});};
 const rndFmt=v=>v?v+'%':'off';
 $('fmin').oninput=e=>{const m=modeById(cur().mode),v=+e.target.value;$('fminVal').textContent=m.fminFmt?m.fminFmt(v,cur()):pct(v);sendSoon({fadeMin:v});};
 $('spd').oninput=e=>{const m=modeById(cur().mode),v=+e.target.value;$('spdVal').textContent=m.fmt?m.fmt(v):v;sendSoon({speed:v});};
@@ -668,18 +672,18 @@ const MODES=[
  {g:'Basic',id:'solid',name:'Solid',colors:1,hint:'One steady color.'},
  {g:'Basic',id:'fade',name:'Fade (breathe)',colors:1,fsec:'Seconds per breath',fmin:1,hint:'The color slowly breathes in and out.'},
  {g:'Basic',id:'test',name:'Test colors',colors:0,hint:'Red, green, blue, white, off: for checking lights and current.'},
- {g:'Motion',id:'chase',name:'Chase',colors:1,spd:'Speed',fmt:lps,size:'Lit block length',dir:true,bg:1,hint:'Blocks of light with gaps, moving along.'},
- {g:'Motion',id:'comet',name:'Comet',colors:1,spd:'Speed',fmt:lps,size:'Tail length',dir:true,bg:1,hint:'A bright head with a fading tail.'},
+ {g:'Motion',id:'chase',name:'Chase',colors:1,spd:'Speed',fmt:lps,size:'Lit block length',dirRandom:'Random (switches now and then)',dirFlip:true,dir:true,bg:1,hint:'Blocks of light with gaps, moving along.'},
+ {g:'Motion',id:'comet',name:'Comet',colors:1,spd:'Speed',fmt:lps,size:'Tail length',dir:true,dirRandom:'Random (each pass)',bg:1,hint:'A bright head with a fading tail.'},
  {g:'Motion',id:'bounce',name:'Bounce (scanner)',colors:1,spd:'Speed',fmt:lps,size:'Tail length',bg:1,hint:'A comet sweeping back and forth.'},
- {g:'Motion',id:'center',name:'Center out / in',colors:'multi',spd:'Speed',fmt:lps,size:'Ripple width',dir:['Outward','Inward'],bg:1,hint:'Ripples from the middle (the controller, on Whole house) to the ends, or back in. Colors alternate per ripple.'},
- {g:'Motion',id:'meteor',name:'Meteor',colors:1,spd:'Speed',fmt:lps,size:'Tail length',dir:true,bg:1,hint:'A comet with a broken, sparkly trail.'},
- {g:'Motion',id:'leaves',name:'Drifting leaves',colors:'multi',min:1,spd:'Fall speed',fmt:v=>(v/10).toFixed(1)+' lights/s',size:'Leaves',sizeFmt:v=>v,fmin:1,fminName:'Falls forward',fminFmt:(v,o)=>{const l=Math.max(v,4)/8,t=l*10/Math.max((o&&o.speed)||10,1);return l.toFixed(1).replace(/\.0$/,'')+' lights ('+t.toFixed(1)+' s)';},fminHint:'How far (and how long) a leaf falls before it swings back. Falling no further than it swings back makes it hover in place.',fsec:'Swings back',fsecFmt:v=>(v/2)+(v===2?' light':' lights'),dir:true,dirRandom:true,bg:1,rndHint:'Each swing back varies (from none to double, the fall changes with it), and each leaf drifts at its own changing pace. 0% = every flutter the same.',hint:'Leaves fall along the line: forward a few lights, a swing back, forward again. Leaves = how many on the line at once. One color per leaf, in list order. Direction: which end they start from, or Random = each leaf picks a way every time it crosses.'},
- {g:'Motion',id:'running',name:'Running lights',colors:1,spd:'Speed',fmt:lps,size:'Wave length',dir:true,bg:1,hint:'A smooth wave of brightness rolling along.'},
- {g:'Motion',id:'wipe',name:'Color wipe',colors:'multi',min:1,spd:'Speed',fmt:lps,dir:true,hint:'Fills light by light with each color in turn. One color: fills, then wipes off.'},
- {g:'Color',id:'rainbow',name:'Rainbow wave',colors:0,spd:'Speed',fmt:lps,size:'Rainbow length (×5 lights)',dir:true,hint:'A rainbow scrolling along the lights.'},
+ {g:'Motion',id:'center',name:'Center out / in',colors:'multi',spd:'Speed',fmt:lps,size:'Ripple width',dirRandom:'Random (switches now and then)',dirFlip:true,dir:['Outward','Inward'],bg:1,hint:'Ripples from the middle (the controller, on Whole house) to the ends, or back in. Colors alternate per ripple.'},
+ {g:'Motion',id:'meteor',name:'Meteor',colors:1,spd:'Speed',fmt:lps,size:'Tail length',dir:true,dirRandom:'Random (each pass)',bg:1,hint:'A comet with a broken, sparkly trail.'},
+ {g:'Motion',id:'leaves',name:'Drifting leaves',colors:'multi',min:1,spd:'Fall speed',fmt:v=>(v/10).toFixed(1)+' lights/s',size:'Leaves',sizeFmt:v=>v,fmin:1,fminName:'Falls forward',fminFmt:(v,o)=>{const l=Math.max(v,4)/8,t=l*10/Math.max((o&&o.speed)||10,1);return l.toFixed(1).replace(/\.0$/,'')+' lights ('+t.toFixed(1)+' s)';},fminHint:'How far (and how long) a leaf falls before it swings back. Falling no further than it swings back makes it hover in place.',fsec:'Swings back',fsecFmt:v=>(v/2)+(v===2?' light':' lights'),dir:true,dirRandom:'Random (each leaf)',bg:1,rndHint:'Each swing back varies (from none to double, the fall changes with it), and each leaf drifts at its own changing pace. 0% = every flutter the same.',hint:'Leaves fall along the line: forward a few lights, a swing back, forward again. Leaves = how many on the line at once. One color per leaf, in list order. Direction: which end they start from, or Random = each leaf picks a way every time it crosses.'},
+ {g:'Motion',id:'running',name:'Running lights',colors:1,spd:'Speed',fmt:lps,size:'Wave length',dirRandom:'Random (switches now and then)',dirFlip:true,dir:true,bg:1,hint:'A smooth wave of brightness rolling along.'},
+ {g:'Motion',id:'wipe',name:'Color wipe',colors:'multi',min:1,spd:'Speed',fmt:lps,dirRandom:'Random (switches now and then)',dirFlip:true,dir:true,hint:'Fills light by light with each color in turn. One color: fills, then wipes off.'},
+ {g:'Color',id:'rainbow',name:'Rainbow wave',colors:0,spd:'Speed',fmt:lps,size:'Rainbow length (×5 lights)',dirRandom:'Random (switches now and then)',dirFlip:true,dir:true,hint:'A rainbow scrolling along the lights.'},
  {g:'Color',id:'rainbowcycle',name:'Rainbow cycle',colors:0,spd:'Speed',fmt:v=>Math.round(600/v)+' s per rainbow',hint:'All lights one color, slowly going through the rainbow.'},
- {g:'Color',id:'gradient',name:'Gradient',colors:'multi',min:2,spd:'Drift',fmt:still,dir:true,hint:'Blends through your colors from one end to the other. Drift 1 = still.'},
- {g:'Holiday',id:'stripes',name:'Stripes / candy cane',colors:'multi',min:2,spd:'Slide',fmt:still,size:'Stripe width',dir:true,hint:'Bands of your colors (red/white, red/green…). Slide 1 = still.'},
+ {g:'Color',id:'gradient',name:'Gradient',colors:'multi',min:2,spd:'Drift',fmt:still,dirRandom:'Random (switches now and then)',dirFlip:true,dir:true,hint:'Blends through your colors from one end to the other. Drift 1 = still.'},
+ {g:'Holiday',id:'stripes',name:'Stripes / candy cane',colors:'multi',min:2,spd:'Slide',fmt:still,size:'Stripe width',dirRandom:'Random (switches now and then)',dirFlip:true,dir:true,hint:'Bands of your colors (red/white, red/green…). Slide 1 = still.'},
  {g:'Holiday',id:'alternate',name:'Alternating swap',colors:'multi',min:2,spd:'Swap speed',fmt:v=>(10/v).toFixed(v>=10?1:0)+' s per swap',size:'Group size',hint:'Every other light (or group) in your colors, swapping on a beat.'},
  {g:'Holiday',id:'sway',name:'Sway (stripes rocking)',colors:'multi',min:2,spd:'Speed',fmt:v=>(v/10).toFixed(1)+' lights/s',size:'Stripe width (and how far it swings)',dir:['Starts forward','Starts backward'],hint:'Stripes of your colors (e.g. 2 white, 2 red) glide one stripe over, blending light to light, then glide back. Pick 2–5 colors.'},
  {g:'Holiday',id:'bulbs',name:'Twinkling bulbs',colors:'multi',min:2,spd:'Twinkle speed',fmt:v=>(v/10).toFixed(1)+'×',size:'Lights per color',fmin:1,hint:'Your colors repeated along the line like multicolor bulbs (1 light per color = classic), each bulb gently brightening and dimming at its own pace. Lowest level = how dim they get.'},
@@ -747,7 +751,8 @@ function renderLook(o){const m=modeById(o.mode);
   $('rndHint').textContent=m.rndHint||'The pace drifts faster and slower by up to this much, so it looks less mechanical. Each section wanders on its own.';}
  $('fminBox').hidden=!m.fmin;if(m.fmin){$('fmin').value=o.fadeMin;const nv=m.fminFmt?m.fminFmt(o.fadeMin,o):pct(o.fadeMin);$('fminVal').textContent=nv;
   $('fminName').textContent=m.fminName||'Lowest level';$('fminHint').textContent=m.fminHint||'Below about 20% the dim end may show steps.';parts.push((m.fminName?m.fminName.toLowerCase():'lowest')+' '+nv);}
- $('dirBox').hidden=!m.dir;const bothW=!!(m.dirRandom&&o.bothWays);$('dir').children[2].hidden=!m.dirRandom;if(m.dir)parts.push(bothW?'random direction':(o.reverse?rev:fwd).split(' (')[0]);
+ $('dirBox').hidden=!m.dir;const bothW=!!(m.dirRandom&&o.bothWays);$('dir').children[2].hidden=!m.dirRandom;if(m.dirRandom)$('dir').children[2].textContent=m.dirRandom;
+ $('flipBox').hidden=!(m.dir&&m.dirFlip&&bothW);if(m.dirFlip&&bothW){$('flip').value=o.flipEvery||6;$('flipVal').textContent=flipFmt(o.flipEvery||6);parts.push('checks every '+flipFmt(o.flipEvery||6));}if(m.dir)parts.push(bothW?'random direction':(o.reverse?rev:fwd).split(' (')[0]);
  $('bgBox').hidden=!m.bg;if(m.bg)parts.push('background '+(o.bgOn?'on':'off'));
  $('setFold').hidden=!parts.length;$('setSum').textContent='Settings · '+parts.join(' · ');
  $('dir').querySelectorAll('button').forEach(b=>b.classList.toggle('sel',b.dataset.rev==='2'?bothW:!bothW&&(b.dataset.rev==='1')===o.reverse));

@@ -19,6 +19,12 @@ uint16_t fadePhase[NUM_CHANNELS] = { 0 };
 // Chase/comet position per channel, in 1/256ths of a light (fixed point 24.8).
 uint32_t motionPos[NUM_CHANNELS] = { 0 };
 
+// Random direction state (see advanceMotion): -256 backward .. 256 forward (0 at boot
+// ramps up), passes done (comet/meteor), and whether this pass runs the other way.
+int16_t  dirRate[NUM_CHANNELS] = { 0 };
+uint16_t passNo[NUM_CHANNELS]  = { 0 };
+bool     flipNow[NUM_CHANNELS] = { false };
+
 // effectMs[] (time since each channel's effect started) is in the main tab:
 // animations.ino comes before this tab and uses it too.
 
@@ -29,6 +35,8 @@ void syncPhases() {
     fadePhase[o] = fadePhase[0];
     motionPos[o] = motionPos[0];
     effectMs[o]  = effectMs[0];
+    dirRate[o]   = dirRate[0];
+    passNo[o]    = passNo[0];
   }
 }
 
@@ -37,6 +45,8 @@ void resetPhase(int ch) {
   fadePhase[ch] = 0;
   motionPos[ch] = 0;
   effectMs[ch]  = 0;
+  dirRate[ch]   = 256;
+  passNo[ch]    = 0;
 }
 
 int lineLength(int ch) {
@@ -88,11 +98,47 @@ uint8_t fadeLevel(int ch, uint32_t dtMs) {
   return s.fadeMin + scale8(wave, 255 - s.fadeMin);
 }
 
+// Random direction (bothWays, v0.35.0).
+// Line effects (chase, rainbow wave, wipe, gradient, stripes, center, running): every
+// flipEvery x 5 s a coin toss (hash32, repeatable) picks forward or backward, and the
+// movement slows, stops and speeds up the other way over about 0.8 s (dirRate).
+// Comet / meteor: each new pass starts from a random end (passNo counts passes).
+// Leaves pick per leaf (drawLeaves). Strands A and B share one coin, so Both stays in step.
+
+bool lineFlips(uint8_t m) {
+  return m == MODE_CHASE || m == MODE_RAINBOW || m == MODE_WIPE || m == MODE_GRADIENT ||
+         m == MODE_STRIPES || m == MODE_CENTER || m == MODE_RUNNING;
+}
+bool passFlips(uint8_t m) { return m == MODE_COMET || m == MODE_METEOR; }
+
+uint32_t flipSeed(int ch) { return (ch < NUM_OUTPUTS) ? 0 : (uint32_t)ch * 0x85EBCA6BUL + 29; }
+
+// Comet/meteor: which way the current pass runs.
+void updatePassFlip(int ch) {
+  flipNow[ch] = states[ch].bothWays && (hash32(passNo[ch] * 0x27D4EB2DUL ^ flipSeed(ch)) & 1);
+}
+
 // Advances channel ch's movement by dtMs and wraps it at `period` lights.
 // Returns the position in 1/256ths of a light.
 uint32_t advanceMotion(int ch, uint32_t dtMs, uint32_t period) {
-  uint32_t period256 = period * 256;
-  motionPos[ch] = (motionPos[ch] + (uint32_t)states[ch].speed * dtMs * 256 / 1000) % period256;
+  const LightState& s = states[ch];
+  int64_t period256 = (int64_t)period * 256;
+  if (period256 <= 0) return 0;
+  int64_t step = (int64_t)s.speed * dtMs * 256 / 1000;
+  if (s.bothWays && lineFlips(s.mode)) {
+    uint32_t everyMs = (uint32_t)(s.flipEvery ? s.flipEvery : 6) * 5000UL;
+    uint32_t slot = effectMs[ch] / everyMs;
+    int target = (slot == 0 || !(hash32(slot * 0x9E3779B1UL ^ flipSeed(ch)) & 1)) ? 256 : -256;
+    int r = dirRate[ch], d = (int)(dtMs * 512 / 800) + 1;           // full turn in ~0.8 s
+    r = (r < target) ? min(r + d, target) : max(r - d, target);
+    dirRate[ch] = r;
+    step = step * r / 256;
+  } else {
+    dirRate[ch] = 256;
+  }
+  int64_t p = (int64_t)motionPos[ch] + step;
+  if (p >= period256) passNo[ch]++;                                   // a new pass begins
+  motionPos[ch] = (uint32_t)(((p % period256) + period256) % period256);
   return motionPos[ch];
 }
 
@@ -104,7 +150,7 @@ void setLight(int ch, int i, uint8_t level) {
   const LightState& s = states[ch];
   int len = lineLength(ch);
   // reverse: position 0 of the effect is the last light on the line
-  CRGB& light = lineLight(ch, s.reverse ? (len - 1 - i) : i);
+  CRGB& light = lineLight(ch, (s.reverse ^ flipNow[ch]) ? (len - 1 - i) : i);
 
   CRGB c;
   if (level == 0) {
@@ -140,6 +186,7 @@ void drawComet(int ch, uint32_t dtMs) {
   int len = lineLength(ch);
   int32_t tail256 = (int32_t)states[ch].size * 256;
   int32_t head = (int32_t)advanceMotion(ch, dtMs, len + states[ch].size);  // 1/256 lights
+  updatePassFlip(ch);   // Random direction: this pass may start from the other end
   for (int i = 0; i < len; i++) {
     int32_t d = head - (int32_t)i * 256;   // how far light i is behind the head
     uint8_t level = 0;
@@ -187,6 +234,7 @@ void drawChannel(int ch, uint32_t dtMs) {
   }
 
   dtMs = jitterDt(ch, dtMs);   // randomness: this channel's pace wanders
+  flipNow[ch] = false;         // set again by comet/meteor for Random direction
   effectMs[ch] += dtMs;
 
   CRGB c;
