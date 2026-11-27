@@ -4,7 +4,13 @@ Wi-Fi controller for addressable (WS2811) house lights, running on an ESP32-S3. 
 
 Everything is controlled from a web page on any phone or PC on the home network: **http://eavelights.local** (or the board's IP address). The lights run on their own: the page is only needed to change things.
 
-Current firmware: **v0.41.1** · Hub: **1.1.0**
+Current firmware: **v0.41.2** · Hub: **1.1.0**
+
+| Home | Lights | Setup |
+|---|---|---|
+| <img src="Docs/images/home.png" width="260" alt="Home tab: live strip view, what's lit, scenes and playlists"> | <img src="Docs/images/lights.png" width="260" alt="Lights tab: what you control, live view, saved looks, effect settings"> | <img src="Docs/images/setup.png" width="260" alt="Setup tab: search, strands, power limits, radio hubs"> |
+
+<sub>Screenshots of the real page with sample settings (the house-photo view is left out).</sub>
 
 ---
 

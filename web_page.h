@@ -45,7 +45,7 @@ button.power{width:100%;padding:16px;font-size:18px;font-weight:600;border-radiu
 button.power.on{background:var(--accent);color:#fff}
 input[type=color]{width:100%;height:48px;border:none;border-radius:10px;background:none;padding:0}
 input[type=range]{width:100%;accent-color:var(--accent)}
-input[type=text],input[type=number],input[type=password],select{width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:16px}
+input[type=text],input[type=number],input[type=password],input[type=search],select{width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:16px}
 select.picker{font-size:17px;font-weight:600;padding:12px}
 .seg{display:flex;gap:8px;flex-wrap:wrap}
 .seg button{flex:1;padding:11px;border-radius:10px;border:1px solid var(--line);background:none;color:var(--text);cursor:pointer;font-size:15px}
@@ -494,6 +494,7 @@ function setTab(t){tab=t;store.set('eaveTab',t);
  // the live card lives on Home and Lights only
  if(t==='home')$('liveSlotHome').appendChild($('liveCard'));
  if(t==='lights')$('liveSlotLights').appendChild($('liveCard'));
+ $('liveCard').hidden=t!=='home'&&t!=='lights';   // e.g. the page reopened on Setup: no empty live card
  if(t==='home')loadLayout();
  if(t==='house'&&!editorFrame.src)editorFrame.src='/editor?embed=1';
  if(editorFrame.contentWindow)editorFrame.contentWindow.postMessage({eaveEditorActive:t==='house'},'*');

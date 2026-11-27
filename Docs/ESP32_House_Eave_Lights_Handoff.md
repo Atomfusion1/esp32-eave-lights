@@ -1,7 +1,7 @@
 # ESP32-S3 House Eave Lighting — Project Handoff
 
 **Date:** 2026-11-26  
-**Status:** Firmware **v0.41.1** on the board; both eave strands (A 67, B 65) and all features so far tested on the house by the user (2026-11-26); hub **1.1.0** tested by radio. Yard lights (palm tree, oak floods) planned. See **§0**.  
+**Status:** Firmware **v0.41.2** on the board; both eave strands (A 67, B 65) and all features so far tested on the house by the user (2026-11-26); hub **1.1.0** tested by radio. Yard lights (palm tree, oak floods) planned. See **§0**.  
 **Purpose:** Give a new VS Code/Codex coding session the hardware facts, target architecture, safety constraints and current state without requiring the conversation history. How to build, upload and lay out code: [AGENTS.md](../AGENTS.md).
 
 ## 0. Current state & next steps (2026-11-26)
