@@ -6,11 +6,13 @@ Everything is controlled from a web page on any phone or PC on the home network:
 
 Current firmware: **v0.41.2** · Hub: **1.1.0**
 
+<img src="Docs/images/hero.png" width="720" alt="Live house view: eave lights in multicolor bulbs, a palm tree wound with lights, two flood lights at an oak">
+
 | Home | Lights | Setup |
 |---|---|---|
 | <img src="Docs/images/home.png" width="260" alt="Home tab: live strip view, what's lit, scenes and playlists"> | <img src="Docs/images/lights.png" width="260" alt="Lights tab: what you control, live view, saved looks, effect settings"> | <img src="Docs/images/setup.png" width="260" alt="Setup tab: search, strands, power limits, radio hubs"> |
 
-<sub>Screenshots of the real page with sample settings (the house-photo view is left out).</sub>
+<sub>Screenshots of the real page with sample settings on a made-up house (remake them with `Docs/images/demo/make_screenshots.sh`).</sub>
 
 ---
 

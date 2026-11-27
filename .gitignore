@@ -30,3 +30,4 @@ dist/
 
 # README screenshots (rendered from the page with sample data)
 !Docs/images/*.png
+!Docs/images/demo/*
